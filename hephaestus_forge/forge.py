@@ -142,6 +142,7 @@ class NetworkConfig(BaseModel):
     tts_port: int = 8082
     vision_port: int = 8083
     dcc_bridge_port: int = 8084
+    remote_api_port: int = 8765
     allowed_external: list[str] = Field(default_factory=lambda: ["api.meshy.ai"])
 
 
@@ -176,7 +177,6 @@ class CloudConfig(BaseModel):
 
 class ForgeConfig(BaseSettings):
     model_config = SettingsConfigDict(
-        yaml_file="config.yaml",
         env_prefix="HEPHAESTUS_",
         case_sensitive=False,
         extra="allow",
@@ -188,6 +188,16 @@ class ForgeConfig(BaseSettings):
     network: NetworkConfig = Field(default_factory=NetworkConfig)
     paths: PathsConfig
     cloud: CloudConfig = Field(default_factory=CloudConfig)
+    agent_runtime: dict = Field(default_factory=dict)
+    mission_control: dict = Field(default_factory=dict)
+    security: dict = Field(default_factory=dict)
+    observability: dict = Field(default_factory=dict)
+
+    @classmethod
+    def from_yaml(cls, path: Path | str) -> "ForgeConfig":
+        with open(path, encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        return cls.model_validate(data)
 
     @classmethod
     def from_scan(cls, project_name: str, project_root: Path, scan: SystemScanResult) -> "ForgeConfig":
@@ -310,6 +320,7 @@ class SystemScanner:
             Path.home() / "UnrealEngine" / "5.8",
             Path("C:/UnrealEngine/5.8"),
             Path("D:/UnrealEngine/5.8"),
+            Path("C:/Program Files/Epic Games/UE_5.8"),
             Path("/opt/UnrealEngine/5.8"),
         ]
 
@@ -1172,7 +1183,7 @@ def compile(
     
     # Load config
     config_path = forge_dir / "config.yaml"
-    config = ForgeConfig(_yaml_file=str(config_path))
+    config = ForgeConfig.from_yaml(config_path)
     
     ue_path = Path(config.system.ue_path) if config.system.ue_path else None
     if not ue_path or not ue_path.exists():
@@ -1200,8 +1211,14 @@ def compile(
         console.print("[red]✗ UnrealBuildTool not found[/red]")
         raise typer.Exit(1)
     
-    # Build command
-    target = "HephaestusBridge"
+    # Build command — compile plugin against the project's .uproject
+    uproject_files = list(project_root.glob("*.uproject"))
+    if not uproject_files:
+        console.print(f"[red]✗ No .uproject found in {project_root}[/red]")
+        raise typer.Exit(1)
+    uproject = uproject_files[0]
+    project_name = uproject.stem
+    target = f"{project_name}Editor"
     platform_arg = "Win64"
     config_arg = "Development"
     
@@ -1210,8 +1227,7 @@ def compile(
         target,
         platform_arg,
         config_arg,
-        f"-Project=\"{plugin_dir / 'HephaestusBridge.uplugin'}\"",
-        "-Module=HephaestusBridge",
+        f'-Project="{uproject}"',
         "-NoEngineChanges",
     ]
     
@@ -1273,7 +1289,7 @@ def deploy(
     
     # Load config
     config_path = forge_dir / "config.yaml"
-    config = ForgeConfig(_yaml_file=str(config_path))
+    config = ForgeConfig.from_yaml(config_path)
     
     ue_path = Path(config.system.ue_path) if config.system.ue_path else None
     if not ue_path or not ue_path.exists():
@@ -1426,77 +1442,389 @@ def deploy(
 def observe(
     project_path: Annotated[Optional[Path], typer.Argument(help="Project root directory")] = None,
     port: Annotated[int, typer.Option("--port", "-p", help="Dashboard port")] = 3000,
+    api: Annotated[str, typer.Option("--api", help="Hephaestus Remote API base URL")] = "http://127.0.0.1:8765",
 ):
     """
-    Open Mission Control Dashboard (React/Three.js/WebGPU).
+    Open Mission Control Dashboard.
 
-    Live viewport stream, Chain of Thought log, World Outliner,
-    Asset Browser, Voice I/O console.
+    Serves MissionControl/dist (static HTML wired to the Remote API).
+    Requires PIE so http://127.0.0.1:8765 is listening.
     """
     project_root = project_path or Path.cwd()
     forge_dir = project_root / ".hephaestus_forge"
-    
+
     if not forge_dir.exists():
         console.print(f"[red]✗ Not a Hephaestus project: {project_root}[/red]")
         raise typer.Exit(1)
-    
-    # Load config
+
     config_path = forge_dir / "config.yaml"
-    config = ForgeConfig(_yaml_file=str(config_path))
-    
+    config = ForgeConfig.from_yaml(config_path)
+
     dashboard_dir = project_root / config.paths.mission_control_dir
-    
+    dist_dir = dashboard_dir / "dist"
+    index_html = dist_dir / "index.html"
+
+    # Prefer prebuilt static dashboard; only run npm if package.json exists and dist is missing
+    if not index_html.exists():
+        package_json = dashboard_dir / "package.json"
+        if package_json.exists():
+            console.print("[yellow]Dashboard not built. Building with npm...[/yellow]")
+            result = subprocess.run(
+                ["npm", "run", "build"],
+                cwd=str(dashboard_dir),
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                console.print("[red]✗ npm build failed — writing static fallback[/red]")
+                console.print(result.stderr)
+                _write_mission_control_fallback(dist_dir, api)
+        else:
+            _write_mission_control_fallback(dist_dir, api)
+
+    if not index_html.exists():
+        _write_mission_control_fallback(dist_dir, api)
+
     console.print(Panel.fit(
         f"[bold]Mission Control Dashboard[/bold]\n"
         f"Port: [cyan]{port}[/cyan]\n"
-        f"Dashboard Source: [cyan]{dashboard_dir}[/cyan]",
+        f"Remote API: [cyan]{api}[/cyan]\n"
+        f"Dashboard: [cyan]{dist_dir}[/cyan]",
         border_style="blue",
     ))
-    
-    # Check if dashboard is built
-    dist_dir = dashboard_dir / "dist"
-    if not dist_dir.exists():
-        console.print("[yellow]Dashboard not built. Building...[/yellow]")
-        
-        # Build dashboard
-        result = subprocess.run(
-            ["npm", "run", "build"],
-            cwd=str(dashboard_dir),
-            capture_output=True,
-            text=True,
-        )
-        
-        if result.returncode != 0:
-            console.print("[red]✗ Build failed[/red]")
-            console.print(result.stderr)
-            raise typer.Exit(1)
-        
-        console.print("[green]✓ Dashboard built[/green]")
-    
-    # Serve dashboard
+
     console.print(f"[green]Starting dashboard on http://127.0.0.1:{port}[/green]")
-    console.print("[dim]Press Ctrl+C to stop[/dim]")
-    
+    console.print("[dim]Press Ctrl+C to stop. Start PIE in UE first for live data.[/dim]")
+
     try:
-        # Use Python's http.server for static files
         import http.server
         import socketserver
-        
+        import webbrowser
+
         class SPAHandler(http.server.SimpleHTTPRequestHandler):
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, directory=str(dist_dir), **kwargs)
-            
+
             def do_GET(self):
-                # SPA fallback
-                if not (dist_dir / self.path.lstrip("/")).exists() and "." not in self.path:
+                if not (dist_dir / self.path.lstrip("/").split("?")[0]).exists() and "." not in self.path.split("?")[0]:
                     self.path = "/index.html"
                 return super().do_GET()
-        
+
+            def log_message(self, format, *args):
+                pass
+
         with socketserver.TCPServer(("127.0.0.1", port), SPAHandler) as httpd:
+            webbrowser.open(f"http://127.0.0.1:{port}")
             httpd.serve_forever()
-            
+
     except KeyboardInterrupt:
         console.print("\n[yellow]Dashboard stopped[/yellow]")
+
+
+def _write_mission_control_fallback(dist_dir: Path, api: str) -> None:
+    """Ship a self-contained Mission Control page (no npm)."""
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    html = _MISSION_CONTROL_HTML.replace("__API_BASE__", api.rstrip("/"))
+    (dist_dir / "index.html").write_text(html, encoding="utf-8")
+    console.print(f"[green]✓ Wrote static Mission Control → {dist_dir / 'index.html'}[/green]")
+
+
+_MISSION_CONTROL_HTML = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Hephaestus Mission Control</title>
+<style>
+  :root {
+    --bg: #0c0f14;
+    --panel: #141a22;
+    --line: #243041;
+    --text: #e8eef7;
+    --muted: #8b9bb4;
+    --accent: #3dd6c6;
+    --warn: #f0a202;
+    --err: #e4572e;
+    --ok: #6bcb77;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: "Segoe UI", system-ui, sans-serif;
+    background: radial-gradient(1200px 600px at 10% -10%, #1a2a3a 0%, var(--bg) 55%);
+    color: var(--text); min-height: 100vh;
+  }
+  header {
+    display: flex; align-items: center; gap: 1rem; padding: 0.85rem 1.25rem;
+    border-bottom: 1px solid var(--line); background: rgba(20,26,34,0.85);
+    backdrop-filter: blur(8px); position: sticky; top: 0; z-index: 2;
+  }
+  header h1 { font-size: 1.05rem; margin: 0; letter-spacing: 0.04em; font-weight: 600; }
+  .pill {
+    font-size: 0.75rem; padding: 0.2rem 0.55rem; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--muted);
+  }
+  .pill.ok { color: var(--ok); border-color: #2f5d3a; }
+  .pill.bad { color: var(--err); border-color: #6a2f22; }
+  main {
+    display: grid; grid-template-columns: 1.4fr 1fr; gap: 1rem;
+    padding: 1rem; max-width: 1400px; margin: 0 auto;
+  }
+  @media (max-width: 960px) { main { grid-template-columns: 1fr; } }
+  section {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 0.9rem 1rem; min-height: 220px;
+  }
+  section h2 { margin: 0 0 0.75rem; font-size: 0.85rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+  #viewport {
+    width: 100%; aspect-ratio: 16/9; background: #05070a; border-radius: 8px;
+    border: 1px solid var(--line); object-fit: contain; display: block;
+  }
+  .row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem; }
+  button, input, select {
+    background: #0f141c; color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 0.45rem 0.7rem; font: inherit;
+  }
+  button { cursor: pointer; }
+  button.primary { background: #163a36; border-color: #2a6b62; color: var(--accent); }
+  button:hover { filter: brightness(1.08); }
+  #log, #actors {
+    font-family: ui-monospace, Consolas, monospace; font-size: 0.78rem;
+    max-height: 320px; overflow: auto; white-space: pre-wrap; color: #c9d6e8;
+  }
+  .actor { padding: 0.25rem 0; border-bottom: 1px solid #1c2530; color: var(--muted); }
+  .hint { color: var(--muted); font-size: 0.8rem; margin-top: 0.5rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>HEPHAESTUS · Mission Control</h1>
+  <span id="status" class="pill bad">API offline</span>
+  <span class="pill" id="apiLabel"></span>
+</header>
+<main>
+  <section>
+    <h2>Viewport</h2>
+    <div class="row">
+      <button class="primary" id="btnCapture">Capture frame</button>
+      <button id="btnRefresh">Refresh image</button>
+      <button id="btnHealth">Ping API</button>
+    </div>
+    <img id="viewport" alt="No frame yet — capture while PIE is running"/>
+    <p class="hint">Uses GET /v1/frame after vision.capture_frame. Start Play (PIE) in Unreal first.</p>
+  </section>
+  <section>
+    <h2>World commands</h2>
+    <div class="row">
+      <button class="primary" id="btnSpawnLight">Spawn PointLight</button>
+      <button id="btnSpawnCube">Spawn Cube</button>
+      <button id="btnList">List actors</button>
+    </div>
+    <div class="row">
+      <input id="actorPath" placeholder="actor path to destroy" style="flex:1;min-width:180px"/>
+      <button id="btnDestroy">Destroy</button>
+    </div>
+    <h2 style="margin-top:1rem">Outliner</h2>
+    <div id="actors"></div>
+  </section>
+  <section style="grid-column: 1 / -1">
+    <h2>Command log</h2>
+    <div id="log"></div>
+  </section>
+</main>
+<script>
+const API = "__API_BASE__";
+const statusEl = document.getElementById("status");
+const logEl = document.getElementById("log");
+const actorsEl = document.getElementById("actors");
+const viewport = document.getElementById("viewport");
+document.getElementById("apiLabel").textContent = API;
+
+function log(msg, data) {
+  const line = typeof data === "undefined" ? msg : msg + " " + JSON.stringify(data, null, 0);
+  logEl.textContent = new Date().toLocaleTimeString() + "  " + line + "\n" + logEl.textContent;
+}
+
+async function postCommand(body) {
+  const res = await fetch(API + "/v1/command", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json();
+  log(body.command, json);
+  return json;
+}
+
+async function ping() {
+  try {
+    const res = await fetch(API + "/v1/health");
+    const json = await res.json();
+    statusEl.textContent = json.ok ? "API online" : "API error";
+    statusEl.className = "pill " + (json.ok ? "ok" : "bad");
+    log("health", json);
+  } catch (e) {
+    statusEl.textContent = "API offline";
+    statusEl.className = "pill bad";
+    log("health failed", String(e));
+  }
+}
+
+function spawnPayload(command, extra) {
+  return {
+    command,
+    params: Object.assign({
+      transform: {
+        location: { x: 0, y: 0, z: 200 },
+        rotation: { pitch: 0, yaw: 0, roll: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+      },
+    }, extra || {}),
+  };
+}
+
+document.getElementById("btnHealth").onclick = ping;
+document.getElementById("btnCapture").onclick = async () => {
+  const r = await postCommand({ command: "vision.capture_frame", params: {} });
+  if (r.success) {
+    viewport.src = API + "/v1/frame?t=" + Date.now();
+  }
+};
+document.getElementById("btnRefresh").onclick = () => {
+  viewport.src = API + "/v1/frame?t=" + Date.now();
+};
+document.getElementById("btnSpawnLight").onclick = () =>
+  postCommand(spawnPayload("world.spawn_actor", { class_path: "/Script/Engine.PointLight" }));
+document.getElementById("btnSpawnCube").onclick = () =>
+  postCommand(spawnPayload("world.spawn_mesh", { mesh_path: "/Engine/BasicShapes/Cube.Cube" }));
+document.getElementById("btnList").onclick = async () => {
+  const r = await postCommand({ command: "world.list_actors", params: {} });
+  let paths = r.actor_paths || [];
+  try {
+    const inner = JSON.parse(r.result_json || "{}");
+    if (inner.actors) paths = inner.actors;
+  } catch (_) {}
+  actorsEl.innerHTML = paths.map(p => `<div class="actor">${p}</div>`).join("") || "<div class='actor'>(empty)</div>";
+};
+document.getElementById("btnDestroy").onclick = () => {
+  const path = document.getElementById("actorPath").value.trim();
+  if (!path) return;
+  postCommand({ command: "world.destroy_actor", params: { actor_path: path } });
+};
+
+ping();
+setInterval(ping, 5000);
+</script>
+</body>
+</html>
+"""
+
+
+@app.command("command")
+def command_cmd(
+    project_path: Annotated[Optional[Path], typer.Argument(help="Project root (optional)")] = None,
+    command: Annotated[Optional[str], typer.Option("--command", "-c", help="Command name, e.g. world.spawn_actor")] = "world.spawn_actor",
+    class_path: Annotated[str, typer.Option("--class", help="Actor class for spawn")] = "/Script/Engine.PointLight",
+    mesh_path: Annotated[str, typer.Option("--mesh", help="Static mesh path for spawn_mesh")] = "/Engine/BasicShapes/Cube.Cube",
+    actor_path: Annotated[str, typer.Option("--actor", help="Actor path for destroy")] = "",
+    x: Annotated[float, typer.Option("--x")] = 0.0,
+    y: Annotated[float, typer.Option("--y")] = 0.0,
+    z: Annotated[float, typer.Option("--z")] = 200.0,
+    json_body: Annotated[Optional[str], typer.Option("--json", help="Raw command JSON (overrides builders)")] = None,
+    host: Annotated[str, typer.Option("--host")] = "127.0.0.1",
+    port: Annotated[int, typer.Option("--port")] = 8765,
+    timeout: Annotated[float, typer.Option("--timeout")] = 30.0,
+):
+    """
+    POST a command to the Hephaestus Remote API inside a running PIE session.
+
+    Requires: UE editor with Play (PIE) active so the Remote API is listening.
+    """
+    import urllib.error
+    import urllib.request
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent / "templates" / "ue_plugin" / "HephaestusBridge" / "Content" / "Python"))
+    from hephaestus import commands as hcmd
+
+    if json_body:
+        payload = json_body
+    elif command == "world.spawn_actor":
+        payload = hcmd.spawn_actor_json(class_path=class_path, location=(x, y, z))
+    elif command == "world.spawn_mesh":
+        payload = hcmd.spawn_mesh_json(mesh_path=mesh_path, location=(x, y, z))
+    elif command == "world.destroy_actor":
+        if not actor_path:
+            console.print("[red]✗ --actor required for world.destroy_actor[/red]")
+            raise typer.Exit(1)
+        payload = hcmd.destroy_actor_json(actor_path)
+    elif command == "world.list_actors":
+        payload = hcmd.list_actors_json(class_path if class_path != "/Script/Engine.PointLight" else "")
+    elif command == "vision.capture_frame":
+        payload = hcmd.capture_frame_json()
+    else:
+        payload = json.dumps({"command": command, "params": {}})
+
+    url = f"http://{host}:{port}/v1/command"
+    console.print(f"[dim]POST {url}[/dim]")
+    console.print(f"[dim]{payload}[/dim]")
+
+    req = urllib.request.Request(
+        url,
+        data=payload.encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8")
+            console.print(body)
+            try:
+                parsed = json.loads(body)
+                if not parsed.get("success", False):
+                    raise typer.Exit(2)
+            except json.JSONDecodeError:
+                pass
+    except urllib.error.URLError as exc:
+        console.print(f"[red]✗ Remote API unreachable: {exc}[/red]")
+        console.print("[yellow]Start Play (PIE) in UE first. Look for: HephaestusRemoteApi: listening on http://127.0.0.1:8765[/yellow]")
+        raise typer.Exit(1)
+
+
+@app.command("smoke-spawn")
+def smoke_spawn(
+    project_path: Annotated[Optional[Path], typer.Argument(help="Project root directory")] = None,
+    class_path: Annotated[str, typer.Option("--class", help="Actor class path")] = "/Script/Engine.PointLight",
+    x: Annotated[float, typer.Option("--x")] = 0.0,
+    y: Annotated[float, typer.Option("--y")] = 0.0,
+    z: Annotated[float, typer.Option("--z")] = 200.0,
+):
+    """
+    Print a world.spawn_actor smoke-test recipe for the UE Python console (PIE required).
+    """
+    project_root = project_path or Path.cwd()
+    plugin_py = project_root / "Plugins" / "HephaestusBridge" / "Content" / "Python"
+    smoke_script = plugin_py / "hephaestus" / "smoke_spawn_actor.py"
+
+    # Keep builder importable without Unreal
+    sys.path.insert(0, str(Path(__file__).resolve().parent / "templates" / "ue_plugin" / "HephaestusBridge" / "Content" / "Python"))
+    try:
+        from hephaestus.commands import build_spawn_actor_command, spawn_actor_json
+    except Exception as exc:
+        console.print(f"[red]✗ Could not import command builder: {exc}[/red]")
+        raise typer.Exit(1)
+
+    payload = build_spawn_actor_command(class_path=class_path, location=(x, y, z))
+    py_snippet = (
+        f"import sys; sys.path.insert(0, r'{plugin_py}')\n"
+        f"import hephaestus.commands as hc\n"
+        f"print(hc.execute_command({json.dumps(payload)}))"
+    )
+    console.print("[bold green]world.spawn_actor smoke test[/bold green]")
+    console.print("1. Open the project in UE 5.8")
+    console.print("2. Press Play (PIE) - GameInstance subsystems only exist in PIE")
+    console.print("3. Output Log -> Python, paste:")
+    console.print(py_snippet)
+    console.print(f"\nOr run: {smoke_script}")
+    console.print(f"\nJSON: {spawn_actor_json(class_path=class_path, location=(x, y, z))}")
 
 
 @app.command()

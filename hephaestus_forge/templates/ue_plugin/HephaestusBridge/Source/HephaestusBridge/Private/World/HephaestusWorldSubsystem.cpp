@@ -1,12 +1,20 @@
 // Copyright (c) 2024 HephaestusForge. All Rights Reserved.
 
 #include "World/HephaestusWorldSubsystem.h"
+#include "HephaestusBridge.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "Engine/Blueprint.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/StaticMeshActor.h"
+#include "Components/StaticMeshComponent.h"
+#include "EngineUtils.h"
 #include "GameFramework/Actor.h"
 #include "UObject/Class.h"
 #include "UObject/Package.h"
+#include "UObject/SoftObjectPath.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "Modules/ModuleManager.h"
 
 #define LOCTEXT_NAMESPACE "HephaestusWorld"
 
@@ -22,7 +30,30 @@ void UHephaestusWorldSubsystem::Deinitialize()
     UE_LOG(LogHephaestusBridge, Log, TEXT("HephaestusWorldSubsystem: Deinitialized"));
 }
 
-AActor* UHephaestusWorldSubsystem::SpawnActor(const FString& ClassPath, const FTransform& Transform, const FActorSpawnParameters& SpawnParams)
+UWorld* UHephaestusWorldSubsystem::ResolveWorld() const
+{
+    UWorld* World = GetWorld();
+    if (!World && GEngine)
+    {
+        for (const FWorldContext& Context : GEngine->GetWorldContexts())
+        {
+            if (Context.World() &&
+                (Context.WorldType == EWorldType::PIE ||
+                 Context.WorldType == EWorldType::Game ||
+                 Context.WorldType == EWorldType::Editor))
+            {
+                World = Context.World();
+                if (Context.WorldType == EWorldType::PIE || Context.WorldType == EWorldType::Game)
+                {
+                    break;
+                }
+            }
+        }
+    }
+    return World;
+}
+
+AActor* UHephaestusWorldSubsystem::SpawnActor(const FString& ClassPath, const FTransform& Transform)
 {
     UClass* ActorClass = ResolveClass(ClassPath);
     if (!ActorClass)
@@ -31,23 +62,55 @@ AActor* UHephaestusWorldSubsystem::SpawnActor(const FString& ClassPath, const FT
         return nullptr;
     }
 
-    UWorld* World = GetWorld();
+    UWorld* World = ResolveWorld();
     if (!World)
     {
         UE_LOG(LogHephaestusBridge, Error, TEXT("HephaestusWorldSubsystem: No world available"));
         return nullptr;
     }
 
-    FActorSpawnParameters Params = SpawnParams;
-    Params.bNoFail = true;
+    FActorSpawnParameters Params;
+    Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
-    AActor* Actor = World->SpawnActor(ActorClass, Transform, Params);
+    const FVector Location = Transform.GetLocation();
+    const FRotator Rotation = Transform.Rotator();
+    AActor* Actor = World->SpawnActor(ActorClass, &Location, &Rotation, Params);
     if (Actor)
     {
-        UE_LOG(LogHephaestusBridge, Log, TEXT("HephaestusWorldSubsystem: Spawned actor %s at %s"), *Actor->GetName(), *Transform.GetLocation().ToString());
+        Actor->SetActorScale3D(Transform.GetScale3D());
+        UE_LOG(LogHephaestusBridge, Log, TEXT("HephaestusWorldSubsystem: Spawned actor %s at %s"),
+            *Actor->GetName(), *Transform.GetLocation().ToString());
     }
 
     return Actor;
+}
+
+AActor* UHephaestusWorldSubsystem::SpawnStaticMeshActor(const FString& MeshPath, const FTransform& Transform)
+{
+    AActor* Actor = SpawnActor(TEXT("/Script/Engine.StaticMeshActor"), Transform);
+    AStaticMeshActor* MeshActor = Cast<AStaticMeshActor>(Actor);
+    if (!MeshActor)
+    {
+        return Actor;
+    }
+
+    const FString ResolvedMesh = MeshPath.IsEmpty()
+        ? TEXT("/Engine/BasicShapes/Cube.Cube")
+        : MeshPath;
+
+    if (UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, *ResolvedMesh))
+    {
+        if (UStaticMeshComponent* Comp = MeshActor->GetStaticMeshComponent())
+        {
+            Comp->SetStaticMesh(Mesh);
+        }
+    }
+    else
+    {
+        UE_LOG(LogHephaestusBridge, Warning, TEXT("HephaestusWorldSubsystem: Failed to load mesh %s"), *ResolvedMesh);
+    }
+
+    return MeshActor;
 }
 
 bool UHephaestusWorldSubsystem::DestroyActor(const FString& ActorPath, bool bNetForce)
@@ -59,12 +122,12 @@ bool UHephaestusWorldSubsystem::DestroyActor(const FString& ActorPath, bool bNet
         return false;
     }
 
-    if (Actor->IsPendingKill())
+    if (!IsValid(Actor) || Actor->IsActorBeingDestroyed())
     {
         return true;
     }
 
-    Actor->DestroyNetworkActorHandled();
+    Actor->Destroy(bNetForce);
     return true;
 }
 
@@ -142,13 +205,12 @@ int32 UHephaestusWorldSubsystem::BatchEditActors(const TArray<FString>& ActorPat
 TArray<AActor*> UHephaestusWorldSubsystem::QuerySpatial(const FBox& Bounds, TSubclassOf<AActor> FilterClass)
 {
     TArray<AActor*> Results;
-    UWorld* World = GetWorld();
+    UWorld* World = ResolveWorld();
     if (!World)
     {
         return Results;
     }
 
-    // Use world's actor iterator with bounds check
     for (TActorIterator<AActor> It(World, FilterClass); It; ++It)
     {
         AActor* Actor = *It;
@@ -168,21 +230,47 @@ IAssetRegistry& UHephaestusWorldSubsystem::GetAssetRegistry()
 
 AActor* UHephaestusWorldSubsystem::FindActorByPath(const FString& ActorPath) const
 {
-    UWorld* World = GetWorld();
-    if (!World)
+    UWorld* World = ResolveWorld();
+    if (!World || ActorPath.IsEmpty())
     {
         return nullptr;
     }
 
-    // Try to find by path name
-    UObject* Obj = StaticFindObject(AActor::StaticClass(), nullptr, *ActorPath);
-    return Cast<AActor>(Obj);
+    if (UObject* Obj = StaticFindObject(AActor::StaticClass(), nullptr, *ActorPath))
+    {
+        if (AActor* Actor = Cast<AActor>(Obj))
+        {
+            return Actor;
+        }
+    }
+
+    if (AActor* Soft = Cast<AActor>(FSoftObjectPath(ActorPath).ResolveObject()))
+    {
+        return Soft;
+    }
+
+    FString ShortName = ActorPath;
+    int32 DotIdx = INDEX_NONE;
+    if (ActorPath.FindLastChar(TEXT('.'), DotIdx))
+    {
+        ShortName = ActorPath.Mid(DotIdx + 1);
+    }
+
+    for (TActorIterator<AActor> It(World); It; ++It)
+    {
+        if (It->GetName() == ShortName || It->GetPathName() == ActorPath)
+        {
+            return *It;
+        }
+    }
+
+    return nullptr;
 }
 
 TArray<AActor*> UHephaestusWorldSubsystem::GetAllActorsOfClass(TSubclassOf<AActor> ActorClass) const
 {
     TArray<AActor*> Results;
-    UWorld* World = GetWorld();
+    UWorld* World = ResolveWorld();
     if (!World)
     {
         return Results;
@@ -196,21 +284,83 @@ TArray<AActor*> UHephaestusWorldSubsystem::GetAllActorsOfClass(TSubclassOf<AActo
     return Results;
 }
 
+TArray<FString> UHephaestusWorldSubsystem::ListActors(const FString& ClassPathFilter) const
+{
+    TArray<FString> Paths;
+    UWorld* World = ResolveWorld();
+    if (!World)
+    {
+        return Paths;
+    }
+
+    UClass* FilterClass = nullptr;
+    if (!ClassPathFilter.IsEmpty())
+    {
+        FilterClass = ResolveClass(ClassPathFilter);
+    }
+
+    for (TActorIterator<AActor> It(World, FilterClass ? FilterClass : AActor::StaticClass()); It; ++It)
+    {
+        if (AActor* Actor = *It)
+        {
+            Paths.Add(Actor->GetPathName());
+        }
+    }
+
+    return Paths;
+}
+
 UClass* UHephaestusWorldSubsystem::ResolveClass(const FString& ClassPath) const
 {
-    // Try direct load
-    UClass* Class = LoadClass<AActor>(nullptr, *ClassPath);
-    if (Class)
+    if (ClassPath.IsEmpty())
+    {
+        return nullptr;
+    }
+
+    // Direct load (e.g. /Script/Engine.PointLight)
+    if (UClass* Class = LoadClass<AActor>(nullptr, *ClassPath))
     {
         return Class;
     }
 
-    // Try finding in asset registry
+    // Short name → /Script/Engine.Name
+    if (!ClassPath.Contains(TEXT("/")) && !ClassPath.Contains(TEXT(".")))
+    {
+        const FString EnginePath = FString::Printf(TEXT("/Script/Engine.%s"), *ClassPath);
+        if (UClass* Class = LoadClass<AActor>(nullptr, *EnginePath))
+        {
+            return Class;
+        }
+    }
+
+    // Soft object path / asset registry
+    if (UObject* Obj = FSoftObjectPath(ClassPath).TryLoad())
+    {
+        if (UClass* AsClass = Cast<UClass>(Obj))
+        {
+            return AsClass;
+        }
+        if (UBlueprint* BP = Cast<UBlueprint>(Obj))
+        {
+            return BP->GeneratedClass;
+        }
+    }
+
     FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
-    FAssetData AssetData = AssetRegistryModule.Get().GetAssetByObjectPath(FName(*ClassPath));
+    FAssetData AssetData = AssetRegistryModule.Get().GetAssetByObjectPath(FSoftObjectPath(ClassPath));
     if (AssetData.IsValid())
     {
-        return Cast<UClass>(AssetData.GetAsset());
+        if (UObject* Asset = AssetData.GetAsset())
+        {
+            if (UClass* AsClass = Cast<UClass>(Asset))
+            {
+                return AsClass;
+            }
+            if (UBlueprint* BP = Cast<UBlueprint>(Asset))
+            {
+                return BP->GeneratedClass;
+            }
+        }
     }
 
     return nullptr;

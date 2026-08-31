@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Hephaestus Mission Control</title>
+<style>
+  :root {
+    --bg: #0c0f14;
+    --panel: #141a22;
+    --line: #243041;
+    --text: #e8eef7;
+    --muted: #8b9bb4;
+    --accent: #3dd6c6;
+    --warn: #f0a202;
+    --err: #e4572e;
+    --ok: #6bcb77;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: "Segoe UI", system-ui, sans-serif;
+    background: radial-gradient(1200px 600px at 10% -10%, #1a2a3a 0%, var(--bg) 55%);
+    color: var(--text); min-height: 100vh;
+  }
+  header {
+    display: flex; align-items: center; gap: 1rem; padding: 0.85rem 1.25rem;
+    border-bottom: 1px solid var(--line); background: rgba(20,26,34,0.85);
+    backdrop-filter: blur(8px); position: sticky; top: 0; z-index: 2;
+  }
+  header h1 { font-size: 1.05rem; margin: 0; letter-spacing: 0.04em; font-weight: 600; }
+  .pill {
+    font-size: 0.75rem; padding: 0.2rem 0.55rem; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--muted);
+  }
+  .pill.ok { color: var(--ok); border-color: #2f5d3a; }
+  .pill.bad { color: var(--err); border-color: #6a2f22; }
+  main {
+    display: grid; grid-template-columns: 1.4fr 1fr; gap: 1rem;
+    padding: 1rem; max-width: 1400px; margin: 0 auto;
+  }
+  @media (max-width: 960px) { main { grid-template-columns: 1fr; } }
+  section {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 0.9rem 1rem; min-height: 220px;
+  }
+  section h2 { margin: 0 0 0.75rem; font-size: 0.85rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+  #viewport {
+    width: 100%; aspect-ratio: 16/9; background: #05070a; border-radius: 8px;
+    border: 1px solid var(--line); object-fit: contain; display: block;
+  }
+  .row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem; }
+  button, input, select {
+    background: #0f141c; color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 0.45rem 0.7rem; font: inherit;
+  }
+  button { cursor: pointer; }
+  button.primary { background: #163a36; border-color: #2a6b62; color: var(--accent); }
+  button:hover { filter: brightness(1.08); }
+  #log, #actors {
+    font-family: ui-monospace, Consolas, monospace; font-size: 0.78rem;
+    max-height: 320px; overflow: auto; white-space: pre-wrap; color: #c9d6e8;
+  }
+  .actor { padding: 0.25rem 0; border-bottom: 1px solid #1c2530; color: var(--muted); }
+  .hint { color: var(--muted); font-size: 0.8rem; margin-top: 0.5rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>HEPHAESTUS · Mission Control</h1>
+  <span id="status" class="pill bad">API offline</span>
+  <span class="pill" id="apiLabel"></span>
+</header>
+<main>
+  <section>
+    <h2>Viewport</h2>
+    <div class="row">
+      <button class="primary" id="btnCapture">Capture frame</button>
+      <button id="btnRefresh">Refresh image</button>
+      <button id="btnHealth">Ping API</button>
+    </div>
+    <img id="viewport" alt="No frame yet — capture while PIE is running"/>
+    <p class="hint">Uses GET /v1/frame after vision.capture_frame. Start Play (PIE) in Unreal first.</p>
+  </section>
+  <section>
+    <h2>World commands</h2>
+    <div class="row">
+      <button class="primary" id="btnSpawnLight">Spawn PointLight</button>
+      <button id="btnSpawnCube">Spawn Cube</button>
+      <button id="btnList">List actors</button>
+    </div>
+    <div class="row">
+      <input id="actorPath" placeholder="actor path to destroy" style="flex:1;min-width:180px"/>
+      <button id="btnDestroy">Destroy</button>
+    </div>
+    <h2 style="margin-top:1rem">Outliner</h2>
+    <div id="actors"></div>
+  </section>
+  <section style="grid-column: 1 / -1">
+    <h2>Command log</h2>
+    <div id="log"></div>
+  </section>
+</main>
+<script>
+const API = "http://127.0.0.1:8765";
+const statusEl = document.getElementById("status");
+const logEl = document.getElementById("log");
+const actorsEl = document.getElementById("actors");
+const viewport = document.getElementById("viewport");
+document.getElementById("apiLabel").textContent = API;
+
+function log(msg, data) {
+  const line = typeof data === "undefined" ? msg : msg + " " + JSON.stringify(data, null, 0);
+  logEl.textContent = new Date().toLocaleTimeString() + "  " + line + "\n" + logEl.textContent;
+}
+
+async function postCommand(body) {
+  const res = await fetch(API + "/v1/command", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json();
+  log(body.command, json);
+  return json;
+}
+
+async function ping() {
+  try {
+    const res = await fetch(API + "/v1/health");
+    const json = await res.json();
+    statusEl.textContent = json.ok ? "API online" : "API error";
+    statusEl.className = "pill " + (json.ok ? "ok" : "bad");
+    log("health", json);
+  } catch (e) {
+    statusEl.textContent = "API offline";
+    statusEl.className = "pill bad";
+    log("health failed", String(e));
+  }
+}
+
+function spawnPayload(command, extra) {
+  return {
+    command,
+    params: Object.assign({
+      transform: {
+        location: { x: 0, y: 0, z: 200 },
+        rotation: { pitch: 0, yaw: 0, roll: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+      },
+    }, extra || {}),
+  };
+}
+
+document.getElementById("btnHealth").onclick = ping;
+document.getElementById("btnCapture").onclick = async () => {
+  const r = await postCommand({ command: "vision.capture_frame", params: {} });
+  if (r.success) {
+    viewport.src = API + "/v1/frame?t=" + Date.now();
+  }
+};
+document.getElementById("btnRefresh").onclick = () => {
+  viewport.src = API + "/v1/frame?t=" + Date.now();
+};
+document.getElementById("btnSpawnLight").onclick = () =>
+  postCommand(spawnPayload("world.spawn_actor", { class_path: "/Script/Engine.PointLight" }));
+document.getElementById("btnSpawnCube").onclick = () =>
+  postCommand(spawnPayload("world.spawn_mesh", { mesh_path: "/Engine/BasicShapes/Cube.Cube" }));
+document.getElementById("btnList").onclick = async () => {
+  const r = await postCommand({ command: "world.list_actors", params: {} });
+  let paths = r.actor_paths || [];
+  try {
+    const inner = JSON.parse(r.result_json || "{}");
+    if (inner.actors) paths = inner.actors;
+  } catch (_) {}
+  actorsEl.innerHTML = paths.map(p => `<div class="actor">${p}</div>`).join("") || "<div class='actor'>(empty)</div>";
+};
+document.getElementById("btnDestroy").onclick = () => {
+  const path = document.getElementById("actorPath").value.trim();
+  if (!path) return;
+  postCommand({ command: "world.destroy_actor", params: { actor_path: path } });
+};
+
+ping();
+setInterval(ping, 5000);
+</script>
+</body>
+</html>

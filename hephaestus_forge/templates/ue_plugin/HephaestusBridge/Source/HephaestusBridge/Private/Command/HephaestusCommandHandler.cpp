@@ -1,6 +1,7 @@
 // Copyright (c) 2024 HephaestusForge. All Rights Reserved.
 
 #include "Command/HephaestusCommandHandler.h"
+#include "HephaestusBridge.h"
 #include "World/HephaestusWorldSubsystem.h"
 #include "Assets/HephaestusAssetSubsystem.h"
 #include "Blueprints/HephaestusBlueprintSubsystem.h"
@@ -11,6 +12,9 @@
 #include "Vision/HephaestusVisionSubsystem.h"
 
 #include "Async/Async.h"
+#include "Engine/Engine.h"
+#include "Engine/GameInstance.h"
+#include "Engine/World.h"
 #include "Json.h"
 #include "JsonObjectConverter.h"
 #include "Misc/ScopeLock.h"
@@ -47,28 +51,14 @@ void UHephaestusCommandHandler::Deinitialize()
     UE_LOG(LogHephaestusBridge, Log, TEXT("HephaestusCommandHandler: Deinitialized"));
 }
 
-void UHephaestusCommandHandler::ExecuteCommandAsync(const FString& CommandJSON, const FScriptDelegate& Callback)
+void UHephaestusCommandHandler::ExecuteCommandAsync(const FString& CommandJSON, TFunction<void(const FHephaestusCommandResult&)> Callback)
 {
-    AsyncTask(ENamedThreads::GameThread, [this, CommandJSON, Callback]()
+    AsyncTask(ENamedThreads::GameThread, [this, CommandJSON, Callback = MoveTemp(Callback)]()
     {
         FHephaestusCommandResult Result = ExecuteCommand_GameThread(CommandJSON);
-
-        // Execute callback on game thread
-        if (Callback.IsBound())
+        if (Callback)
         {
-            // We need to pass the result to the delegate
-            // This requires a specific delegate signature - using a workaround
-            UFunction* Func = Callback.GetUFunction();
-            if (Func)
-            {
-                struct FCallbackParams
-                {
-                    FHephaestusCommandResult Result;
-                };
-                FCallbackParams Params;
-                Params.Result = Result;
-                Callback.ProcessDelegate(Params);
-            }
+            Callback(Result);
         }
     });
 }
@@ -80,9 +70,53 @@ FHephaestusCommandResult UHephaestusCommandHandler::ExecuteCommand(const FString
     return ExecuteCommand_GameThread(CommandJSON);
 }
 
-void UHephaestusCommandHandler::ExecuteBatchAsync(const TArray<FString>& CommandsJSON, const FScriptDelegate& Callback)
+FHephaestusCommandResult UHephaestusCommandHandler::ExecuteCommandForWorld(const UObject* WorldContextObject, const FString& CommandJSON)
 {
-    AsyncTask(ENamedThreads::GameThread, [this, CommandsJSON, Callback]()
+    UWorld* World = GEngine ? GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::ReturnNull) : nullptr;
+    if (!World && GEngine)
+    {
+        for (const FWorldContext& Context : GEngine->GetWorldContexts())
+        {
+            if (Context.World() &&
+                (Context.WorldType == EWorldType::PIE || Context.WorldType == EWorldType::Game))
+            {
+                World = Context.World();
+                break;
+            }
+        }
+    }
+    if (!World)
+    {
+        FHephaestusCommandResult Error;
+        Error.bSuccess = false;
+        Error.ErrorMessage = TEXT("No PIE/game world (press Play first)");
+        return Error;
+    }
+
+    UGameInstance* GI = World->GetGameInstance();
+    if (!GI)
+    {
+        FHephaestusCommandResult Error;
+        Error.bSuccess = false;
+        Error.ErrorMessage = TEXT("No GameInstance on world");
+        return Error;
+    }
+
+    UHephaestusCommandHandler* Handler = GI->GetSubsystem<UHephaestusCommandHandler>();
+    if (!Handler)
+    {
+        FHephaestusCommandResult Error;
+        Error.bSuccess = false;
+        Error.ErrorMessage = TEXT("HephaestusCommandHandler not found");
+        return Error;
+    }
+
+    return Handler->ExecuteCommand(CommandJSON);
+}
+
+void UHephaestusCommandHandler::ExecuteBatchAsync(const TArray<FString>& CommandsJSON, TFunction<void(const FHephaestusBatchCommandResult&)> Callback)
+{
+    AsyncTask(ENamedThreads::GameThread, [this, CommandsJSON, Callback = MoveTemp(Callback)]()
     {
         FHephaestusBatchCommandResult BatchResult;
         BatchResult.bOverallSuccess = true;
@@ -103,20 +137,9 @@ void UHephaestusCommandHandler::ExecuteBatchAsync(const TArray<FString>& Command
 
         BatchResult.TotalTimeMs = static_cast<float>((FPlatformTime::Seconds() - StartTime) * 1000.0);
 
-        // Execute callback
-        if (Callback.IsBound())
+        if (Callback)
         {
-            UFunction* Func = Callback.GetUFunction();
-            if (Func)
-            {
-                struct FBatchCallbackParams
-                {
-                    FHephaestusBatchCommandResult Result;
-                };
-                FBatchCallbackParams Params;
-                Params.Result = BatchResult;
-                Callback.ProcessDelegate(Params);
-            }
+            Callback(BatchResult);
         }
     });
 }
@@ -175,7 +198,9 @@ TArray<FString> UHephaestusCommandHandler::GetAvailableCommands() const
 {
     TArray<FString> Commands = {
         TEXT("world.spawn_actor"),
+        TEXT("world.spawn_mesh"),
         TEXT("world.destroy_actor"),
+        TEXT("world.list_actors"),
         TEXT("world.batch_edit"),
         TEXT("world.query_spatial"),
         TEXT("asset.create_material"),
@@ -208,7 +233,9 @@ TArray<FString> UHephaestusCommandHandler::GetAvailableCommands() const
 
     // Add custom commands
     FScopeLock Lock(&CustomCommandsLock);
-    Commands.Append(CustomCommands.GetKeys());
+    TArray<FString> CustomKeys;
+    CustomCommands.GenerateKeyArray(CustomKeys);
+    Commands.Append(CustomKeys);
 
     return Commands;
 }
@@ -299,7 +326,7 @@ FHephaestusCommandResult UHephaestusCommandHandler::RouteCommand(const TSharedPt
     // Route to subsystem handlers
     if (Command.StartsWith(TEXT("world.")))
     {
-        return HandleWorldCommand(Params);
+        return HandleWorldCommand(Command, Params);
     }
     else if (Command.StartsWith(TEXT("asset.")))
     {
@@ -327,57 +354,213 @@ FHephaestusCommandResult UHephaestusCommandHandler::RouteCommand(const TSharedPt
     }
     else if (Command.StartsWith(TEXT("vision.")))
     {
-        return HandleVisionCommand(Params);
+        return HandleVisionCommand(Command, Params);
     }
 
     return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Unknown command category: %s"), *Command));
 }
 
-FHephaestusCommandResult UHephaestusCommandHandler::HandleWorldCommand(const TSharedPtr<FJsonObject>& Params)
+FHephaestusCommandResult UHephaestusCommandHandler::HandleWorldCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params)
 {
     if (!WorldSubsystem)
     {
-        return MakeErrorResult(TEXT(""), TEXT("World subsystem not available"));
+        if (UGameInstance* GI = GetGameInstance())
+        {
+            WorldSubsystem = GI->GetSubsystem<UHephaestusWorldSubsystem>();
+        }
+    }
+    if (!WorldSubsystem)
+    {
+        return MakeErrorResult(TEXT(""), TEXT("World subsystem not available (start PIE)"));
     }
 
-    FString Action = Params->GetStringField(TEXT("action"));
+    FString Action;
+    if (Params.IsValid())
+    {
+        Params->TryGetStringField(TEXT("action"), Action);
+    }
+    if (Action.IsEmpty())
+    {
+        // world.spawn_actor -> spawn_actor
+        Command.Split(TEXT("."), nullptr, &Action, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
+    }
 
     if (Action == TEXT("spawn_actor"))
     {
-        // Params: class_path, transform, spawn_params
-        FString ClassPath = Params->GetStringField(TEXT("class_path"));
-        FTransform Transform;
-        if (!ParseTransform(Params->GetObjectField(TEXT("transform")), Transform))
+        if (!Params.IsValid())
         {
-            return MakeErrorResult(TEXT(""), TEXT("Invalid transform"));
+            return MakeErrorResult(TEXT(""), TEXT("Missing params for world.spawn_actor"));
+        }
+
+        FString ClassPath = Params->GetStringField(TEXT("class_path"));
+        if (ClassPath.IsEmpty())
+        {
+            ClassPath = TEXT("/Script/Engine.PointLight");
+        }
+
+        FTransform Transform = FTransform::Identity;
+        if (Params->HasField(TEXT("transform")))
+        {
+            if (!ParseTransform(Params->GetObjectField(TEXT("transform")), Transform))
+            {
+                return MakeErrorResult(TEXT(""), TEXT("Invalid transform"));
+            }
         }
 
         AActor* Actor = WorldSubsystem->SpawnActor(ClassPath, Transform);
         if (Actor)
         {
             TArray<FString> Actors = { Actor->GetPathName() };
-            FString ResultJSON = FString::Printf(TEXT("{\"actor_path\":\"%s\"}"), *Actor->GetPathName());
+            FString ResultJSON = FString::Printf(
+                TEXT("{\"actor_path\":\"%s\",\"class\":\"%s\"}"),
+                *Actor->GetPathName(),
+                *ClassPath);
             return MakeSuccessResult(TEXT(""), ResultJSON, {}, Actors);
         }
-        return MakeErrorResult(TEXT(""), TEXT("Failed to spawn actor"));
+        return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Failed to spawn actor: %s"), *ClassPath));
+    }
+    else if (Action == TEXT("spawn_mesh"))
+    {
+        if (!Params.IsValid())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Missing params for world.spawn_mesh"));
+        }
+
+        FString MeshPath;
+        Params->TryGetStringField(TEXT("mesh_path"), MeshPath);
+
+        FTransform Transform = FTransform::Identity;
+        if (Params->HasField(TEXT("transform")))
+        {
+            if (!ParseTransform(Params->GetObjectField(TEXT("transform")), Transform))
+            {
+                return MakeErrorResult(TEXT(""), TEXT("Invalid transform"));
+            }
+        }
+
+        AActor* Actor = WorldSubsystem->SpawnStaticMeshActor(MeshPath, Transform);
+        if (Actor)
+        {
+            TArray<FString> Actors = { Actor->GetPathName() };
+            const FString ResolvedMesh = MeshPath.IsEmpty() ? TEXT("/Engine/BasicShapes/Cube.Cube") : MeshPath;
+            FString ResultJSON = FString::Printf(
+                TEXT("{\"actor_path\":\"%s\",\"mesh_path\":\"%s\"}"),
+                *Actor->GetPathName(),
+                *ResolvedMesh);
+            return MakeSuccessResult(TEXT(""), ResultJSON, {}, Actors);
+        }
+        return MakeErrorResult(TEXT(""), TEXT("Failed to spawn static mesh actor"));
     }
     else if (Action == TEXT("destroy_actor"))
     {
+        if (!Params.IsValid())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Missing params for world.destroy_actor"));
+        }
         FString ActorPath = Params->GetStringField(TEXT("actor_path"));
         bool bSuccess = WorldSubsystem->DestroyActor(ActorPath);
         return bSuccess ? MakeSuccessResult(TEXT("")) : MakeErrorResult(TEXT(""), TEXT("Failed to destroy actor"));
     }
+    else if (Action == TEXT("list_actors"))
+    {
+        FString ClassFilter;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("class_path"), ClassFilter);
+        }
+        TArray<FString> Paths = WorldSubsystem->ListActors(ClassFilter);
+        TSharedRef<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+        TArray<TSharedPtr<FJsonValue>> Arr;
+        for (const FString& Path : Paths)
+        {
+            Arr.Add(MakeShared<FJsonValueString>(Path));
+        }
+        ResultObj->SetArrayField(TEXT("actors"), Arr);
+        ResultObj->SetNumberField(TEXT("count"), Paths.Num());
+        FString ResultJSON;
+        TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&ResultJSON);
+        FJsonSerializer::Serialize(ResultObj, Writer);
+        return MakeSuccessResult(TEXT(""), ResultJSON, {}, Paths);
+    }
     else if (Action == TEXT("batch_edit"))
     {
-        // Params: actors[], property_edits[]
-        // Implementation would batch edit properties
-        return MakeSuccessResult(TEXT(""), TEXT("{\"edited\":0}"));
+        if (!Params.IsValid())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Missing params for world.batch_edit"));
+        }
+
+        TArray<FString> ActorPaths;
+        const TArray<TSharedPtr<FJsonValue>>* ActorsArr = nullptr;
+        if (Params->TryGetArrayField(TEXT("actor_paths"), ActorsArr) && ActorsArr)
+        {
+            for (const TSharedPtr<FJsonValue>& Val : *ActorsArr)
+            {
+                ActorPaths.Add(Val->AsString());
+            }
+        }
+
+        TMap<FString, FString> PropertyEdits;
+        const TSharedPtr<FJsonObject>* EditsObj = nullptr;
+        if (Params->TryGetObjectField(TEXT("property_edits"), EditsObj) && EditsObj && EditsObj->IsValid())
+        {
+            for (const auto& Pair : (*EditsObj)->Values)
+            {
+                PropertyEdits.Add(FString(Pair.Key), Pair.Value->AsString());
+            }
+        }
+
+        const int32 Edited = WorldSubsystem->BatchEditActors(ActorPaths, PropertyEdits);
+        FString ResultJSON = FString::Printf(TEXT("{\"edited\":%d}"), Edited);
+        return MakeSuccessResult(TEXT(""), ResultJSON, {}, ActorPaths);
     }
     else if (Action == TEXT("query_spatial"))
     {
-        // Params: bounds, filter_class
-        // Returns array of actor references
-        return MakeSuccessResult(TEXT(""), TEXT("{\"actors\":[]}"));
+        if (!Params.IsValid() || !Params->HasField(TEXT("bounds")))
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Missing bounds for world.query_spatial"));
+        }
+
+        const TSharedPtr<FJsonObject> BoundsObj = Params->GetObjectField(TEXT("bounds"));
+        FVector MinV(0), MaxV(0);
+        if (BoundsObj->HasField(TEXT("min")))
+        {
+            ParseVector(BoundsObj->GetObjectField(TEXT("min")), MinV);
+        }
+        if (BoundsObj->HasField(TEXT("max")))
+        {
+            ParseVector(BoundsObj->GetObjectField(TEXT("max")), MaxV);
+        }
+
+        FString FilterClassPath;
+        Params->TryGetStringField(TEXT("filter_class"), FilterClassPath);
+        TSubclassOf<AActor> FilterClass = nullptr;
+        if (!FilterClassPath.IsEmpty())
+        {
+            FilterClass = LoadClass<AActor>(nullptr, *FilterClassPath);
+            if (!FilterClass && !FilterClassPath.Contains(TEXT("/")))
+            {
+                FilterClass = LoadClass<AActor>(nullptr, *FString::Printf(TEXT("/Script/Engine.%s"), *FilterClassPath));
+            }
+        }
+
+        TArray<AActor*> Found = WorldSubsystem->QuerySpatial(FBox(MinV, MaxV), FilterClass);
+        TArray<FString> Paths;
+        TArray<TSharedPtr<FJsonValue>> Arr;
+        for (AActor* Actor : Found)
+        {
+            if (Actor)
+            {
+                Paths.Add(Actor->GetPathName());
+                Arr.Add(MakeShared<FJsonValueString>(Actor->GetPathName()));
+            }
+        }
+        TSharedRef<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+        ResultObj->SetArrayField(TEXT("actors"), Arr);
+        ResultObj->SetNumberField(TEXT("count"), Paths.Num());
+        FString ResultJSON;
+        TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&ResultJSON);
+        FJsonSerializer::Serialize(ResultObj, Writer);
+        return MakeSuccessResult(TEXT(""), ResultJSON, {}, Paths);
     }
 
     return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Unknown world action: %s"), *Action));
@@ -554,7 +737,7 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleAudioCommand(const TSh
     return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Unknown audio action: %s"), *Action));
 }
 
-FHephaestusCommandResult UHephaestusCommandHandler::HandleVisionCommand(const TSharedPtr<FJsonObject>& Params)
+FHephaestusCommandResult UHephaestusCommandHandler::HandleVisionCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params)
 {
     if (!GetGameInstance())
     {
@@ -567,17 +750,32 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleVisionCommand(const TS
         return MakeErrorResult(TEXT(""), TEXT("Vision subsystem not available"));
     }
 
-    FString Action = Params->GetStringField(TEXT("action"));
+    FString Action;
+    if (Params.IsValid())
+    {
+        Params->TryGetStringField(TEXT("action"), Action);
+    }
+    if (Action.IsEmpty())
+    {
+        Command.Split(TEXT("."), nullptr, &Action, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
+    }
 
     if (Action == TEXT("capture_frame"))
     {
         FHephaestusFrameMetadata Metadata;
         UTexture2D* Texture = nullptr;
-        bool bSuccess = VisionSubsystem->CaptureSingleFrame(Metadata, Texture);
-        if (bSuccess && Texture)
+        const bool bSuccess = VisionSubsystem->CaptureSingleFrame(Metadata, Texture);
+        if (bSuccess)
         {
-            FString ResultJSON = FString::Printf(TEXT("{\"frame_id\":%llu,\"width\":%d,\"height\":%d}"),
-                Metadata.FrameID, Metadata.Resolution.X, Metadata.Resolution.Y);
+            TSharedRef<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+            ResultObj->SetNumberField(TEXT("frame_id"), static_cast<double>(Metadata.FrameID));
+            ResultObj->SetNumberField(TEXT("width"), Metadata.Resolution.X);
+            ResultObj->SetNumberField(TEXT("height"), Metadata.Resolution.Y);
+            ResultObj->SetStringField(TEXT("path"), VisionSubsystem->GetLatestFramePath());
+            ResultObj->SetStringField(TEXT("url"), TEXT("/v1/frame"));
+            FString ResultJSON;
+            TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&ResultJSON);
+            FJsonSerializer::Serialize(ResultObj, Writer);
             return MakeSuccessResult(TEXT(""), ResultJSON);
         }
         return MakeErrorResult(TEXT(""), TEXT("Failed to capture frame"));
@@ -585,8 +783,19 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleVisionCommand(const TS
     else if (Action == TEXT("start_stream"))
     {
         FHephaestusVisionConfig Config;
-        // Parse config from params
-        bool bSuccess = VisionSubsystem->StartCapture(Config);
+        if (Params.IsValid() && Params->HasField(TEXT("width")))
+        {
+            Config.CaptureResolution.X = Params->GetIntegerField(TEXT("width"));
+        }
+        if (Params.IsValid() && Params->HasField(TEXT("height")))
+        {
+            Config.CaptureResolution.Y = Params->GetIntegerField(TEXT("height"));
+        }
+        if (Params.IsValid() && Params->HasField(TEXT("fps")))
+        {
+            Config.TargetFPS = Params->GetIntegerField(TEXT("fps"));
+        }
+        const bool bSuccess = VisionSubsystem->StartCapture(Config);
         return bSuccess ? MakeSuccessResult(TEXT("")) : MakeErrorResult(TEXT(""), TEXT("Failed to start stream"));
     }
     else if (Action == TEXT("stop_stream"))
@@ -596,8 +805,11 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleVisionCommand(const TS
     }
     else if (Action == TEXT("inject_overlay"))
     {
-        // Parse overlay from params
         FHephaestusDebugOverlay Overlay;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("label"), Overlay.Label);
+        }
         VisionSubsystem->InjectDebugOverlay(Overlay);
         return MakeSuccessResult(TEXT(""));
     }

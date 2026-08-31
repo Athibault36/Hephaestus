@@ -8,51 +8,59 @@
 
 class AActor;
 class UClass;
+class IAssetRegistry;
 
 /**
  * UHephaestusWorldSubsystem
- * 
+ *
  * Provides world/actor manipulation capabilities to the agent.
- * Spawn, destroy, batch edit, spatial queries via octree.
+ * Spawn, destroy, batch edit, spatial queries.
  */
 UCLASS(Blueprintable, Category = "Hephaestus")
 class HEPHAESTUSBRIDGE_API UHephaestusWorldSubsystem : public UGameInstanceSubsystem
 {
-    GENERATED_BODY()
+	GENERATED_BODY()
 
 public:
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+	virtual void Deinitialize() override;
 
-    /** Spawn an actor from class path */
-    UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
-    AActor* SpawnActor(const FString& ClassPath, const FTransform& Transform, const FActorSpawnParameters& SpawnParams = FActorSpawnParameters());
+	/** Spawn an actor from class path */
+	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
+	AActor* SpawnActor(const FString& ClassPath, const FTransform& Transform);
 
-    /** Destroy an actor by path */
-    UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
-    bool DestroyActor(const FString& ActorPath, bool bNetForce = false);
+	/** Spawn a StaticMeshActor and assign a mesh (default: Engine cube) */
+	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
+	AActor* SpawnStaticMeshActor(const FString& MeshPath, const FTransform& Transform);
 
-    /** Batch edit multiple actors' properties */
-    UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
-    int32 BatchEditActors(const TArray<FString>& ActorPaths, const TMap<FString, FString>& PropertyEdits);
+	/** Destroy an actor by path */
+	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
+	bool DestroyActor(const FString& ActorPath, bool bNetForce = false);
 
-    /** Query actors within spatial bounds */
-    UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
-    TArray<AActor*> QuerySpatial(const FBox& Bounds, TSubclassOf<AActor> FilterClass = nullptr);
+	/** Batch edit multiple actors' properties */
+	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
+	int32 BatchEditActors(const TArray<FString>& ActorPaths, const TMap<FString, FString>& PropertyEdits);
 
-    /** Get asset registry */
-    UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
-    class IAssetRegistry& GetAssetRegistry();
+	/** Query actors within spatial bounds */
+	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
+	TArray<AActor*> QuerySpatial(const FBox& Bounds, TSubclassOf<AActor> FilterClass = nullptr);
 
-    /** Find actor by path */
-    UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
-    AActor* FindActorByPath(const FString& ActorPath) const;
+	/** Find actor by path */
+	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
+	AActor* FindActorByPath(const FString& ActorPath) const;
 
-    /** Get all actors of class */
-    UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
-    TArray<AActor*> GetAllActorsOfClass(TSubclassOf<AActor> ActorClass) const;
+	/** Get all actors of class */
+	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
+	TArray<AActor*> GetAllActorsOfClass(TSubclassOf<AActor> ActorClass) const;
+
+	/** List actor paths currently in the world (optionally filter by class path) */
+	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
+	TArray<FString> ListActors(const FString& ClassPathFilter = TEXT("")) const;
+
+	/** Native (non-UHT) asset registry access */
+	IAssetRegistry& GetAssetRegistry();
 
 private:
-    /** Resolve class from path */
-    UClass* ResolveClass(const FString& ClassPath) const;
+	UClass* ResolveClass(const FString& ClassPath) const;
+	UWorld* ResolveWorld() const;
 };

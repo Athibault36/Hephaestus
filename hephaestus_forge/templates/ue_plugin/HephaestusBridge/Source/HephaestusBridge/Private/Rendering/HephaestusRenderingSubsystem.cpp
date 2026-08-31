@@ -1,11 +1,7 @@
 // Copyright (c) 2024 HephaestusForge. All Rights Reserved.
 
 #include "Rendering/HephaestusRenderingSubsystem.h"
-#include "RenderGraph.h"
-#include "RenderGraphUtils.h"
-#include "GlobalShader.h"
-#include "ShaderParameterStruct.h"
-#include "PipelineStateCache.h"
+#include "HephaestusBridge.h"
 
 #define LOCTEXT_NAMESPACE "HephaestusRendering"
 
@@ -29,12 +25,10 @@ bool UHephaestusRenderingSubsystem::AddRenderGraphPass(const FHephaestusRenderPa
     return true;
 }
 
-FShaderParameterStruct* UHephaestusRenderingSubsystem::CreateShaderParameterStruct(const FString& StructName, const TMap<FString, FString>& Parameters)
+FString UHephaestusRenderingSubsystem::CreateShaderParameterStruct(const FString& StructName, const TMap<FString, FString>& Parameters)
 {
-    // In a real implementation, this would create a shader parameter struct
-    // from the provided parameters
     UE_LOG(LogHephaestusBridge, Log, TEXT("HephaestusRenderingSubsystem: CreateShaderParameterStruct - %s (stub)"), *StructName);
-    return nullptr;
+    return StructName;
 }
 
 bool UHephaestusRenderingSubsystem::ExecuteComputeShader(const FString& ShaderPath, const FIntVector& DispatchSize, const TMap<FString, FString>& Parameters)
@@ -46,10 +40,9 @@ bool UHephaestusRenderingSubsystem::ExecuteComputeShader(const FString& ShaderPa
     return true;
 }
 
-FSceneRenderer* UHephaestusRenderingSubsystem::GetSceneRenderer() const
+bool UHephaestusRenderingSubsystem::HasSceneRenderer() const
 {
-    // Return current scene renderer if available
-    return nullptr;
+    return false;
 }
 
 #undef LOCTEXT_NAMESPACE
