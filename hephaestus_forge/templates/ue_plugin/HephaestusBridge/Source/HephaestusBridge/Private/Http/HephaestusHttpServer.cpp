@@ -4,11 +4,18 @@
 #include "Command/HephaestusCommandHandler.h"
 #include "HephaestusBridge.h"
 
+#include "Vision/HephaestusVisionSubsystem.h"
+
 #include "HttpServerModule.h"
 #include "HttpServerRequest.h"
 #include "HttpServerResponse.h"
 #include "HttpPath.h"
 #include "Engine/GameInstance.h"
+#include "Engine/Texture2D.h"
+#include "TextureResource.h"
+#include "IImageWrapper.h"
+#include "IImageWrapperModule.h"
+#include "Modules/ModuleManager.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Serialization/JsonSerializer.h"
@@ -67,6 +74,9 @@ void UHephaestusHttpServer::StartServer(uint32 InPort)
     RouteHandles.Add(Router->BindRoute(
         FHttpPath(TEXT("/batch")), EHttpServerRequestVerbs::VERB_POST,
         FHttpRequestHandler::CreateUObject(this, &UHephaestusHttpServer::HandleBatch)));
+    RouteHandles.Add(Router->BindRoute(
+        FHttpPath(TEXT("/frame/:id")), EHttpServerRequestVerbs::VERB_GET,
+        FHttpRequestHandler::CreateUObject(this, &UHephaestusHttpServer::HandleFrame)));
 
     HttpServerModule.StartAllListeners();
     BoundPort = InPort;
@@ -186,6 +196,52 @@ bool UHephaestusHttpServer::HandleCommand(const FHttpServerRequest& Request, con
     // HTTP handlers run on the game thread, so this synchronous call is safe.
     const FHephaestusCommandResult Result = Handler->ExecuteCommand(Body);
     RespondJson(OnComplete, ResultToJson(Result), Result.bSuccess ? 200 : 200);
+    return true;
+}
+
+bool UHephaestusHttpServer::HandleFrame(const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete)
+{
+    UHephaestusVisionSubsystem* Vision = GetGameInstance()
+        ? GetGameInstance()->GetSubsystem<UHephaestusVisionSubsystem>()
+        : nullptr;
+    UTexture2D* Texture = Vision ? Vision->GetLatestFrameTexture() : nullptr;
+    if (!Texture || !Texture->GetPlatformData() || Texture->GetPlatformData()->Mips.Num() == 0)
+    {
+        RespondJson(OnComplete, TEXT("{\"error\":\"no frame available\"}"), 404);
+        return true;
+    }
+
+    FTexture2DMipMap& Mip = Texture->GetPlatformData()->Mips[0];
+    const int32 Width = Mip.SizeX;
+    const int32 Height = Mip.SizeY;
+    const void* Raw = Mip.BulkData.LockReadOnly();
+    const int64 RawSize = Mip.BulkData.GetBulkDataSize();
+
+    IImageWrapperModule& ImageWrapperModule =
+        FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
+    const TSharedPtr<IImageWrapper> Wrapper = ImageWrapperModule.CreateImageWrapper(EImageFormat::PNG);
+
+    TArray64<uint8> Png;
+    bool bEncoded = false;
+    if (Raw && Wrapper.IsValid() &&
+        Wrapper->SetRaw(Raw, RawSize, Width, Height, ERGBFormat::BGRA, 8))
+    {
+        Png = Wrapper->GetCompressed(100);
+        bEncoded = Png.Num() > 0;
+    }
+    Mip.BulkData.Unlock();
+
+    if (!bEncoded)
+    {
+        RespondJson(OnComplete, TEXT("{\"error\":\"failed to encode frame\"}"), 500);
+        return true;
+    }
+
+    TUniquePtr<FHttpServerResponse> Response = MakeUnique<FHttpServerResponse>();
+    Response->Code = EHttpServerResponseCodes::Ok;
+    Response->Body.Append(Png.GetData(), Png.Num());
+    Response->Headers.Add(TEXT("content-type"), {TEXT("image/png")});
+    OnComplete(MoveTemp(Response));
     return true;
 }
 

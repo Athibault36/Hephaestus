@@ -21,7 +21,7 @@ import json
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
@@ -148,6 +148,15 @@ class UEClient:
         except json.JSONDecodeError as exc:
             raise UEConnectionError(f"UE bridge returned non-JSON body: {resp.text[:200]}") from exc
 
+    def _get_bytes(self, path: str) -> bytes:
+        try:
+            resp = self._client.get(path)
+        except httpx.TransportError as exc:
+            raise UEConnectionError(f"Failed to reach UE bridge at {self.base_url}: {exc}") from exc
+        if resp.status_code >= 400:
+            raise UEConnectionError(f"UE bridge error ({resp.status_code}) for {path}")
+        return resp.content
+
     # -- public API ----------------------------------------------------------
     def is_healthy(self) -> bool:
         """Return True if the bridge answers its health endpoint."""
@@ -185,6 +194,25 @@ class UEClient:
         data = self._post("/batch", {"commands": commands})
         results = data.get("results", [])
         return [CommandResult.from_response(r) for r in results]
+
+    def get_frame(self, frame_id: int) -> bytes:
+        """Fetch the raw image bytes (PNG) for a captured frame by id."""
+        return self._get_bytes(f"/frame/{int(frame_id)}")
+
+    def capture_frame(self, include_image: bool = False) -> Tuple[CommandResult, Optional[bytes]]:
+        """Capture a viewport frame; optionally also fetch its image bytes.
+
+        Returns ``(result, image_bytes_or_None)``. The command result carries
+        frame metadata (frame_id, width, height); the bytes are the encoded
+        image suitable for feeding a vision model in the observe loop.
+        """
+        result = self.execute("vision.capture_frame", {"action": "capture_frame"})
+        image: Optional[bytes] = None
+        if include_image and result.success:
+            frame_id = result.result.get("frame_id")
+            if frame_id is not None:
+                image = self.get_frame(int(frame_id))
+        return result, image
 
     def close(self) -> None:
         self._client.close()

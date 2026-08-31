@@ -70,6 +70,28 @@ def test_batch_execution():
     assert all(r.success for r in results)
 
 
+def test_capture_frame_with_image_fetches_bytes():
+    fake = FakeUE()
+    client = make_client(fake)
+    result, image = client.capture_frame(include_image=True)
+    assert result.success is True
+    assert result.result["frame_id"] == 1
+    assert image is not None and image.startswith(b"\x89PNG")
+
+
+def test_capture_frame_without_image_skips_fetch():
+    fake = FakeUE()
+    client = make_client(fake)
+    result, image = client.capture_frame(include_image=False)
+    assert result.success is True and image is None
+
+
+def test_get_frame_returns_bytes():
+    fake = FakeUE()
+    client = make_client(fake)
+    assert client.get_frame(7).startswith(b"\x89PNG")
+
+
 def test_result_from_response_field_aliases():
     # Accept PascalCase (raw USTRUCT) field names too.
     r = CommandResult.from_response(

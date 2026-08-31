@@ -29,12 +29,21 @@ class FakeUE:
         self.frame_counter = 0
         self.fail_transport_times = 0  # simulate N transient 503s before success
 
+    # Minimal valid 1x1 PNG (used as a stand-in for a captured frame).
+    PNG_1PX = bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
+        "890000000d49444154789c636060606000000005000104b8b0f0000000004945"
+        "4e44ae426082"
+    )
+
     def handler(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
         if request.method == "GET" and path == "/health":
             return httpx.Response(200, json={"status": "ok", "commands": len(AVAILABLE_COMMANDS)})
         if request.method == "GET" and path == "/commands":
             return httpx.Response(200, json={"commands": AVAILABLE_COMMANDS})
+        if request.method == "GET" and path.startswith("/frame/"):
+            return httpx.Response(200, content=self.PNG_1PX, headers={"Content-Type": "image/png"})
         if request.method == "POST" and path == "/command":
             if self.fail_transport_times > 0:
                 self.fail_transport_times -= 1

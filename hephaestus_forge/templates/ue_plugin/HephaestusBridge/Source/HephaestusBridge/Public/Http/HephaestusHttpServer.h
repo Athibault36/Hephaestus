@@ -54,6 +54,8 @@ private:
     bool HandleBatch(const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete);
     bool HandleHealth(const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete);
     bool HandleCommands(const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete);
+    /** GET /frame/:id -> PNG bytes of the latest captured viewport frame. */
+    bool HandleFrame(const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete);
 
     UHephaestusCommandHandler* GetCommandHandler() const;
 
