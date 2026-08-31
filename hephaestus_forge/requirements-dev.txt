@@ -1,0 +1,6 @@
+# HephaestusForge development / test dependencies.
+# Installs the runtime requirements plus tooling to run the pytest suite.
+#   pip install -r hephaestus_forge/requirements-dev.txt
+-r requirements.txt
+
+pytest>=8.2,<10

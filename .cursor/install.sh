@@ -21,7 +21,13 @@ fi
 # shellcheck disable=SC1091
 . .venv/bin/activate
 python -m pip install --upgrade pip
-pip install -r hephaestus_forge/requirements.txt
+# Prefer dev requirements (runtime deps + test tooling) when present so the
+# pytest suite is reproducible; fall back to runtime-only requirements.
+if [ -f hephaestus_forge/requirements-dev.txt ]; then
+  pip install -r hephaestus_forge/requirements-dev.txt
+else
+  pip install -r hephaestus_forge/requirements.txt
+fi
 
 # --- Frontend: Mission Control dashboard (React + Vite) ----------------------
 (
