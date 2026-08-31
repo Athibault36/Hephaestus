@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import { useRef, useEffect } from 'react';
 import { useMissionControlStore } from '../store/missionControlStore';
 import { ThoughtEntry } from '../store/missionControlStore';
 
@@ -24,7 +24,9 @@ export function ChainOfThought() {
 
   const formatTime = (timestamp: number) => {
     const date = new Date(timestamp);
-    return date.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
+    const hms = date.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const ms = date.getMilliseconds().toString().padStart(3, '0');
+    return `${hms}.${ms}`;
   };
 
   return (

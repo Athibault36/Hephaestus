@@ -1,13 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMissionControlStore } from '../store/missionControlStore';
 
 export function VoiceConsole() {
-  const { isRecording, setIsRecording, audioLevel, isConnected, agentState } = useMissionControlStore();
+  const { isRecording, setIsRecording, isConnected, agentState } = useMissionControlStore();
   const [localAudioLevel, setLocalAudioLevel] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const animationFrameRef = useRef<number>();
 
   const canRecord = isConnected && agentState !== 'speaking' && agentState !== 'error';
 

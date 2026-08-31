@@ -1,4 +1,3 @@
-import React from 'react';
 import { useMissionControlStore } from '../store/missionControlStore';
 import { AssetInfo } from '../store/missionControlStore';
 

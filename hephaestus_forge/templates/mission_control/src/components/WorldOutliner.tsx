@@ -1,4 +1,3 @@
-import React from 'react';
 import { useMissionControlStore } from '../store/missionControlStore';
 import { ActorInfo } from '../store/missionControlStore';
 
@@ -16,10 +15,6 @@ export function WorldOutliner() {
     if (className.includes('Landscape')) return '🏔️';
     if (className.includes('Water')) return '🌊';
     return '🎭';
-  };
-
-  const formatVector = (v: [number, number, number]) => {
-    return `[${v[0].toFixed(1)}, ${v[1].toFixed(1)}, ${v[2].toFixed(1)}]`;
   };
 
   return (

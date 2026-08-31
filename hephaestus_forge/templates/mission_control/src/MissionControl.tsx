@@ -1,7 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Canvas } from '@react-three/fiber';
-import { OrbitControls, Html, Stats } from '@react-three/drei';
-import * as THREE from 'three';
+import React, { useState, useEffect } from 'react';
 import { ViewportStream } from './components/ViewportStream';
 import { ChainOfThought } from './components/ChainOfThought';
 import { WorldOutliner } from './components/WorldOutliner';
@@ -12,7 +9,7 @@ import { useMissionControlStore } from './store/missionControlStore';
 import './MissionControl.css';
 
 export function MissionControl() {
-  const [activePanels, setActivePanels] = useState({
+  const [activePanels, setActivePanels] = useState<Record<string, boolean>>({
     viewport: true,
     chainOfThought: true,
     worldOutliner: true,
