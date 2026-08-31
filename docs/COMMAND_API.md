@@ -38,7 +38,7 @@ Discovery routes stay open: `GET /health`, `GET /commands`.
 ### `GET /health`
 
 ```json
-{"status": "ok", "commands": 26}
+{"status": "ok", "commands": 27}
 ```
 
 ### `GET /commands`
@@ -110,6 +110,7 @@ All commands use `"params": {"action": "<action>", ...}` unless noted.
 | `world.spawn_actor` | `spawn_actor` | `class_path`, `transform`, optional `label` |
 | `world.destroy_actor` | `destroy_actor` | `actor_path` |
 | `world.query_spatial` | `query_spatial` | optional `bounds`, `filter_class` |
+| `world.batch_edit` | `batch_edit` | `actors`, optional `property_edits` |
 
 ### vision.*
 
@@ -182,7 +183,7 @@ Or in code:
 ```python
 from hephaestus_forge.runtime import build_default_registry
 registry = build_default_registry()
-print(registry.names())  # 26 tools
+print(registry.names())  # 27 tools
 ```
 
 ## Error codes (HTTP)

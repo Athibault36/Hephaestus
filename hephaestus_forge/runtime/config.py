@@ -114,6 +114,8 @@ class ObservabilityConfig:
     metrics_enabled: bool = False
     metrics_host: str = DEFAULT_HOST
     metrics_port: int = 9090
+    tracing_enabled: bool = False
+    tracing_endpoint: str = "http://127.0.0.1:4318/v1/traces"
 
 
 def load_observability_config(project_root: Optional[Path] = None) -> ObservabilityConfig:
@@ -123,12 +125,15 @@ def load_observability_config(project_root: Optional[Path] = None) -> Observabil
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     obs = data.get("observability") or {}
     metrics = obs.get("metrics") or {}
+    tracing = obs.get("tracing") or {}
     return ObservabilityConfig(
         log_format=str(obs.get("log_format", "text")),
         log_dir=str(obs.get("log_dir", "logs")),
         metrics_enabled=bool(metrics.get("enabled", False)),
         metrics_host=str(metrics.get("host", DEFAULT_HOST)),
         metrics_port=int(metrics.get("port", 9090)),
+        tracing_enabled=bool(tracing.get("enabled", False)),
+        tracing_endpoint=str(tracing.get("endpoint", "http://127.0.0.1:4318/v1/traces")),
     )
 
 

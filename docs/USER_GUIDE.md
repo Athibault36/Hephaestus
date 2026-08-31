@@ -87,6 +87,14 @@ hephaestus_forge health
 hephaestus_forge deploy
 ```
 
+**Services only** (Linux-testable lifecycle — starts LLM/TTS/vision/DCC + metrics, skips UE):
+
+```bash
+hephaestus_forge deploy --services-only
+```
+
+When `observability.metrics.enabled` is true in config, Prometheus metrics are served at `http://127.0.0.1:9090/metrics`. With `observability.log_format: jsonl`, agent trajectories append to `logs/agent_trajectory.jsonl` automatically.
+
 **Dashboard only** (Linux-testable UI):
 
 ```bash
@@ -116,6 +124,7 @@ hephaestus_forge agent \
 | `HEPHAESTUS_LLM_URL` | OpenAI-compatible LLM base URL |
 | `HEPHAESTUS_BRIDGE_TOKEN` | Shared auth token for bridge requests |
 | `HEPHAESTUS_BRIDGE_PORT` | Mission Control Socket.IO port |
+| `VITE_UE_BRIDGE_TOKEN` | Dashboard viewport polling auth (Mission Control `.env`) |
 
 ## 7. Voice (optional)
 

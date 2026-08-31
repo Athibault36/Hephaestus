@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
@@ -37,6 +38,10 @@ DEFAULT_SYSTEM_PROMPT = (
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _null_context():
+    return nullcontext()
 
 
 @dataclass
@@ -103,6 +108,7 @@ class AgentRuntime:
         on_event: Optional[Callable[[TrajectoryEvent], None]] = None,
         allow_text_tool_calls: bool = True,
         metrics: Optional[Any] = None,
+        tracer: Optional[Any] = None,
     ):
         self.llm = llm
         self.ue = ue_client
@@ -113,6 +119,7 @@ class AgentRuntime:
         self.on_event = on_event
         self.allow_text_tool_calls = allow_text_tool_calls
         self.metrics = metrics
+        self.tracer = tracer
 
     def _emit(self, trajectory: List[TrajectoryEvent], event: TrajectoryEvent) -> None:
         trajectory.append(event)
@@ -164,101 +171,110 @@ class AgentRuntime:
         tools = self.registry.openai_schemas()
 
         for step in range(1, self.max_steps + 1):
-            if self.metrics is not None:
-                self.metrics.record_step()
-            t0 = time.perf_counter()
-            response: LLMResponse = self.llm.chat(messages, tools=tools)
-            llm_ms = (time.perf_counter() - t0) * 1000.0
-            if self.metrics is not None:
-                self.metrics.record_llm(llm_ms)
-
-            native = bool(response.tool_calls)
-            calls = list(response.tool_calls)
-            if not calls and self.allow_text_tool_calls:
-                calls = extract_tool_calls_from_text(response.content)
-
-            if not calls:
-                final = response.content or "(no final message)"
-                self._emit(trajectory, TrajectoryEvent("final", final))
-                return RunResult(
-                    goal=goal,
-                    completed=True,
-                    final_message=final,
-                    steps=step,
-                    trajectory=trajectory,
-                    tool_calls=tool_call_count,
-                )
-
-            if response.content:
-                self._emit(
-                    trajectory,
-                    TrajectoryEvent("thought", response.content, {"llm_time_ms": round(llm_ms, 2)}),
-                )
-
-            if native:
-                # OpenAI tool-calling protocol: assistant tool_calls + tool-role results.
-                messages.append(
-                    {
-                        "role": "assistant",
-                        "content": response.content or "",
-                        "tool_calls": [
-                            {
-                                "id": tc.id or f"call_{step}_{i}",
-                                "type": "function",
-                                "function": {"name": tc.name, "arguments": json.dumps(tc.arguments)},
-                            }
-                            for i, tc in enumerate(calls)
-                        ],
-                    }
-                )
-            else:
-                # Text-parsed tool calls: keep the raw assistant turn as context.
-                messages.append({"role": "assistant", "content": response.content or ""})
-
-            observations = []
-            for i, call in enumerate(calls):
-                tool_call_count += 1
-                self._emit(
-                    trajectory,
-                    TrajectoryEvent("action", f"{call.name}({json.dumps(call.arguments)})", {"tool": call.name}),
-                )
-                result = self._execute_tool(call.name, call.arguments)
-                summary = result.to_summary()
+            step_ctx = (
+                self.tracer.span("agent.step", step=step)
+                if self.tracer is not None
+                else _null_context()
+            )
+            with step_ctx:
                 if self.metrics is not None:
-                    self.metrics.record_tool(
-                        call.name,
-                        result.success,
-                        result.execution_time_ms or 0.0,
-                        error_kind=result.error_kind,
+                    self.metrics.record_step()
+                t0 = time.perf_counter()
+                response: LLMResponse = self.llm.chat(messages, tools=tools)
+                llm_ms = (time.perf_counter() - t0) * 1000.0
+                if self.metrics is not None:
+                    self.metrics.record_llm(llm_ms)
+
+                native = bool(response.tool_calls)
+                calls = list(response.tool_calls)
+                if not calls and self.allow_text_tool_calls:
+                    calls = extract_tool_calls_from_text(response.content)
+
+                if not calls:
+                    final = response.content or "(no final message)"
+                    self._emit(trajectory, TrajectoryEvent("final", final))
+                    return RunResult(
+                        goal=goal,
+                        completed=True,
+                        final_message=final,
+                        steps=step,
+                        trajectory=trajectory,
+                        tool_calls=tool_call_count,
                     )
-                meta = dict(summary)
-                if result.asset_references:
-                    meta["assets"] = result.asset_references
-                self._emit(
-                    trajectory,
-                    TrajectoryEvent(
-                        "tool_result" if result.success else "error",
-                        f"{call.name} -> {'ok' if result.success else result.error}",
-                        meta,
-                    ),
-                )
+
+                if response.content:
+                    self._emit(
+                        trajectory,
+                        TrajectoryEvent("thought", response.content, {"llm_time_ms": round(llm_ms, 2)}),
+                    )
+
                 if native:
                     messages.append(
                         {
-                            "role": "tool",
-                            "tool_call_id": call.id or f"call_{step}_{i}",
-                            "name": call.name,
-                            "content": json.dumps(summary),
+                            "role": "assistant",
+                            "content": response.content or "",
+                            "tool_calls": [
+                                {
+                                    "id": tc.id or f"call_{step}_{i}",
+                                    "type": "function",
+                                    "function": {"name": tc.name, "arguments": json.dumps(tc.arguments)},
+                                }
+                                for i, tc in enumerate(calls)
+                            ],
                         }
                     )
                 else:
-                    observations.append({"tool": call.name, "result": summary})
+                    messages.append({"role": "assistant", "content": response.content or ""})
 
-            if not native:
-                # Feed results back as a user turn for plain chat models.
-                messages.append(
-                    {"role": "user", "content": f"Tool results: {json.dumps(observations)}"}
-                )
+                observations = []
+                for i, call in enumerate(calls):
+                    tool_call_count += 1
+                    self._emit(
+                        trajectory,
+                        TrajectoryEvent("action", f"{call.name}({json.dumps(call.arguments)})", {"tool": call.name}),
+                    )
+                    tool_ctx = (
+                        self.tracer.span("agent.tool", tool=call.name)
+                        if self.tracer is not None
+                        else _null_context()
+                    )
+                    with tool_ctx:
+                        result = self._execute_tool(call.name, call.arguments)
+                    summary = result.to_summary()
+                    if self.metrics is not None:
+                        self.metrics.record_tool(
+                            call.name,
+                            result.success,
+                            result.execution_time_ms or 0.0,
+                            error_kind=result.error_kind,
+                        )
+                    meta = dict(summary)
+                    if result.asset_references:
+                        meta["assets"] = result.asset_references
+                    self._emit(
+                        trajectory,
+                        TrajectoryEvent(
+                            "tool_result" if result.success else "error",
+                            f"{call.name} -> {'ok' if result.success else result.error}",
+                            meta,
+                        ),
+                    )
+                    if native:
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": call.id or f"call_{step}_{i}",
+                                "name": call.name,
+                                "content": json.dumps(summary),
+                            }
+                        )
+                    else:
+                        observations.append({"tool": call.name, "result": summary})
+
+                if not native:
+                    messages.append(
+                        {"role": "user", "content": f"Tool results: {json.dumps(observations)}"}
+                    )
 
         # Ran out of steps without a final answer.
         self._emit(trajectory, TrajectoryEvent("error", f"Reached max_steps={self.max_steps} without completion"))

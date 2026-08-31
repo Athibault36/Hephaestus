@@ -98,7 +98,7 @@ def test_auth_failure_surfaces_as_auth_error():
     fake = FakeUE(require_auth=True, auth_token="good")
     ue = UEClient(base_url="http://ue.test", transport=make_transport(fake), auth_token="bad")
     with pytest.raises(UEConnectionError) as exc:
-        ue.health()
+        ue.execute("world.query_spatial", {"action": "query_spatial"})
     assert exc.value.info.kind.value == "auth"
     ue.close()
 

@@ -16,7 +16,7 @@ def test_ue_client_auth_rejected():
     fake = FakeUE(require_auth=True, auth_token="abc")
     client = UEClient(base_url="http://ue.test", transport=make_transport(fake), auth_token="wrong")
     with pytest.raises(UEConnectionError):
-        client.health()
+        client.execute("world.query_spatial", {"action": "query_spatial"})
     client.close()
 
 

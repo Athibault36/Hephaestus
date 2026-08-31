@@ -13,7 +13,13 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .errors import ErrorInfo, ToolError, infer_command_error, validation_error
-from .validation import validate_required_string, validate_spawn_class_path
+from .validation import (
+    validate_actor_path,
+    validate_actor_path_list,
+    validate_required_string,
+    validate_spawn_class_path,
+    validate_unreal_asset_path,
+)
 from .ue_client import CommandResult, UEClient
 
 Vec3 = Tuple[float, float, float]
@@ -201,9 +207,7 @@ def _build_spawn_actor(args: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
 
 
 def _build_destroy_actor(args: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
-    actor_path = args.get("actor_path")
-    if not actor_path or not isinstance(actor_path, str):
-        raise ToolError("world.destroy_actor requires a string 'actor_path'")
+    actor_path = validate_actor_path(args.get("actor_path"))
     return "world.destroy_actor", {"action": "destroy_actor", "actor_path": actor_path}
 
 
@@ -220,12 +224,10 @@ def _build_query_spatial(args: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
 
 
 def _build_batch_edit(args: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
-    actors = args.get("actors")
-    if not isinstance(actors, list) or not actors:
-        raise ToolError("world.batch_edit requires a non-empty 'actors' list", code="VALIDATION_MISSING_FIELD")
+    actors = validate_actor_path_list(args.get("actors"))
     params: Dict[str, Any] = {
         "action": "batch_edit",
-        "actors": [str(a) for a in actors],
+        "actors": actors,
         "property_edits": args.get("property_edits") or [],
     }
     return "world.batch_edit", params
@@ -343,7 +345,10 @@ CAPTURE_FRAME = Tool(
 )
 
 def _require_str(args: Dict[str, Any], key: str, tool_name: str) -> str:
-    return validate_required_string(args.get(key), key, tool_name)
+    value = args.get(key)
+    if key in {"blueprint_path", "destination_path", "asset_path", "shader_path", "graph_path", "sequence_path"}:
+        return validate_unreal_asset_path(value, key, tool_name)
+    return validate_required_string(value, key, tool_name)
 
 
 def _action_tool(

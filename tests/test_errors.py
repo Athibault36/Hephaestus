@@ -60,6 +60,6 @@ def test_ue_client_auth_maps_to_error_kind():
     fake = FakeUE(require_auth=True, auth_token="secret")
     client = UEClient(base_url="http://ue.test", transport=make_transport(fake), auth_token="bad")
     with pytest.raises(UEConnectionError) as exc:
-        client.health()
+        client.execute("world.query_spatial", {"action": "query_spatial"})
     assert exc.value.info.kind == ErrorKind.AUTH
     client.close()

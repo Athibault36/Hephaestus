@@ -1305,7 +1305,9 @@ def deploy(
     Starts llama-server, TTS server, vision stack, DCC bridge,
     then launches UE Editor or headless instance with -HephaestusAgent flag.
     """
-    from hephaestus_forge.runtime.deploy_helpers import bridge_env_from_config, wait_for_url
+    from hephaestus_forge.runtime.deploy_helpers import ProcessSupervisor, bridge_env_from_config
+    from hephaestus_forge.runtime.config import load_observability_config
+    from hephaestus_forge.runtime.observability import start_observability
 
     project_root = project_path or Path.cwd()
     forge_dir = project_root / ".hephaestus_forge"
@@ -1345,152 +1347,150 @@ def deploy(
             raise typer.Exit(1)
     
     # Start agent runtime services if not disabled
-    processes = []
     nim_client = None
-    
-    if not no_agent:
-        runtime_dir = project_root / config.paths.agent_runtime_dir
-        cfg_dict = _load_project_config(project_root)
-        inference = (cfg_dict.get("models") or {}).get("inference") or {}
-        llama_host = inference.get("host", "127.0.0.1")
+    obs_runtime = None
 
-        def _wait_service(name: str, url: str, timeout: float = 45.0) -> None:
-            console.print(f"[dim]Waiting for {name} at {url}...[/dim]")
-            if wait_for_url(url, timeout=timeout):
-                console.print(f"[green]✓ {name} ready[/green]")
-            else:
-                console.print(f"[yellow]⚠ {name} not ready after {timeout:.0f}s (continuing)[/yellow]")
-
-        # Start LLM backend (local or NIM)
-        if use_nim:
-            # Initialize NIM client with budget tracking
-            budget_mgr = BudgetManager(config_path)
-            nim_client = NIMClient(budget_mgr)
-            console.print(f"[green]✓ NIM client initialized: {nim_model}[/green]")
+    def _wait_service(supervisor: ProcessSupervisor, name: str, url: str, timeout: float = 45.0) -> None:
+        console.print(f"[dim]Waiting for {name} at {url}...[/dim]")
+        if supervisor.wait_ready(name, url, timeout=timeout):
+            console.print(f"[green]✓ {name} ready[/green]")
         else:
-            llama_config = config.agent_runtime.get("llama_server", {})
-            if llama_config.get("enabled", True):
-                proc = _start_llama_server(runtime_dir, llama_config)
-                if proc:
-                    processes.append(("llama-server", proc))
-                    llama_port = int(llama_config.get("port", 8080))
-                    _wait_service("llama-server", f"http://{llama_host}:{llama_port}/v1/models", timeout=90.0)
-        
-        tts_config = config.agent_runtime.get("tts_server", {})
-        if tts_config.get("enabled", True):
-            tts_dir = runtime_dir / "tts_server"
-            if (tts_dir / "voice_cloning.py").exists():
-                proc = _start_uvicorn_service(
-                    "tts-server",
-                    tts_dir,
-                    "voice_cloning:app",
-                    tts_config.get("host", "127.0.0.1"),
-                    int(tts_config.get("port", 8082)),
-                )
-                if proc:
-                    processes.append(("tts-server", proc))
-                    tts_port = int(tts_config.get("port", 8082))
-                    _wait_service("tts-server", f"http://{llama_host}:{tts_port}/health")
-            else:
-                console.print(f"[yellow]⚠ TTS server not found in {tts_dir}[/yellow]")
-        
-        vision_config = config.agent_runtime.get("vision_stack", {})
-        if vision_config.get("enabled", True):
-            vision_dir = runtime_dir / "vision_stack"
-            if (vision_dir / "vision_processor.py").exists():
-                proc = _start_uvicorn_service(
-                    "vision-stack",
-                    vision_dir,
-                    "vision_processor:app",
-                    vision_config.get("host", "127.0.0.1"),
-                    int(vision_config.get("port", 8083)),
-                )
-                if proc:
-                    processes.append(("vision-stack", proc))
-                    vision_port = int(vision_config.get("port", 8083))
-                    _wait_service("vision-stack", f"http://{llama_host}:{vision_port}/health")
-            else:
-                console.print(f"[yellow]⚠ vision_processor.py not found in {vision_dir}[/yellow]")
-        
-        dcc_config = config.agent_runtime.get("dcc_bridge", {})
-        if dcc_config.get("enabled", True):
-            dcc_dir = runtime_dir / "dcc_bridge"
-            if (dcc_dir / "main.py").exists():
-                env = os.environ.copy()
-                env["DCC_BRIDGE_HOST"] = dcc_config.get("host", "127.0.0.1")
-                env["DCC_BRIDGE_PORT"] = str(dcc_config.get("port", 8084))
-                cmd = [sys.executable, str(dcc_dir / "main.py")]
-                console.print(f"[dim]Starting dcc-bridge: {' '.join(cmd)}[/dim]")
-                proc = subprocess.Popen(cmd, cwd=str(dcc_dir), env=env)
-                processes.append(("dcc-bridge", proc))
-                console.print(f"[green]✓ dcc-bridge started on {env['DCC_BRIDGE_HOST']}:{env['DCC_BRIDGE_PORT']}[/green]")
-                _wait_service("dcc-bridge", f"http://{env['DCC_BRIDGE_HOST']}:{env['DCC_BRIDGE_PORT']}/health")
-            else:
-                console.print(f"[yellow]⚠ DCC bridge not found in {dcc_dir}[/yellow]")
-    
-    # Launch UE (skip when --services-only for Linux lifecycle testing)
-    if services_only:
-        console.print("[cyan]Services-only mode: UE launch skipped. Press Ctrl+C to stop services.[/cyan]")
-        try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            console.print("\n[yellow]Shutting down...[/yellow]")
-        finally:
-            from hephaestus_forge.runtime.deploy_helpers import shutdown_processes
-            shutdown_processes(processes, log=lambda msg: console.print(f"[dim]{msg}[/dim]"))
-            if nim_client:
-                asyncio.run(nim_client.close())
-        return
+            console.print(f"[yellow]⚠ {name} not ready after {timeout:.0f}s (continuing)[/yellow]")
 
-    ue_editor = ue_path / "Engine" / "Binaries" / "Win64" / "UnrealEditor.exe"
-    if not ue_editor.exists():
-        console.print("[red]✗ UnrealEditor.exe not found[/red]")
-        raise typer.Exit(1)
-    
-    # Find project file
-    project_files = list(project_root.glob("*.uproject"))
-    if not project_files:
-        console.print("[red]✗ No .uproject file found in project root[/red]")
-        raise typer.Exit(1)
-    
-    project_file = project_files[0]
-    
-    ue_cmd = [
-        str(ue_editor),
-        str(project_file),
-    ]
-    
-    if headless:
-        ue_cmd.extend(["-nullrhi", "-windowed", "-ResX=1920", "-ResY=1080"])
-    
-    # Add Hephaestus agent flag
-    ue_cmd.append("-HephaestusAgent")
-    
-    console.print(f"[dim]Launching UE: {' '.join(ue_cmd)}[/dim]")
-
-    ue_env = os.environ.copy()
-    if not no_agent:
-        ue_env.update(bridge_env_from_config(_load_project_config(project_root)))
-    
     try:
-        ue_proc = subprocess.Popen(ue_cmd, cwd=str(project_root), env=ue_env)
-        processes.append(("UnrealEditor", ue_proc))
-        
-        console.print("[green]✓ UE launched successfully[/green]")
-        console.print("[dim]Press Ctrl+C to stop all processes[/dim]")
-        
-        # Wait for UE process
-        ue_proc.wait()
-        
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Shutting down...[/yellow]")
-    finally:
-        from hephaestus_forge.runtime.deploy_helpers import shutdown_processes
+        with ProcessSupervisor(shutdown_timeout=5.0) as supervisor:
+            if not no_agent:
+                obs_runtime = start_observability(
+                    load_observability_config(project_root),
+                    project_root,
+                    log=lambda msg: console.print(f"[green]✓ {msg}[/green]"),
+                )
 
-        shutdown_processes(processes, log=lambda msg: console.print(f"[dim]{msg}[/dim]"))
-        
-        # Close NIM client if used
+            if not no_agent:
+                runtime_dir = project_root / config.paths.agent_runtime_dir
+                cfg_dict = _load_project_config(project_root)
+                inference = (cfg_dict.get("models") or {}).get("inference") or {}
+                llama_host = inference.get("host", "127.0.0.1")
+
+                # Start LLM backend (local or NIM)
+                if use_nim:
+                    budget_mgr = BudgetManager(config_path)
+                    nim_client = NIMClient(budget_mgr)
+                    console.print(f"[green]✓ NIM client initialized: {nim_model}[/green]")
+                else:
+                    llama_config = config.agent_runtime.get("llama_server", {})
+                    if llama_config.get("enabled", True):
+                        proc = _start_llama_server(runtime_dir, llama_config)
+                        if proc:
+                            supervisor.add("llama-server", proc)
+                            llama_port = int(llama_config.get("port", 8080))
+                            _wait_service(
+                                supervisor,
+                                "llama-server",
+                                f"http://{llama_host}:{llama_port}/v1/models",
+                                timeout=90.0,
+                            )
+
+                tts_config = config.agent_runtime.get("tts_server", {})
+                if tts_config.get("enabled", True):
+                    tts_dir = runtime_dir / "tts_server"
+                    if (tts_dir / "voice_cloning.py").exists():
+                        proc = _start_uvicorn_service(
+                            "tts-server",
+                            tts_dir,
+                            "voice_cloning:app",
+                            tts_config.get("host", "127.0.0.1"),
+                            int(tts_config.get("port", 8082)),
+                        )
+                        if proc:
+                            supervisor.add("tts-server", proc)
+                            tts_port = int(tts_config.get("port", 8082))
+                            _wait_service(supervisor, "tts-server", f"http://{llama_host}:{tts_port}/health")
+                    else:
+                        console.print(f"[yellow]⚠ TTS server not found in {tts_dir}[/yellow]")
+
+                vision_config = config.agent_runtime.get("vision_stack", {})
+                if vision_config.get("enabled", True):
+                    vision_dir = runtime_dir / "vision_stack"
+                    if (vision_dir / "vision_processor.py").exists():
+                        proc = _start_uvicorn_service(
+                            "vision-stack",
+                            vision_dir,
+                            "vision_processor:app",
+                            vision_config.get("host", "127.0.0.1"),
+                            int(vision_config.get("port", 8083)),
+                        )
+                        if proc:
+                            supervisor.add("vision-stack", proc)
+                            vision_port = int(vision_config.get("port", 8083))
+                            _wait_service(supervisor, "vision-stack", f"http://{llama_host}:{vision_port}/health")
+                    else:
+                        console.print(f"[yellow]⚠ vision_processor.py not found in {vision_dir}[/yellow]")
+
+                dcc_config = config.agent_runtime.get("dcc_bridge", {})
+                if dcc_config.get("enabled", True):
+                    dcc_dir = runtime_dir / "dcc_bridge"
+                    if (dcc_dir / "main.py").exists():
+                        env = os.environ.copy()
+                        env["DCC_BRIDGE_HOST"] = dcc_config.get("host", "127.0.0.1")
+                        env["DCC_BRIDGE_PORT"] = str(dcc_config.get("port", 8084))
+                        cmd = [sys.executable, str(dcc_dir / "main.py")]
+                        console.print(f"[dim]Starting dcc-bridge: {' '.join(cmd)}[/dim]")
+                        proc = subprocess.Popen(cmd, cwd=str(dcc_dir), env=env)
+                        supervisor.add("dcc-bridge", proc)
+                        console.print(
+                            f"[green]✓ dcc-bridge started on {env['DCC_BRIDGE_HOST']}:{env['DCC_BRIDGE_PORT']}[/green]"
+                        )
+                        _wait_service(
+                            supervisor,
+                            "dcc-bridge",
+                            f"http://{env['DCC_BRIDGE_HOST']}:{env['DCC_BRIDGE_PORT']}/health",
+                        )
+                    else:
+                        console.print(f"[yellow]⚠ DCC bridge not found in {dcc_dir}[/yellow]")
+
+            # Launch UE (skip when --services-only for Linux lifecycle testing)
+            if services_only:
+                console.print("[cyan]Services-only mode: UE launch skipped. Press Ctrl+C to stop services.[/cyan]")
+                try:
+                    while True:
+                        time.sleep(1)
+                except KeyboardInterrupt:
+                    console.print("\n[yellow]Shutting down...[/yellow]")
+                return
+
+            ue_editor = ue_path / "Engine" / "Binaries" / "Win64" / "UnrealEditor.exe"
+            if not ue_editor.exists():
+                console.print("[red]✗ UnrealEditor.exe not found[/red]")
+                raise typer.Exit(1)
+
+            project_files = list(project_root.glob("*.uproject"))
+            if not project_files:
+                console.print("[red]✗ No .uproject file found in project root[/red]")
+                raise typer.Exit(1)
+
+            project_file = project_files[0]
+            ue_cmd = [str(ue_editor), str(project_file)]
+            if headless:
+                ue_cmd.extend(["-nullrhi", "-windowed", "-ResX=1920", "-ResY=1080"])
+            ue_cmd.append("-HephaestusAgent")
+
+            console.print(f"[dim]Launching UE: {' '.join(ue_cmd)}[/dim]")
+            ue_env = os.environ.copy()
+            if not no_agent:
+                ue_env.update(bridge_env_from_config(_load_project_config(project_root)))
+
+            try:
+                ue_proc = subprocess.Popen(ue_cmd, cwd=str(project_root), env=ue_env)
+                supervisor.add("UnrealEditor", ue_proc)
+                console.print("[green]✓ UE launched successfully[/green]")
+                console.print("[dim]Press Ctrl+C to stop all processes[/dim]")
+                ue_proc.wait()
+            except KeyboardInterrupt:
+                console.print("\n[yellow]Shutting down...[/yellow]")
+    finally:
+        if obs_runtime is not None:
+            obs_runtime.stop()
         if nim_client:
             asyncio.run(nim_client.close())
 
@@ -2230,7 +2230,7 @@ def health(
         FAIL, OK, WARN, Check, HealthReport, check_file, check_service, check_tool,
     )
     from hephaestus_forge.gpu_dev.llama_manager import LlamaServerManager
-    from hephaestus_forge.runtime.config import RuntimeConfig
+    from hephaestus_forge.runtime.config import RuntimeConfig, load_observability_config
 
     project_root = (project_path or Path.cwd()).resolve()
     cfg = _load_project_config(project_root)
@@ -2281,6 +2281,16 @@ def health(
     ]
     for name, url in endpoints:
         report.add(check_service(name, url, timeout=timeout))
+
+    obs_cfg = load_observability_config(project_root)
+    if obs_cfg.metrics_enabled:
+        report.add(
+            check_service(
+                "prometheus-metrics",
+                f"http://{obs_cfg.metrics_host}:{obs_cfg.metrics_port}/metrics",
+                timeout=timeout,
+            )
+        )
 
     # --- Mission Control build artifact ---
     mc_dir = project_root / (cfg.get("paths", {}) or {}).get("mission_control_dir", "MissionControl")
@@ -2339,11 +2349,8 @@ def agent(
     from hephaestus_forge.runtime import UEClient, build_default_registry
     from hephaestus_forge.runtime.llm import LLMClient
     from hephaestus_forge.runtime.orchestrator import AgentRuntime, TrajectoryEvent
-    from hephaestus_forge.runtime.config import (
-        default_trajectory_log_path,
-        load_observability_config,
-        load_runtime_config,
-    )
+    from hephaestus_forge.runtime.config import load_observability_config, load_runtime_config
+    from hephaestus_forge.runtime.observability import start_observability
 
     project_root = (project_path or Path.cwd()).resolve()
     runtime_cfg = load_runtime_config(project_root)
@@ -2353,23 +2360,14 @@ def agent(
     resolved_bridge_port = bridge_port if bridge_port != 8081 else runtime_cfg.mission_bridge_port
     registry = build_default_registry()
 
-    if trajectory_log is None and obs_cfg.log_format.lower() == "jsonl":
-        trajectory_log = default_trajectory_log_path(project_root, obs_cfg)
-
-    metrics_server = None
-    metrics_registry = None
-    if obs_cfg.metrics_enabled:
-        from hephaestus_forge.runtime.metrics import MetricsServer, get_metrics_registry
-
-        metrics_registry = get_metrics_registry()
-        metrics_server = MetricsServer(
-            host=obs_cfg.metrics_host,
-            port=obs_cfg.metrics_port,
-            registry=metrics_registry,
-        ).start()
-        console.print(
-            f"[green]✓ Metrics at http://{obs_cfg.metrics_host}:{obs_cfg.metrics_port}/metrics[/green]"
-        )
+    obs_runtime = start_observability(obs_cfg, project_root, goal=goal)
+    if trajectory_log is None:
+        trajectory_log = obs_runtime.trajectory_log_path
+    metrics_registry = obs_runtime.metrics_registry
+    if obs_runtime.metrics_url:
+        console.print(f"[green]✓ Metrics at {obs_runtime.metrics_url}[/green]")
+    if obs_runtime.tracer is not None:
+        console.print("[green]✓ Tracing enabled[/green]")
 
     console.print(Panel.fit(
         f"[bold]Hephaestus Agent[/bold]\n"
@@ -2385,6 +2383,7 @@ def agent(
         for schema in registry.openai_schemas():
             fn = schema["function"]
             console.print(f"  • [bold]{fn['name']}[/bold]: {fn['description']}")
+        obs_runtime.stop()
         return
 
     icons = {
@@ -2441,6 +2440,7 @@ def agent(
         observe_first=observe_first,
         on_event=on_event,
         metrics=metrics_registry,
+        tracer=obs_runtime.tracer,
     )
 
     try:
@@ -2452,8 +2452,7 @@ def agent(
             mission_bridge.stop()
         if jsonl_logger is not None:
             jsonl_logger.close()
-        if metrics_server is not None:
-            metrics_server.stop()
+        obs_runtime.stop()
 
     console.print(Panel.fit(
         f"[bold]{'Completed' if result.completed else 'Stopped'}[/bold]\n"

@@ -7,6 +7,8 @@ import {
   getUeBridgeBase,
 } from '../lib/ueBridge';
 
+const SOCKET_FRAME_FRESH_MS = 5000;
+
 export function ViewportStream() {
   const isConnected = useMissionControlStore((s) => s.isConnected);
   const latestFrame = useMissionControlStore((s) => s.latestFrame);
@@ -18,19 +20,39 @@ export function ViewportStream() {
   const [pollFps, setPollFps] = useState(0);
   const objectUrlRef = useRef<string | null>(null);
   const lastPollRef = useRef<number>(0);
+  const lastSocketFrameRef = useRef<number>(0);
 
-  // Poll UE bridge GET /frame (via capture_frame -> /frame/:id) when Socket.IO
-  // has not pushed a frame yet, or as a fallback live feed.
+  useEffect(() => {
+    if (latestFrame?.startsWith('data:image/')) {
+      lastSocketFrameRef.current = Date.now();
+    }
+  }, [latestFrame]);
+
+  // Poll UE bridge only when Socket.IO has not recently pushed a frame.
   useEffect(() => {
     let cancelled = false;
     const pollMs = getFramePollIntervalMs();
 
+    const shouldPoll = () => {
+      if (!isConnected) return true;
+      if (!latestFrame) return true;
+      if (latestFrame.startsWith('data:image/')) {
+        return Date.now() - lastSocketFrameRef.current > SOCKET_FRAME_FRESH_MS;
+      }
+      return true;
+    };
+
     const poll = async () => {
+      if (!shouldPoll()) {
+        setPollError(null);
+        return;
+      }
+
       const healthy = await checkBridgeHealth();
       if (cancelled) return;
       setBridgeOnline(healthy);
       if (!healthy) {
-        setPollError('UE bridge unreachable');
+        setPollError('UE bridge unreachable (check deploy or VITE_UE_BRIDGE_TOKEN)');
         return;
       }
 
@@ -68,12 +90,11 @@ export function ViewportStream() {
         objectUrlRef.current = null;
       }
     };
-  }, [setLatestFrame]);
+  }, [isConnected, latestFrame, setLatestFrame]);
 
   const stats = {
-    fps: metrics?.fps || pollFps || 0,
-    bitrate: 0,
-    latency: metrics?.latency?.tool || 0,
+    fps: metrics?.fps ?? pollFps ?? null,
+    latency: metrics?.latency?.tool ?? null,
   };
 
   const showPlaceholder = !isConnected && !bridgeOnline && !latestFrame;
@@ -82,7 +103,7 @@ export function ViewportStream() {
     <div className="viewport-container">
       {latestFrame ? (
         <img
-          key={latestFrame}
+          key={latestFrame.slice(0, 64)}
           className="viewport-stream viewport-frame"
           src={latestFrame}
           alt="Latest captured UE viewport frame"
@@ -95,12 +116,12 @@ export function ViewportStream() {
       <div className="viewport-overlay" />
 
       <div className="viewport-stats">
-        <span>FPS: {stats.fps || '—'}</span>
-        <span>Tool latency: {stats.latency ? `${stats.latency}ms` : '—'}</span>
+        <span>FPS: {stats.fps ?? '—'}</span>
+        <span>Tool latency: {stats.latency != null ? `${stats.latency}ms` : '—'}</span>
         <span>Bridge: {getUeBridgeBase()}</span>
       </div>
 
-      {pollError && bridgeOnline === false && (
+      {pollError && bridgeOnline === false && !latestFrame && (
         <div className="viewport-placeholder viewport-poll-hint">
           <p className="placeholder-hint">{pollError}</p>
         </div>

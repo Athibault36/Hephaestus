@@ -30,7 +30,7 @@ the engine/GPU · risk = engineering uncertainty.
 
 ## Phase 0 — Current state (complete)
 
-- Python agent runtime: `UEClient`, tool registry (`world.spawn_actor`, `world.destroy_actor`, `world.query_spatial`, `vision.capture_frame`), `LLMClient` (native + text/ReAct tool-calling), `AgentRuntime` observe→think→act loop. **56 tests.**
+- Python agent runtime: `UEClient`, tool registry (27 commands across world/vision/asset/blueprint/rendering/pcg/animation/audio), `LLMClient` (native + text/ReAct tool-calling), `AgentRuntime` observe→think→act loop. **123+ tests.**
 - CLI: `init`, `attach`, `compile` (editor target + plugin auto-placement + `--dry-run`), `health`, `agent` (`--stream`), plus existing commands.
 - Mission Control dashboard builds cleanly; live Socket.IO bridge streams chain-of-thought / actors / latency metrics.
 - Packaging (`pyproject.toml` + console script), reproducible dev installs, CI (pytest + build) green on PRs.

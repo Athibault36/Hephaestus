@@ -69,11 +69,12 @@ class FakeUE:
         return None
 
     def handler(self, request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        discovery = path in ("/health", "/commands")
         auth_resp = self._check_auth(request)
-        if auth_resp is not None:
+        if auth_resp is not None and not discovery:
             return auth_resp
 
-        path = request.url.path
         if request.method == "GET" and path == "/health":
             return httpx.Response(200, json={"status": "ok", "commands": len(AVAILABLE_COMMANDS)})
         if request.method == "GET" and path == "/commands":
