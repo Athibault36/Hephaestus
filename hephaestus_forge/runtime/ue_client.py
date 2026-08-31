@@ -25,6 +25,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
+from .config import AUTH_HEADER, RuntimeConfig, load_runtime_config
+
 DEFAULT_BASE_URL = "http://127.0.0.1:8099"
 DEFAULT_TIMEOUT = 10.0
 DEFAULT_MAX_RETRIES = 2
@@ -96,17 +98,36 @@ class UEClient:
         timeout: float = DEFAULT_TIMEOUT,
         max_retries: int = DEFAULT_MAX_RETRIES,
         transport: Optional[httpx.BaseTransport] = None,
+        auth_token: Optional[str] = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.max_retries = max(0, int(max_retries))
-        self._client = httpx.Client(base_url=self.base_url, timeout=timeout, transport=transport)
+        self.auth_token = auth_token
+        headers = {AUTH_HEADER: auth_token} if auth_token else None
+        self._client = httpx.Client(
+            base_url=self.base_url, timeout=timeout, transport=transport, headers=headers
+        )
 
     @classmethod
     def from_env(cls, **kwargs: Any) -> "UEClient":
-        """Create a client honoring ``HEPHAESTUS_UE_URL`` for the base URL."""
-        base_url = os.environ.get("HEPHAESTUS_UE_URL", DEFAULT_BASE_URL)
-        return cls(base_url=base_url, **kwargs)
+        """Create a client honoring ``HEPHAESTUS_UE_URL`` and bridge token env vars."""
+        cfg = load_runtime_config()
+        return cls(
+            base_url=os.environ.get("HEPHAESTUS_UE_URL", cfg.ue_bridge_url),
+            auth_token=kwargs.pop("auth_token", cfg.ue_bridge_token),
+            **kwargs,
+        )
+
+    @classmethod
+    def from_config(cls, config: Optional[RuntimeConfig] = None, **kwargs: Any) -> "UEClient":
+        """Create a client from a :class:`RuntimeConfig` (or loaded project config)."""
+        cfg = config or load_runtime_config()
+        return cls(
+            base_url=kwargs.pop("base_url", cfg.ue_bridge_url),
+            auth_token=kwargs.pop("auth_token", cfg.ue_bridge_token),
+            **kwargs,
+        )
 
     # -- transport helpers ---------------------------------------------------
     def _post(self, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -130,7 +151,8 @@ class UEClient:
             if resp.status_code >= 400:
                 raise UEConnectionError(f"UE bridge rejected request ({resp.status_code}): {resp.text[:200]}")
             try:
-                return resp.json()
+                data = resp.json()
+                return data if isinstance(data, dict) else {"value": data}
             except json.JSONDecodeError as exc:
                 raise UEConnectionError(f"UE bridge returned non-JSON body: {resp.text[:200]}") from exc
         # Unreachable, but keeps type checkers happy.
@@ -144,7 +166,8 @@ class UEClient:
         if resp.status_code >= 400:
             raise UEConnectionError(f"UE bridge error ({resp.status_code}): {resp.text[:200]}")
         try:
-            return resp.json()
+            data = resp.json()
+            return data if isinstance(data, dict) else {"value": data}
         except json.JSONDecodeError as exc:
             raise UEConnectionError(f"UE bridge returned non-JSON body: {resp.text[:200]}") from exc
 

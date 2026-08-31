@@ -20,6 +20,8 @@ jobs:
           pip install -e ".[dev]"
       - name: Lint (ruff, pyflakes)
         run: ruff check --select F hephaestus_forge tests
+      - name: Type-check (mypy)
+        run: mypy hephaestus_forge/runtime
       - name: Run tests
         run: pytest -q
 

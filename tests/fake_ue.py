@@ -12,22 +12,48 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from hephaestus_forge.runtime.config import AUTH_HEADER
+
 AVAILABLE_COMMANDS = [
     "world.spawn_actor",
     "world.destroy_actor",
     "world.query_spatial",
     "vision.capture_frame",
+    "asset.create_material",
+    "asset.import",
+    "asset.reimport",
+    "asset.export",
+    "asset.create_instance",
+    "blueprint.compile",
+    "blueprint.add_function",
+    "blueprint.set_property",
+    "blueprint.diff",
+    "rendering.add_pass",
+    "rendering.create_shader_params",
+    "rendering.dispatch_compute",
+    "pcg.mutate_graph",
+    "pcg.set_metadata",
+    "pcg.query_spatial",
+    "animation.create_control_rig",
+    "animation.retarget",
+    "animation.edit_sequence",
+    "animation.livelink_connect",
+    "audio.create_metasound",
+    "audio.play_quartz",
+    "audio.synthesize",
 ]
 
 
 class FakeUE:
     """Records commands and produces plausible command results."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, require_auth: bool = False, auth_token: str = "test-token") -> None:
         self.received: List[Dict[str, Any]] = []
         self.spawn_counter = 0
         self.frame_counter = 0
         self.fail_transport_times = 0  # simulate N transient 503s before success
+        self.require_auth = require_auth
+        self.auth_token = auth_token
 
     # Minimal valid 1x1 PNG (used as a stand-in for a captured frame).
     PNG_1PX = bytes.fromhex(
@@ -37,6 +63,11 @@ class FakeUE:
     )
 
     def handler(self, request: httpx.Request) -> httpx.Response:
+        if self.require_auth:
+            token = request.headers.get(AUTH_HEADER)
+            if token != self.auth_token:
+                return httpx.Response(401, json={"error": "unauthorized"})
+
         path = request.url.path
         if request.method == "GET" and path == "/health":
             return httpx.Response(200, json={"status": "ok", "commands": len(AVAILABLE_COMMANDS)})
@@ -75,6 +106,8 @@ class FakeUE:
         if command == "vision.capture_frame":
             self.frame_counter += 1
             return _ok(cid, {"frame_id": self.frame_counter, "width": 1920, "height": 1080})
+        if command in AVAILABLE_COMMANDS:
+            return _ok(cid, {"command": command, "action": params.get("action", "")})
         return _err(cid, f"unknown command {command}")
 
 

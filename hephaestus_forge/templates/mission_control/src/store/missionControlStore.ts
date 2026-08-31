@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { io, Socket } from 'socket.io-client';
 
+const BRIDGE_URL = import.meta.env.VITE_BRIDGE_URL || 'http://127.0.0.1:8081';
+
 export interface ThoughtEntry {
   id: string;
   timestamp: number;
@@ -98,7 +100,7 @@ export const useMissionControlStore = create<MissionControlState>((set, get) => 
   socket: null,
   isConnected: false,
   connect: () => {
-    const socket = io('http://127.0.0.1:8081', {
+    const socket = io(BRIDGE_URL, {
       transports: ['polling', 'websocket'],
       reconnection: true,
       reconnectionAttempts: 5,

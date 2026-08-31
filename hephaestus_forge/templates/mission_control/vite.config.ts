@@ -13,6 +13,11 @@ export default defineConfig({
     port: 3000,
     host: '127.0.0.1',
     proxy: {
+      '/ue-bridge': {
+        target: process.env.VITE_UE_BRIDGE_PROXY || 'http://127.0.0.1:8099',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/ue-bridge/, ''),
+      },
       '/api': {
         target: 'http://127.0.0.1:8084',
         changeOrigin: true,

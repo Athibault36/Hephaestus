@@ -89,6 +89,7 @@ network:
   tts_port: 8082
   vision_port: 8083
   dcc_bridge_port: 8084
+  ue_bridge_port: 8099
   allowed_external:
     - "api.meshy.ai"
 
@@ -170,6 +171,7 @@ security:
     - "127.0.0.1"
     - "::1"
   require_auth: false
+  bridge_token: ""  # Set via HEPHAESTUS_BRIDGE_TOKEN env var in production
   api_keys:
     meshy: ""  # Set via MESHY_API_KEY env var
 

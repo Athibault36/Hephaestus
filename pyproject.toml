@@ -38,6 +38,8 @@ gpu = [
 dev = [
     "pytest>=8.2,<10",
     "ruff>=0.6",
+    "mypy>=1.11",
+    "types-PyYAML>=6.0",
 ]
 
 [project.scripts]
@@ -65,3 +67,12 @@ line-length = 120
 # Pyflakes catches real problems (unused imports/vars, undefined names) without
 # cosmetic churn. Broader rulesets can be enabled per-package over time.
 select = ["F"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = false
+check_untyped_defs = true
+ignore_missing_imports = true
+files = ["hephaestus_forge/runtime"]

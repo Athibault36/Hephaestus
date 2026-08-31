@@ -61,7 +61,7 @@ class MissionBridge:
         self.port = port
         self._server = server
         self._wsgi_thread: Optional[threading.Thread] = None
-        self._httpd = None
+        self._httpd: Any = None
         self._actors: List[Dict[str, Any]] = []
         self._tool_calls = 0
         self._latency_total_ms = 0.0

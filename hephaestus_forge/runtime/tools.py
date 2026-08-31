@@ -282,9 +282,225 @@ CAPTURE_FRAME = Tool(
     builder=_build_capture_frame,
 )
 
+def _require_str(args: Dict[str, Any], key: str, tool_name: str) -> str:
+    value = args.get(key)
+    if not value or not isinstance(value, str):
+        raise ToolError(f"{tool_name} requires a string '{key}'")
+    return value
+
+
+def _action_tool(
+    name: str,
+    action: str,
+    description: str,
+    required: List[str],
+    optional: Optional[List[str]] = None,
+) -> Tool:
+    """Factory for tools whose params are ``action`` plus passthrough fields."""
+
+    def builder(args: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+        params: Dict[str, Any] = {"action": action}
+        for key in required:
+            params[key] = _require_str(args, key, name)
+        for key in optional or []:
+            if key in args and args[key] is not None:
+                params[key] = args[key]
+        return name, params
+
+    properties: Dict[str, Any] = {
+        key: {"type": "string", "description": f"Required {key}."} for key in required
+    }
+    for key in optional or []:
+        properties[key] = {"type": "string", "description": f"Optional {key}."}
+
+    return Tool(
+        name=name,
+        description=description,
+        parameters={
+            "type": "object",
+            "properties": properties,
+            "required": required,
+        },
+        builder=builder,
+    )
+
+
+# --- extended command families (C++ handlers; Python wiring testable now) ------
+ASSET_CREATE_MATERIAL = _action_tool(
+    "asset.create_material",
+    "create_material",
+    "Create a new material asset from a material description JSON/path.",
+    required=["material_desc"],
+)
+ASSET_IMPORT = _action_tool(
+    "asset.import",
+    "import",
+    "Import a file from disk into the UE content tree.",
+    required=["file_path", "destination_path"],
+    optional=["import_options"],
+)
+ASSET_REIMPORT = _action_tool("asset.reimport", "reimport", "Reimport an existing asset.", required=["asset_path"])
+ASSET_EXPORT = _action_tool(
+    "asset.export",
+    "export",
+    "Export a UE asset to disk.",
+    required=["asset_path", "file_path"],
+    optional=["export_options"],
+)
+ASSET_CREATE_INSTANCE = _action_tool(
+    "asset.create_instance",
+    "create_instance",
+    "Create a material instance from a parent material.",
+    required=["parent_material"],
+    optional=["parameters"],
+)
+
+BLUEPRINT_COMPILE = _action_tool(
+    "blueprint.compile",
+    "compile",
+    "Compile a Blueprint asset.",
+    required=["blueprint_path"],
+)
+BLUEPRINT_ADD_FUNCTION = _action_tool(
+    "blueprint.add_function",
+    "add_function",
+    "Add a function to a Blueprint.",
+    required=["blueprint_path", "function_name"],
+)
+BLUEPRINT_SET_PROPERTY = _action_tool(
+    "blueprint.set_property",
+    "set_property",
+    "Set a property on a Blueprint or generated class.",
+    required=["blueprint_path", "property_name", "value"],
+)
+BLUEPRINT_DIFF = _action_tool(
+    "blueprint.diff",
+    "diff",
+    "Diff a Blueprint against a prior revision or another asset.",
+    required=["blueprint_path"],
+    optional=["against_path"],
+)
+
+RENDERING_ADD_PASS = _action_tool(
+    "rendering.add_pass",
+    "add_pass",
+    "Add a custom render pass to the viewport/renderer.",
+    required=["pass_name"],
+    optional=["pass_config"],
+)
+RENDERING_CREATE_SHADER_PARAMS = _action_tool(
+    "rendering.create_shader_params",
+    "create_shader_params",
+    "Create shader parameter bindings for a material or pass.",
+    required=["material_path"],
+)
+RENDERING_DISPATCH_COMPUTE = _action_tool(
+    "rendering.dispatch_compute",
+    "dispatch_compute",
+    "Dispatch a compute shader with the given parameters.",
+    required=["shader_path"],
+    optional=["dispatch_size"],
+)
+
+PCG_MUTATE_GRAPH = _action_tool(
+    "pcg.mutate_graph",
+    "mutate_graph",
+    "Apply a mutation to a PCG graph asset.",
+    required=["graph_path"],
+    optional=["mutation"],
+)
+PCG_SET_METADATA = _action_tool(
+    "pcg.set_metadata",
+    "set_metadata",
+    "Set PCG metadata on actors or graph nodes.",
+    required=["target_path", "metadata"],
+)
+PCG_QUERY_SPATIAL = _action_tool(
+    "pcg.query_spatial",
+    "query_spatial",
+    "Query PCG-generated instances in a spatial region.",
+    required=[],
+    optional=["bounds", "filter_tag"],
+)
+
+ANIMATION_CREATE_CONTROL_RIG = _action_tool(
+    "animation.create_control_rig",
+    "create_control_rig",
+    "Create a Control Rig asset for a skeletal mesh.",
+    required=["skeletal_mesh_path"],
+)
+ANIMATION_RETARGET = _action_tool(
+    "animation.retarget",
+    "retarget",
+    "Retarget animation between skeletons.",
+    required=["source_skeleton", "target_skeleton", "sequence_path"],
+)
+ANIMATION_EDIT_SEQUENCE = _action_tool(
+    "animation.edit_sequence",
+    "edit_sequence",
+    "Edit keys or sections on a level sequence.",
+    required=["sequence_path"],
+    optional=["edit_payload"],
+)
+ANIMATION_LIVELINK_CONNECT = _action_tool(
+    "animation.livelink_connect",
+    "livelink_connect",
+    "Connect a LiveLink source for real-time animation.",
+    required=["source_name"],
+)
+
+AUDIO_CREATE_METASOUND = _action_tool(
+    "audio.create_metasound",
+    "create_metasound",
+    "Create a MetaSound source asset.",
+    required=["asset_path"],
+)
+AUDIO_PLAY_QUARTZ = _action_tool(
+    "audio.play_quartz",
+    "play_quartz",
+    "Start or schedule Quartz clock playback.",
+    required=["clock_name"],
+    optional=["quantization"],
+)
+AUDIO_SYNTHESIZE = _action_tool(
+    "audio.synthesize",
+    "synthesize",
+    "Synthesize audio via MetaSound or procedural source.",
+    required=["metasound_path"],
+    optional=["duration_seconds"],
+)
+
+EXTENDED_TOOLS: List[Tool] = [
+    ASSET_CREATE_MATERIAL,
+    ASSET_IMPORT,
+    ASSET_REIMPORT,
+    ASSET_EXPORT,
+    ASSET_CREATE_INSTANCE,
+    BLUEPRINT_COMPILE,
+    BLUEPRINT_ADD_FUNCTION,
+    BLUEPRINT_SET_PROPERTY,
+    BLUEPRINT_DIFF,
+    RENDERING_ADD_PASS,
+    RENDERING_CREATE_SHADER_PARAMS,
+    RENDERING_DISPATCH_COMPUTE,
+    PCG_MUTATE_GRAPH,
+    PCG_SET_METADATA,
+    PCG_QUERY_SPATIAL,
+    ANIMATION_CREATE_CONTROL_RIG,
+    ANIMATION_RETARGET,
+    ANIMATION_EDIT_SEQUENCE,
+    ANIMATION_LIVELINK_CONNECT,
+    AUDIO_CREATE_METASOUND,
+    AUDIO_PLAY_QUARTZ,
+    AUDIO_SYNTHESIZE,
+]
+
 DEFAULT_TOOLS: List[Tool] = [SPAWN_ACTOR, DESTROY_ACTOR, QUERY_SPATIAL, CAPTURE_FRAME]
 
 
-def build_default_registry() -> ToolRegistry:
-    """Return a registry populated with the default UE agent tools."""
-    return ToolRegistry(DEFAULT_TOOLS)
+def build_default_registry(include_extended: bool = True) -> ToolRegistry:
+    """Return a registry populated with core (and optionally extended) UE tools."""
+    tools = list(DEFAULT_TOOLS)
+    if include_extended:
+        tools.extend(EXTENDED_TOOLS)
+    return ToolRegistry(tools)

@@ -140,7 +140,16 @@ class NetworkConfig(BaseModel):
     tts_port: int = 8082
     vision_port: int = 8083
     dcc_bridge_port: int = 8084
+    ue_bridge_port: int = 8099
     allowed_external: list[str] = Field(default_factory=lambda: ["api.meshy.ai"])
+
+
+class SecurityConfig(BaseModel):
+    localhost_only: bool = True
+    allowed_ips: list[str] = Field(default_factory=lambda: ["127.0.0.1", "::1"])
+    require_auth: bool = False
+    bridge_token: str = ""
+    api_keys: dict = Field(default_factory=dict)
 
 
 class PathsConfig(BaseModel):
@@ -185,6 +194,7 @@ class ForgeConfig(BaseSettings):
     network: NetworkConfig = Field(default_factory=NetworkConfig)
     paths: PathsConfig
     cloud: CloudConfig = Field(default_factory=CloudConfig)
+    security: SecurityConfig = Field(default_factory=SecurityConfig)
 
     @classmethod
     def from_scan(cls, project_name: str, project_root: Path, scan: SystemScanResult) -> "ForgeConfig":
@@ -2187,9 +2197,11 @@ def health(
         FAIL, OK, WARN, Check, HealthReport, check_file, check_service, check_tool,
     )
     from hephaestus_forge.gpu_dev.llama_manager import LlamaServerManager
+    from hephaestus_forge.runtime.config import RuntimeConfig
 
     project_root = (project_path or Path.cwd()).resolve()
     cfg = _load_project_config(project_root)
+    runtime = RuntimeConfig.from_dict(cfg) if cfg else RuntimeConfig.defaults()
     report = HealthReport()
 
     # --- Project & config ---
@@ -2225,13 +2237,14 @@ def health(
     inference = ((cfg.get("models") or {}).get("inference")) or {}
     llama_host = inference.get("host", "127.0.0.1")
     llama_port = inference.get("port", 8080)
+    mc_host = str((cfg.get("mission_control") or {}).get("host", llama_host))
     endpoints = [
         ("llama-server", f"http://{llama_host}:{llama_port}/v1/models"),
-        ("tts-server", f"http://127.0.0.1:{net.get('tts_port', 8082)}/health"),
-        ("vision-stack", f"http://127.0.0.1:{net.get('vision_port', 8083)}/health"),
-        ("dcc-bridge", f"http://127.0.0.1:{net.get('dcc_bridge_port', 8084)}/health"),
-        ("mission-control", f"http://127.0.0.1:{net.get('dashboard_port', 3000)}/"),
-        ("ue-bridge", os.environ.get("HEPHAESTUS_UE_URL", "http://127.0.0.1:8099") + "/health"),
+        ("tts-server", f"http://{llama_host}:{net.get('tts_port', 8082)}/health"),
+        ("vision-stack", f"http://{llama_host}:{net.get('vision_port', 8083)}/health"),
+        ("dcc-bridge", f"http://{llama_host}:{net.get('dcc_bridge_port', 8084)}/health"),
+        ("mission-control", f"http://{mc_host}:{runtime.dashboard_port}/"),
+        ("ue-bridge", runtime.ue_bridge_url + "/health"),
     ]
     for name, url in endpoints:
         report.add(check_service(name, url, timeout=timeout))
@@ -2289,15 +2302,20 @@ def agent(
     from hephaestus_forge.runtime import UEClient, build_default_registry
     from hephaestus_forge.runtime.llm import LLMClient
     from hephaestus_forge.runtime.orchestrator import AgentRuntime, TrajectoryEvent
+    from hephaestus_forge.runtime.config import load_runtime_config
 
-    resolved_ue_url = ue_url or os.environ.get("HEPHAESTUS_UE_URL", "http://127.0.0.1:8099")
+    project_root = (project_path or Path.cwd()).resolve()
+    runtime_cfg = load_runtime_config(project_root)
+    resolved_ue_url = ue_url or runtime_cfg.ue_bridge_url
+    resolved_llm_url = llm_url if llm_url != "http://127.0.0.1:8080/v1" else runtime_cfg.llm_base_url
+    resolved_bridge_port = bridge_port if bridge_port != 8081 else runtime_cfg.mission_bridge_port
     registry = build_default_registry()
 
     console.print(Panel.fit(
         f"[bold]Hephaestus Agent[/bold]\n"
         f"Goal: [cyan]{goal}[/cyan]\n"
         f"UE bridge: [cyan]{resolved_ue_url}[/cyan]\n"
-        f"LLM: [cyan]{model} @ {llm_url}[/cyan]\n"
+        f"LLM: [cyan]{model} @ {resolved_llm_url}[/cyan]\n"
         f"Tools: [cyan]{', '.join(registry.names())}[/cyan]",
         border_style="green",
     ))
@@ -2317,8 +2335,11 @@ def agent(
     mission_bridge = None
     if stream:
         from hephaestus_forge.runtime.mission_bridge import MissionBridge
-        mission_bridge = MissionBridge(port=bridge_port).start()
-        console.print(f"[green]✓ Streaming to Mission Control on port {bridge_port}[/green]")
+        mission_bridge = MissionBridge(port=resolved_bridge_port).start()
+        bind_host = runtime_cfg.mission_bridge_host if runtime_cfg.localhost_only else "0.0.0.0"
+        if bind_host != "127.0.0.1":
+            console.print(f"[yellow]Note: Mission bridge binding host is configured as {bind_host}[/yellow]")
+        console.print(f"[green]✓ Streaming to Mission Control on port {resolved_bridge_port}[/green]")
 
     def on_event(event: "TrajectoryEvent") -> None:
         icon = icons.get(event.type, "•")
@@ -2336,12 +2357,12 @@ def agent(
                 except Exception:
                     pass
 
-    ue_client = UEClient(base_url=resolved_ue_url)
+    ue_client = UEClient.from_config(runtime_cfg, base_url=resolved_ue_url)
     if not ue_client.is_healthy():
         console.print(f"[yellow]⚠ UE bridge not reachable at {resolved_ue_url}. "
                       f"Start UE via 'hephaestus_forge deploy' first.[/yellow]")
 
-    llm = LLMClient(base_url=llm_url, model=model)
+    llm = LLMClient(base_url=resolved_llm_url, model=model)
     runtime = AgentRuntime(
         llm, ue_client, registry, max_steps=max_steps, observe_first=observe_first, on_event=on_event
     )

@@ -12,6 +12,9 @@ running UE5.8 editor/game through the HephaestusBridge plugin:
 from .ue_client import CommandResult, UEClient, UEConnectionError, UEError
 from .tools import Tool, ToolError, ToolRegistry, build_default_registry
 
+from .config import RuntimeConfig, load_runtime_config
+from .auth import validate_bridge_token, extract_token_from_headers
+
 __all__ = [
     "CommandResult",
     "UEClient",
@@ -21,4 +24,8 @@ __all__ = [
     "ToolError",
     "ToolRegistry",
     "build_default_registry",
+    "RuntimeConfig",
+    "load_runtime_config",
+    "validate_bridge_token",
+    "extract_token_from_headers",
 ]

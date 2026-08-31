@@ -14,6 +14,8 @@ def test_load_populates_nested_and_extra_fields():
     assert cfg.system.ue_path == "C:/UnrealEngine/5.8"
     assert cfg.paths.mission_control_dir == "MissionControl"
     assert cfg.network.dashboard_port == 3000
+    assert cfg.network.ue_bridge_port == 8099
+    assert cfg.security.localhost_only is True
     # 'agent_runtime' is not a declared field but is preserved via extra="allow".
     assert cfg.agent_runtime["llama_server"]["port"] == 8080
 
