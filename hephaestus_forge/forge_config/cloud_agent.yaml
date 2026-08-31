@@ -1,0 +1,97 @@
+# Production-ready overnight queue — prioritized for maximum Hephaestus progress
+# Runs on Brev via: bash ~/go_offline.sh ~/Hephaestus
+
+autonomous:
+  backend: local_llm
+
+  llm:
+    host: "127.0.0.1"
+    port: 8080
+    ctx_size: 32768
+    n_gpu_layers: 0
+    startup_wait_seconds: 300
+    download_if_missing: false
+
+  nim:
+    model: "nvidia/nemotron-3-8b"
+    base_url: "https://integrate.api.nvidia.com/v1"
+
+  budget:
+    stop_brev_when_done: true
+    max_runtime_minutes: 180
+
+  worker:
+    apply_edits: true
+    log_dir: "Agent_Runtime/autonomous"
+    pause_seconds_between_tasks: 15
+
+tasks:
+  - id: prod-01-cuda-gpu
+    task: |
+      PRODUCTION BLOCKER: Fix hephaestus_forge/gpu_dev/llama_manager.py so llama.cpp
+      loads on Brev L40S. Brev has CUDA 13 at /usr/local/cuda/lib64. Install/use
+      nvidia-cublas-cu12 and nvidia-cuda-runtime-cu12 pip packages, build LD_LIBRARY_PATH
+      from their lib dirs, try n_gpu_layers=-1 before CPU fallback. Add clear logging.
+      Output complete file as ```python:hephaestus_forge/gpu_dev/llama_manager.py
+
+  - id: prod-02-agent-runtime-client
+    task: |
+      Create hephaestus_forge/agent_runtime/ue_client.py — HTTP/JSON client that sends
+      CommandHandler commands (world.spawn_actor, vision.capture_frame, blueprint.compile)
+      to UE at configurable host:port. Include pydantic models, retry, health check.
+      Wire a forge command stub or document usage in module docstring.
+      Output new files with ```python: paths.
+
+  - id: prod-03-world-spawn
+    task: |
+      In templates/ue_plugin/.../HephaestusWorldSubsystem.cpp implement world.spawn_actor
+      end-to-end: parse JSON params (class, transform, label), spawn in current world,
+      return actor path in FHephaestusCommandResult JSON. Ensure CommandHandler route
+      DispatchWorldCommand calls it. Production-quality UE5.8 C++, no stubs.
+      Output ```cpp: and ```h: blocks for changed files only.
+
+  - id: prod-04-vision-capture
+    task: |
+      Implement vision.capture_frame in HephaestusVisionSubsystem: read viewport render
+      target, encode PNG/JPEG base64, return in command result JSON. Minimum viable for
+      agent observe loop. Update CommandHandler dispatch for vision.* commands.
+      Output complete changed .cpp/.h files.
+
+  - id: prod-05-forge-compile-project
+    task: |
+      Update hephaestus_forge/forge.py compile() to accept Hephaestus/Hephaestus.uproject
+      as project target (not just .uplugin path). Detect Win64 UnrealBuildTool, pass
+      -Project= path correctly, copy plugin to Plugins/HephaestusBridge if missing.
+      Output ```python:hephaestus_forge/forge.py sections or full file.
+
+  - id: prod-06-mission-control-build
+    task: |
+      Fix templates/mission_control for production: ensure package.json has working
+      build script, add .env.example for API ports matching forge config (8080,8083,3000),
+      fix any TypeScript errors in MissionControl.tsx and store. Output changed files.
+
+  - id: prod-07-orchestrator-mvp
+    task: |
+      Create minimal working hephaestus_forge/agent_runtime/orchestrator_mvp.py (not full
+      LangGraph deps): loop that calls local LLM at :8080, parses tool JSON, calls
+      ue_client.py, logs trajectory to Agent_Runtime/autonomous/trajectory.jsonl.
+      Under 200 lines, production structure. Output new python files.
+
+  - id: prod-08-requirements
+    task: |
+      Add hephaestus_forge/requirements.txt with pinned deps for forge.py, gpu-dev,
+      agent-run, deploy services (typer, pydantic, httpx, uvicorn, fastapi, pyyaml,
+      huggingface_hub). Add hephaestus_forge/pyproject.toml optional. Output both files.
+
+  - id: prod-09-health-check
+    task: |
+      Add forge health command: checks llama-server, vision :8083/health, dcc :8084,
+      tts :8082, returns single JSON status table. Needed before production deploy.
+      Output ```python:hephaestus_forge/forge.py with new health command.
+
+  - id: prod-10-uproject-integration
+    task: |
+      Generate Hephaestus/Plugins/HephaestusBridge/ layout instructions and update
+      Hephaestus.uproject JSON to enable HephaestusBridge plugin + PythonScriptPlugin.
+      Output Hephaestus.uproject snippet and a SETUP.md in hephaestus_forge/docs/SETUP.md
+      with exact Windows paths for compile/deploy on local UE5.8.

@@ -1,0 +1,173 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://hephaestus-forge.dev/schemas/voice_profile.json",
+  "title": "Hephaestus Voice Profile",
+  "description": "Schema for voice cloning profiles used by TTS engines",
+  "type": "object",
+  "required": ["voice_id", "name", "language", "engine_data", "reference_audio", "metadata"],
+  "properties": {
+    "voice_id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_-]{8,32}$",
+      "description": "Unique voice identifier"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "Human-readable voice name"
+    },
+    "language": {
+      "type": "string",
+      "pattern": "^[a-z]{2}(-[A-Z]{2})?$",
+      "description": "BCP 47 language code (e.g., en, en-US, zh-CN)"
+    },
+    "gender": {
+      "type": "string",
+      "enum": ["male", "female", "neutral", "unknown"],
+      "default": "unknown"
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 512,
+      "default": ""
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "engine_data": {
+      "type": "object",
+      "description": "Engine-specific embeddings and model paths",
+      "properties": {
+        "fish_speech": {
+          "type": "object",
+          "properties": {
+            "embedding_path": { "type": "string" },
+            "embedding_shape": { "type": "array", "items": { "type": "integer" } },
+            "embedding_dtype": { "type": "string", "enum": ["float32", "float16"] }
+          },
+          "required": ["embedding_path"]
+        },
+        "xtts": {
+          "type": "object",
+          "properties": {
+            "embedding_path": { "type": "string" },
+            "speaker_id": { "type": "integer" },
+            "gpt_cond_latent_path": { "type": "string" },
+            "speaker_embedding_path": { "type": "string" }
+          }
+        },
+        "openvoice": {
+          "type": "object",
+          "properties": {
+            "embedding_path": { "type": "string" },
+            "tone_color_embedding_path": { "type": "string" }
+          }
+        },
+        "rvc": {
+          "type": "object",
+          "properties": {
+            "model_path": { "type": "string" },
+            "index_path": { "type": "string" },
+            "feature_path": { "type": "string" },
+            "pitch_guidance": { "type": "boolean", "default": true },
+            "f0_method": { "type": "string", "enum": ["pm", "harvest", "crepe", "rmvpe"], "default": "rmvpe" }
+          },
+          "required": ["model_path"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "reference_audio": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "required": ["path", "duration_seconds", "sample_rate", "format"],
+        "properties": {
+          "path": { "type": "string", "description": "Relative path to reference audio file" },
+          "duration_seconds": { "type": "number", "minimum": 1, "maximum": 60 },
+          "sample_rate": { "type": "integer", "enum": [16000, 22050, 24000, 44100, 48000] },
+          "format": { "type": "string", "enum": ["wav", "flac", "mp3", "ogg"] },
+          "transcript": { "type": "string", "description": "Optional transcript for alignment" },
+          "quality_score": { "type": "number", "minimum": 0, "maximum": 1, "description": "Audio quality assessment" }
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["created_at", "updated_at", "created_by_engine", "version"],
+      "properties": {
+        "created_at": { "type": "number", "description": "Unix timestamp" },
+        "updated_at": { "type": "number", "description": "Unix timestamp" },
+        "created_by_engine": { "type": "string", "enum": ["fish-speech", "xtts", "openvoice", "rvc", "manual"] },
+        "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$", "default": "1.0.0" },
+        "training_steps": { "type": "integer", "default": 0, "description": "For RVC: training steps" },
+        "training_epochs": { "type": "integer", "default": 0 },
+        "dataset_size_minutes": { "type": "number", "default": 0 },
+        "notes": { "type": "string", "default": "" }
+      }
+    },
+    "synthesis_defaults": {
+      "type": "object",
+      "properties": {
+        "speed": { "type": "number", "minimum": 0.5, "maximum": 2.0, "default": 1.0 },
+        "pitch": { "type": "number", "minimum": 0.5, "maximum": 2.0, "default": 1.0 },
+        "energy": { "type": "number", "minimum": 0.5, "maximum": 2.0, "default": 1.0 },
+        "emotion": { "type": "string", "enum": ["neutral", "happy", "sad", "angry", "calm", "excited"], "default": "neutral" },
+        "sample_rate": { "type": "integer", "enum": [16000, 22050, 24000, 44100, 48000], "default": 24000 }
+      }
+    }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "voice_id": "hephaestus_default",
+      "name": "Hephaestus Default",
+      "language": "en",
+      "gender": "neutral",
+      "description": "Default voice for HEPHAESTUS agent",
+      "tags": ["default", "agent", "technical"],
+      "engine_data": {
+        "fish_speech": {
+          "embedding_path": "embeddings/hephaestus_default_fish.npy",
+          "embedding_shape": [256],
+          "embedding_dtype": "float32"
+        },
+        "xtts": {
+          "embedding_path": "embeddings/hephaestus_default_xtts.npy",
+          "speaker_id": 0,
+          "gpt_cond_latent_path": "embeddings/hephaestus_default_xtts_gpt.pt",
+          "speaker_embedding_path": "embeddings/hephaestus_default_xtts_spk.pt"
+        }
+      },
+      "reference_audio": [
+        {
+          "path": "references/hephaestus_default/ref_0.wav",
+          "duration_seconds": 12.5,
+          "sample_rate": 24000,
+          "format": "wav",
+          "transcript": "I am Hephaestus, your technical artist and engine architect.",
+          "quality_score": 0.95
+        }
+      ],
+      "metadata": {
+        "created_at": 1725000000,
+        "updated_at": 1725000000,
+        "created_by_engine": "fish-speech",
+        "version": "1.0.0",
+        "notes": "Primary agent voice"
+      },
+      "synthesis_defaults": {
+        "speed": 1.0,
+        "pitch": 1.0,
+        "energy": 1.0,
+        "emotion": "neutral",
+        "sample_rate": 24000
+      }
+    }
+  ]
+}

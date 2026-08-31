@@ -1,0 +1,482 @@
+{
+  "version": "1.0.0",
+  "description": "Defines the C++/Python API surface exposed to the HEPHAESTUS agent via HephaestusBridge plugin",
+  "cpp_modules": [
+    {
+      "name": "HephaestusVision",
+      "class": "UHephaestusVisionSubsystem",
+      "functions": [
+        {
+          "name": "CaptureViewport",
+          "params": [
+            {"name": "Resolution", "type": "FIntPoint"},
+            {"name": "Format", "type": "EHephaestusCaptureFormat"},
+            {"name": "IncludeGBuffer", "type": "bool"}
+          ],
+          "returns": "UTexture2D*",
+          "description": "Capture a single viewport frame with optional G-Buffer"
+        },
+        {
+          "name": "StartStreaming",
+          "params": [
+            {"name": "FPS", "type": "int32"},
+            {"name": "Bitrate", "type": "int32"},
+            {"name": "Codec", "type": "EHephaestusStreamCodec"}
+          ],
+          "returns": "bool",
+          "description": "Start continuous WebRTC viewport streaming"
+        },
+        {
+          "name": "StopStreaming",
+          "params": [],
+          "returns": "void",
+          "description": "Stop viewport streaming"
+        },
+        {
+          "name": "InjectDebugOverlay",
+          "params": [
+            {"name": "OverlayData", "type": "FHephaestusDebugOverlay"}
+          ],
+          "returns": "void",
+          "description": "Inject debug visualization (boxes, text, lines) into next frame"
+        }
+      ],
+      "properties": [
+        {"name": "bIsStreaming", "type": "bool", "replicated": false, "description": "Whether streaming is active"},
+        {"name": "CurrentFPS", "type": "int32", "replicated": false, "description": "Current streaming FPS"}
+      ]
+    },
+    {
+      "name": "HephaestusCommand",
+      "class": "UHephaestusCommandHandler",
+      "functions": [
+        {
+          "name": "ExecuteCommand",
+          "params": [
+            {"name": "CommandJSON", "type": "FString"}
+          ],
+          "returns": "FHephaestusCommandResult",
+          "description": "Execute a single command synchronously on game thread"
+        },
+        {
+          "name": "ExecuteCommandAsync",
+          "params": [
+            {"name": "CommandJSON", "type": "FString"},
+            {"name": "Callback", "type": "FScriptDelegate"}
+          ],
+          "returns": "void",
+          "description": "Execute command asynchronously with callback"
+        },
+        {
+          "name": "ExecuteBatch",
+          "params": [
+            {"name": "CommandsJSON", "type": "TArray<FString>"}
+          ],
+          "returns": "FHephaestusBatchCommandResult",
+          "description": "Execute multiple commands in sequence"
+        },
+        {
+          "name": "RegisterCustomCommand",
+          "params": [
+            {"name": "CommandName", "type": "FString"},
+            {"name": "HandlerDelegate", "type": "FHephaestusCustomCommandDelegate"}
+          ],
+          "returns": "bool",
+          "description": "Register a custom command handler"
+        },
+        {
+          "name": "GetAvailableCommands",
+          "params": [],
+          "returns": "TArray<FString>",
+          "description": "Get list of all available command names"
+        },
+        {
+          "name": "ValidateCommand",
+          "params": [
+            {"name": "CommandJSON", "type": "FString"},
+            {"name": "OutErrorMessage", "type": "FString&"}
+          ],
+          "returns": "bool",
+          "description": "Validate command JSON without executing"
+        }
+      ],
+      "properties": []
+    },
+    {
+      "name": "HephaestusWorld",
+      "class": "UHephaestusWorldSubsystem",
+      "functions": [
+        {
+          "name": "SpawnActor",
+          "params": [
+            {"name": "ClassPath", "type": "FString"},
+            {"name": "Transform", "type": "FTransform"},
+            {"name": "SpawnParams", "type": "FActorSpawnParameters"}
+          ],
+          "returns": "AActor*",
+          "description": "Spawn an actor from class path"
+        },
+        {
+          "name": "DestroyActor",
+          "params": [
+            {"name": "ActorPath", "type": "FString"},
+            {"name": "bNetForce", "type": "bool"}
+          ],
+          "returns": "bool",
+          "description": "Destroy actor by path"
+        },
+        {
+          "name": "BatchEditActors",
+          "params": [
+            {"name": "ActorPaths", "type": "TArray<FString>"},
+            {"name": "PropertyEdits", "type": "TMap<FString, FString>"}
+          ],
+          "returns": "int32",
+          "description": "Batch edit properties on multiple actors"
+        },
+        {
+          "name": "QuerySpatial",
+          "params": [
+            {"name": "Bounds", "type": "FBox"},
+            {"name": "FilterClass", "type": "TSubclassOf<AActor>"}
+          ],
+          "returns": "TArray<AActor*>",
+          "description": "Query actors within spatial bounds"
+        },
+        {
+          "name": "GetAssetRegistry",
+          "params": [],
+          "returns": "IAssetRegistry&",
+          "description": "Get asset registry reference"
+        }
+      ],
+      "properties": []
+    },
+    {
+      "name": "HephaestusAssets",
+      "class": "UHephaestusAssetSubsystem",
+      "functions": [
+        {
+          "name": "CreateMaterial",
+          "params": [
+            {"name": "Desc", "type": "FHephaestusMaterialDesc"}
+          ],
+          "returns": "UMaterial*",
+          "description": "Create material from description"
+        },
+        {
+          "name": "ImportAsset",
+          "params": [
+            {"name": "FilePath", "type": "FString"},
+            {"name": "DestinationPath", "type": "FString"},
+            {"name": "Options", "type": "FHephaestusImportOptions"}
+          ],
+          "returns": "UObject*",
+          "description": "Import asset from file"
+        },
+        {
+          "name": "ReimportAsset",
+          "params": [
+            {"name": "Asset", "type": "UObject*"}
+          ],
+          "returns": "bool",
+          "description": "Reimport existing asset"
+        },
+        {
+          "name": "ExportAsset",
+          "params": [
+            {"name": "Asset", "type": "UObject*"},
+            {"name": "FilePath", "type": "FString"},
+            {"name": "ExportOptions", "type": "FString"}
+          ],
+          "returns": "bool",
+          "description": "Export asset to file"
+        },
+        {
+          "name": "CreateMaterialInstance",
+          "params": [
+            {"name": "ParentMaterial", "type": "UMaterial*"},
+            {"name": "Parameters", "type": "TMap<FString, FString>"}
+          ],
+          "returns": "UMaterialInstanceDynamic*",
+          "description": "Create dynamic material instance"
+        }
+      ],
+      "properties": []
+    },
+    {
+      "name": "HephaestusBlueprints",
+      "class": "UHephaestusBlueprintSubsystem",
+      "functions": [
+        {
+          "name": "CompileBlueprint",
+          "params": [
+            {"name": "Blueprint", "type": "UBlueprint*"}
+          ],
+          "returns": "bool",
+          "description": "Compile a blueprint"
+        },
+        {
+          "name": "AddFunctionToBlueprint",
+          "params": [
+            {"name": "Blueprint", "type": "UBlueprint*"},
+            {"name": "FunctionDesc", "type": "FHephaestusFunctionDesc"}
+          ],
+          "returns": "bool",
+          "description": "Add function to blueprint"
+        },
+        {
+          "name": "SetBlueprintProperty",
+          "params": [
+            {"name": "Blueprint", "type": "UBlueprint*"},
+            {"name": "PropertyName", "type": "FString"},
+            {"name": "Value", "type": "FString"}
+          ],
+          "returns": "bool",
+          "description": "Set blueprint property value"
+        },
+        {
+          "name": "DiffBlueprints",
+          "params": [
+            {"name": "BlueprintA", "type": "UBlueprint*"},
+            {"name": "BlueprintB", "type": "UBlueprint*"}
+          ],
+          "returns": "FHephaestusDiffResult",
+          "description": "Diff two blueprints"
+        }
+      ],
+      "properties": []
+    },
+    {
+      "name": "HephaestusRendering",
+      "class": "UHephaestusRenderingSubsystem",
+      "functions": [
+        {
+          "name": "AddRenderGraphPass",
+          "params": [
+            {"name": "PassDesc", "type": "FHephaestusRenderPassDesc"}
+          ],
+          "returns": "bool",
+          "description": "Add custom render graph pass"
+        },
+        {
+          "name": "CreateShaderParameterStruct",
+          "params": [
+            {"name": "StructName", "type": "FString"},
+            {"name": "Parameters", "type": "TMap<FString, FString>"}
+          ],
+          "returns": "FShaderParameterStruct*",
+          "description": "Create shader parameter struct"
+        },
+        {
+          "name": "ExecuteComputeShader",
+          "params": [
+            {"name": "ShaderPath", "type": "FString"},
+            {"name": "DispatchSize", "type": "FIntVector"},
+            {"name": "Parameters", "type": "TMap<FString, FString>"}
+          ],
+          "returns": "bool",
+          "description": "Execute compute shader dispatch"
+        }
+      ],
+      "properties": []
+    },
+    {
+      "name": "HephaestusPCG",
+      "class": "UHephaestusPCGSubsystem",
+      "functions": [
+        {
+          "name": "MutatePCGGraph",
+          "params": [
+            {"name": "Graph", "type": "UPCGGraph*"},
+            {"name": "Mutations", "type": "TArray<FHephaestusPCGMutation>"}
+          ],
+          "returns": "bool",
+          "description": "Mutate PCG graph structure"
+        },
+        {
+          "name": "SetMetadataParams",
+          "params": [
+            {"name": "Component", "type": "UPCGComponent*"},
+            {"name": "Params", "type": "TMap<FString, FString>"}
+          ],
+          "returns": "void",
+          "description": "Set metadata parameters on PCG component"
+        },
+        {
+          "name": "QuerySpatialData",
+          "params": [
+            {"name": "Query", "type": "FHephaestusPCGSpatialQuery"}
+          ],
+          "returns": "FHephaestusPCGSpatialDataResult",
+          "description": "Query spatial data from PCG"
+        }
+      ],
+      "properties": []
+    },
+    {
+      "name": "HephaestusAnimation",
+      "class": "UHephaestusAnimationSubsystem",
+      "functions": [
+        {
+          "name": "CreateControlRig",
+          "params": [
+            {"name": "SkeletalMesh", "type": "USkeletalMesh*"},
+            {"name": "RigDesc", "type": "FHephaestusControlRigDesc"}
+          ],
+          "returns": "UControlRig*",
+          "description": "Create Control Rig for skeletal mesh"
+        },
+        {
+          "name": "RetargetAnimation",
+          "params": [
+            {"name": "Source", "type": "UAnimSequence*"},
+            {"name": "Target", "type": "USkeletalMesh*"},
+            {"name": "IKRig", "type": "UControlRig*"}
+          ],
+          "returns": "UAnimSequence*",
+          "description": "Retarget animation to different skeleton"
+        },
+        {
+          "name": "EditSequence",
+          "params": [
+            {"name": "Sequence", "type": "UAnimSequence*"},
+            {"name": "Edits", "type": "TMap<FString, FString>"}
+          ],
+          "returns": "bool",
+          "description": "Edit animation sequence"
+        },
+        {
+          "name": "LiveLinkConnect",
+          "params": [
+            {"name": "SubjectName", "type": "FString"},
+            {"name": "Config", "type": "FString"}
+          ],
+          "returns": "bool",
+          "description": "Connect to LiveLink subject"
+        }
+      ],
+      "properties": []
+    },
+    {
+      "name": "HephaestusAudio",
+      "class": "UHephaestusAudioSubsystem",
+      "functions": [
+        {
+          "name": "CreateMetaSound",
+          "params": [
+            {"name": "PatchDesc", "type": "FHephaestusMetaSoundDesc"}
+          ],
+          "returns": "UMetaSoundSource*",
+          "description": "Create MetaSound source from patch description"
+        },
+        {
+          "name": "PlayQuartzClock",
+          "params": [
+            {"name": "ClockHandle", "type": "FString"},
+            {"name": "Timeline", "type": "FString"}
+          ],
+          "returns": "void",
+          "description": "Play Quartz clock"
+        },
+        {
+          "name": "SynthesizeAudio",
+          "params": [
+            {"name": "SynthDesc", "type": "FString"}
+          ],
+          "returns": "USoundWave*",
+          "description": "Synthesize audio procedurally"
+        }
+      ],
+      "properties": []
+    }
+  ],
+  "python_modules": [
+    {
+      "name": "hephaestus.pcg",
+      "functions": [
+        "generate_landscape",
+        "scatter_foliage",
+        "create_biome_graph",
+        "mutate_metadata",
+        "export_pcg_assets"
+      ],
+      "description": "PCG landscape generation, foliage scattering, biome graphs"
+    },
+    {
+      "name": "hephaestus.niagara",
+      "functions": [
+        "create_emitter",
+        "create_system",
+        "bind_parameters",
+        "compile_shader",
+        "profile_gpu"
+      ],
+      "description": "Niagara VFX emitter/system creation and profiling"
+    },
+    {
+      "name": "hephaestus.usd",
+      "functions": [
+        "export_stage",
+        "import_stage",
+        "create_variant_set",
+        "author_material",
+        "flatten_composition"
+      ],
+      "description": "USD import/export, variant sets, material authoring"
+    },
+    {
+      "name": "hephaestus.blender_ipc",
+      "functions": [
+        "exec_script",
+        "exec_expr",
+        "retopologize",
+        "uv_pack",
+        "bake_maps",
+        "rigify_character",
+        "export_fbx",
+        "geometry_nodes_eval"
+      ],
+      "description": "Blender Python script execution and DCC operations"
+    },
+    {
+      "name": "hephaestus.dcc_bridge",
+      "functions": [
+        "cc5_export_character",
+        "cc5_conform_cloth",
+        "cc5_accu_rig",
+        "cc5_facial_profile",
+        "cc5_retarget_motion",
+        "cc5_livelink_facial",
+        "meshy_generate",
+        "meshy_texture",
+        "meshy_import_to_ue"
+      ],
+      "description": "Character Creator 5 and Meshy API integration"
+    }
+  ],
+  "external_tools": [
+    {
+      "name": "blender",
+      "command": "blender",
+      "args": ["--background", "--python-expr"],
+      "timeout_seconds": 300,
+      "description": "Blender background Python execution"
+    },
+    {
+      "name": "cc5",
+      "command": "rlpython",
+      "args": [],
+      "timeout_seconds": 120,
+      "description": "Character Creator 5 Python automation"
+    },
+    {
+      "name": "meshy",
+      "type": "rest",
+      "base_url": "https://api.meshy.ai/v1",
+      "auth_header": "Authorization",
+      "timeout_seconds": 60,
+      "description": "Meshy 3D generation REST API"
+    }
+  ]
+}

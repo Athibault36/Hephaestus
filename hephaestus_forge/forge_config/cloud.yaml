@@ -1,0 +1,109 @@
+# HephaestusForge Cloud Configuration
+# Hard-capped at $25 (Brev credits)
+
+cloud:
+  budget:
+    monthly_limit_usd: 25
+    per_session_limit_usd: 25
+    hard_ceiling_usd: 25
+    alert_threshold_pct: 80
+    auto_stop_at_limit: true
+    stop_at_budget_fraction: 0.92   # Watchdog stops at 92% of reserve
+    currency: "USD"
+
+  providers:
+    - name: "brev"
+      priority: 1
+      enabled: true
+      config:
+        # NVIDIA Brev CLI — https://docs.nvidia.com/brev/getting-started/quickstart
+        # Install CLI, then: brev login
+        gpu_name: "L40S"
+        # Matches console: gpu-l40s-a.1gpu-32vcpu-128gb (256GB storage)
+        instance_type: "gpu-l40s-a.1gpu-32vcpu-128gb"
+        # Conservative default; override if Brev shows a different $/hr at create time
+        default_hourly_rate: 1.50
+        storage_gb: 256
+        sort_by_price: true
+        instance_types:
+          l40s:
+            hourly_rate: 1.50
+            gpu_count: 1
+            gpu_memory_gb: 48
+            vcpu: 32
+            ram_gb: 128
+            storage_gb: 256
+          l40s-cheap:
+            hourly_rate: 1.06
+            gpu_count: 1
+            gpu_memory_gb: 48
+          gh200:
+            # Expensive — still clamped by $15 ceiling (~1h)
+            hourly_rate: 8.00
+            gpu_count: 1
+            gpu_memory_gb: 96
+
+    - name: "nim"
+      priority: 2
+      enabled: true
+      config:
+        api_key_env: "NVIDIA_API_KEY"
+        base_url: "https://integrate.api.nvidia.com/v1"
+        models:
+          - "nvidia/nemotron-3-ultra"
+          - "nvidia/nemotron-3-8b"
+          - "nvidia/nv-embed-qa"
+        pricing:
+          nemotron-3-ultra:
+            input: 0.15
+            output: 0.60
+          nemotron-3-8b:
+            input: 0.03
+            output: 0.12
+          nv-embed-qa:
+            input: 0.01
+            output: 0.0
+
+    - name: "bitdeer"
+      priority: 3
+      enabled: false   # Off by default — prefer Brev under $15 credits
+      config:
+        api_key_env: "BITDEER_API_KEY"
+        base_url: "https://api.bitdeer.com/v1"
+        instance_types:
+          h100-80gb:
+            hourly_rate: 2.89
+            spot_rate: 1.89
+            gpu_count: 1
+            gpu_memory_gb: 80
+
+    - name: "runpod"
+      priority: 4
+      enabled: false
+      config:
+        api_key_env: "RUNPOD_API_KEY"
+        base_url: "https://api.runpod.io/graphql"
+        instance_types:
+          h100-80gb:
+            hourly_rate: 2.69
+            spot_rate: 1.89
+
+  routing:
+    rules:
+      - condition: "task.complexity > 0.5"
+        target: "brev:l40s"
+        max_cost_per_hour: 3.00
+      - condition: "task.type == 'embedding' || task.type == 'fast_edit'"
+        target: "nim:nemotron-3-8b"
+        max_cost_per_hour: 0.10
+      - condition: "always"
+        target: "local"
+        max_cost_per_hour: 0.00
+
+  session:
+    idle_timeout_minutes: 15
+    max_duration_hours: 10      # Soft max; budget watchdog is authoritative
+    checkpoint_interval_minutes: 30
+    persist_volumes: true
+    # Always stop Brev instances on exit / budget hit
+    force_stop_on_exit: true
