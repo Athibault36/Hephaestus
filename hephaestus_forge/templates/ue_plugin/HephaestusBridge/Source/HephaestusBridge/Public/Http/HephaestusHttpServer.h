@@ -49,7 +49,18 @@ public:
     /** Default port, overridable via the HEPHAESTUS_UE_PORT environment variable. */
     static uint32 ResolvePort();
 
+    /** Shared token from HEPHAESTUS_BRIDGE_TOKEN (empty = auth disabled unless forced). */
+    static FString ResolveAuthToken();
+
+    /** True when HEPHAESTUS_REQUIRE_AUTH=1 or a bridge token is configured. */
+    static bool ShouldRequireAuth();
+
 private:
+    /** Return false after sending 401/503 when auth fails. */
+    bool AuthorizeMutation(const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete) const;
+
+    static FString HeaderValue(const FHttpServerRequest& Request, const FString& HeaderName);
+
     bool HandleCommand(const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete);
     bool HandleBatch(const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete);
     bool HandleHealth(const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete);

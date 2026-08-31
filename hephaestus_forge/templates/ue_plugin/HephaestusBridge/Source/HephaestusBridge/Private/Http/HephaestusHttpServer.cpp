@@ -38,6 +38,73 @@ uint32 UHephaestusHttpServer::ResolvePort()
     return 8099;
 }
 
+FString UHephaestusHttpServer::ResolveAuthToken()
+{
+    return FPlatformMisc::GetEnvironmentVariable(TEXT("HEPHAESTUS_BRIDGE_TOKEN"));
+}
+
+bool UHephaestusHttpServer::ShouldRequireAuth()
+{
+    const FString Flag = FPlatformMisc::GetEnvironmentVariable(TEXT("HEPHAESTUS_REQUIRE_AUTH"));
+    if (Flag.Equals(TEXT("1"), ESearchCase::IgnoreCase) ||
+        Flag.Equals(TEXT("true"), ESearchCase::IgnoreCase))
+    {
+        return true;
+    }
+    return !ResolveAuthToken().IsEmpty();
+}
+
+FString UHephaestusHttpServer::HeaderValue(const FHttpServerRequest& Request, const FString& HeaderName)
+{
+    if (const TArray<FString>* Values = Request.Headers.Find(HeaderName))
+    {
+        if (Values->Num() > 0)
+        {
+            return (*Values)[0];
+        }
+    }
+    return FString();
+}
+
+bool UHephaestusHttpServer::AuthorizeMutation(
+    const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete) const
+{
+    if (!ShouldRequireAuth())
+    {
+        return true;
+    }
+
+    const FString Expected = ResolveAuthToken();
+    if (Expected.IsEmpty())
+    {
+        RespondJson(OnComplete,
+            TEXT("{\"success\":false,\"error_message\":\"auth required but HEPHAESTUS_BRIDGE_TOKEN unset\"}"),
+            503);
+        return false;
+    }
+
+    FString Provided = HeaderValue(Request, TEXT("X-Hephaestus-Token"));
+    if (Provided.IsEmpty())
+    {
+        Provided = HeaderValue(Request, TEXT("x-hephaestus-token"));
+    }
+
+    if (Provided != Expected)
+    {
+        RespondJson(OnComplete, TEXT("{\"success\":false,\"error_message\":\"unauthorized\"}"), 401);
+        return false;
+    }
+
+    // Reject oversized mutation payloads (1 MiB) before parsing JSON.
+    if (Request.Body.Num() > 1024 * 1024)
+    {
+        RespondJson(OnComplete, TEXT("{\"success\":false,\"error_message\":\"payload too large\"}"), 413);
+        return false;
+    }
+
+    return true;
+}
+
 void UHephaestusHttpServer::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
@@ -185,6 +252,11 @@ bool UHephaestusHttpServer::HandleCommands(const FHttpServerRequest& Request, co
 
 bool UHephaestusHttpServer::HandleCommand(const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete)
 {
+    if (!AuthorizeMutation(Request, OnComplete))
+    {
+        return true;
+    }
+
     UHephaestusCommandHandler* Handler = GetCommandHandler();
     if (!Handler)
     {
@@ -201,6 +273,11 @@ bool UHephaestusHttpServer::HandleCommand(const FHttpServerRequest& Request, con
 
 bool UHephaestusHttpServer::HandleFrame(const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete)
 {
+    if (!AuthorizeMutation(Request, OnComplete))
+    {
+        return true;
+    }
+
     UHephaestusVisionSubsystem* Vision = GetGameInstance()
         ? GetGameInstance()->GetSubsystem<UHephaestusVisionSubsystem>()
         : nullptr;
@@ -247,6 +324,11 @@ bool UHephaestusHttpServer::HandleFrame(const FHttpServerRequest& Request, const
 
 bool UHephaestusHttpServer::HandleBatch(const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete)
 {
+    if (!AuthorizeMutation(Request, OnComplete))
+    {
+        return true;
+    }
+
     UHephaestusCommandHandler* Handler = GetCommandHandler();
     if (!Handler)
     {

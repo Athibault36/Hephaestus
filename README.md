@@ -29,6 +29,7 @@ hephaestus_forge agent --goal "Spawn a cube at the origin" --stream
 ```
 
 See [docs/USER_GUIDE.md](docs/USER_GUIDE.md) for the full clone → attach → compile → agent walkthrough.
+See [docs/COMMAND_API.md](docs/COMMAND_API.md) for the HTTP bridge and tool reference.
 
 ## Architecture
 

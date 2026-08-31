@@ -1304,6 +1304,8 @@ def deploy(
     Starts llama-server, TTS server, vision stack, DCC bridge,
     then launches UE Editor or headless instance with -HephaestusAgent flag.
     """
+    from hephaestus_forge.runtime.deploy_helpers import bridge_env_from_config, wait_for_url
+
     project_root = project_path or Path.cwd()
     forge_dir = project_root / ".hephaestus_forge"
     
@@ -1346,7 +1348,17 @@ def deploy(
     
     if not no_agent:
         runtime_dir = project_root / config.paths.agent_runtime_dir
-        
+        cfg_dict = _load_project_config(project_root)
+        inference = (cfg_dict.get("models") or {}).get("inference") or {}
+        llama_host = inference.get("host", "127.0.0.1")
+
+        def _wait_service(name: str, url: str, timeout: float = 45.0) -> None:
+            console.print(f"[dim]Waiting for {name} at {url}...[/dim]")
+            if wait_for_url(url, timeout=timeout):
+                console.print(f"[green]✓ {name} ready[/green]")
+            else:
+                console.print(f"[yellow]⚠ {name} not ready after {timeout:.0f}s (continuing)[/yellow]")
+
         # Start LLM backend (local or NIM)
         if use_nim:
             # Initialize NIM client with budget tracking
@@ -1359,6 +1371,8 @@ def deploy(
                 proc = _start_llama_server(runtime_dir, llama_config)
                 if proc:
                     processes.append(("llama-server", proc))
+                    llama_port = int(llama_config.get("port", 8080))
+                    _wait_service("llama-server", f"http://{llama_host}:{llama_port}/v1/models", timeout=90.0)
         
         tts_config = config.agent_runtime.get("tts_server", {})
         if tts_config.get("enabled", True):
@@ -1373,6 +1387,8 @@ def deploy(
                 )
                 if proc:
                     processes.append(("tts-server", proc))
+                    tts_port = int(tts_config.get("port", 8082))
+                    _wait_service("tts-server", f"http://{llama_host}:{tts_port}/health")
             else:
                 console.print(f"[yellow]⚠ TTS server not found in {tts_dir}[/yellow]")
         
@@ -1389,6 +1405,8 @@ def deploy(
                 )
                 if proc:
                     processes.append(("vision-stack", proc))
+                    vision_port = int(vision_config.get("port", 8083))
+                    _wait_service("vision-stack", f"http://{llama_host}:{vision_port}/health")
             else:
                 console.print(f"[yellow]⚠ vision_processor.py not found in {vision_dir}[/yellow]")
         
@@ -1404,6 +1422,7 @@ def deploy(
                 proc = subprocess.Popen(cmd, cwd=str(dcc_dir), env=env)
                 processes.append(("dcc-bridge", proc))
                 console.print(f"[green]✓ dcc-bridge started on {env['DCC_BRIDGE_HOST']}:{env['DCC_BRIDGE_PORT']}[/green]")
+                _wait_service("dcc-bridge", f"http://{env['DCC_BRIDGE_HOST']}:{env['DCC_BRIDGE_PORT']}/health")
             else:
                 console.print(f"[yellow]⚠ DCC bridge not found in {dcc_dir}[/yellow]")
     
@@ -1433,9 +1452,13 @@ def deploy(
     ue_cmd.append("-HephaestusAgent")
     
     console.print(f"[dim]Launching UE: {' '.join(ue_cmd)}[/dim]")
+
+    ue_env = os.environ.copy()
+    if not no_agent:
+        ue_env.update(bridge_env_from_config(_load_project_config(project_root)))
     
     try:
-        ue_proc = subprocess.Popen(ue_cmd, cwd=str(project_root))
+        ue_proc = subprocess.Popen(ue_cmd, cwd=str(project_root), env=ue_env)
         processes.append(("UnrealEditor", ue_proc))
         
         console.print("[green]✓ UE launched successfully[/green]")
@@ -1447,15 +1470,9 @@ def deploy(
     except KeyboardInterrupt:
         console.print("\n[yellow]Shutting down...[/yellow]")
     finally:
-        # Cleanup processes
-        for name, proc in processes:
-            if proc.poll() is None:
-                console.print(f"[dim]Stopping {name}...[/dim]")
-                proc.terminate()
-                try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
+        from hephaestus_forge.runtime.deploy_helpers import shutdown_processes
+
+        shutdown_processes(processes, log=lambda msg: console.print(f"[dim]{msg}[/dim]"))
         
         # Close NIM client if used
         if nim_client:
