@@ -1,15 +1,23 @@
 // Copyright (c) 2024 HephaestusForge. All Rights Reserved.
 
 using UnrealBuildTool;
+using System;
 using System.Collections.Generic;
 
 public class HephaestusBridge : ModuleRules
 {
+    // Default is a first-compile-friendly set. Set HEPHAESTUS_FULL_BUILD=1 to also
+    // require PixelStreaming / WebRTC / OpenCV / ThirdParty LLM stacks.
+    private static bool WantFullOptionalStack()
+    {
+        string Flag = Environment.GetEnvironmentVariable("HEPHAESTUS_FULL_BUILD");
+        return Flag == "1" || string.Equals(Flag, "true", StringComparison.OrdinalIgnoreCase);
+    }
+
     public HephaestusBridge(ReadOnlyTargetRules Target) : base(Target)
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-        // --- Public Include Paths ---
         PublicIncludePaths.AddRange(
             new string[] {
                 ModuleDirectory,
@@ -27,7 +35,6 @@ public class HephaestusBridge : ModuleRules
             }
         );
 
-        // --- Private Include Paths ---
         PrivateIncludePaths.AddRange(
             new string[] {
                 ModuleDirectory + "/Private",
@@ -44,7 +51,7 @@ public class HephaestusBridge : ModuleRules
             }
         );
 
-        // --- Core UE Dependencies ---
+        // Core + HTTP bridge (required for M1 health/command/frame)
         PublicDependencyModuleNames.AddRange(
             new string[] {
                 "Core",
@@ -67,45 +74,41 @@ public class HephaestusBridge : ModuleRules
                 "PCG",
                 "Niagara",
                 "NiagaraCore",
-                "NiagaraShader",
-                "MetaSoundEngine",
-                "QuartzCore",
-                "Synthesis",
-                "AudioMixer",
                 "AssetRegistry",
-                "AssetTools",
-                "UnrealEd",
-                "BlueprintGraph",
-                "KismetCompiler",
-                "GraphEditor",
-                "PropertyEditor",
-                "ContentBrowser",
-                "EditorStyle",
-                "ToolMenus",
-                "WorkspaceMenuStructure",
-                "DeveloperSettings",
                 "Json",
                 "JsonUtilities",
                 "HTTP",
                 "HTTPServer",
                 "Sockets",
                 "Networking",
-                "PacketHandler",
-                "NetCore",
-                "OnlineSubsystem",
-                "OnlineSubsystemUtils",
-                "PythonScriptPlugin",
                 "ImageWrapper",
                 "ImageWriteQueue",
                 "MediaAssets",
                 "MediaUtils",
-                "PixelStreaming",
-                "WebRTC",
-                "OpenCV",
+                "DeveloperSettings",
+                "AudioMixer",
             }
         );
 
-        // --- Private Dependencies ---
+        // Editor-only modules — never link into a cooked game target.
+        if (Target.bBuildEditor)
+        {
+            PublicDependencyModuleNames.AddRange(
+                new string[] {
+                    "UnrealEd",
+                    "AssetTools",
+                    "BlueprintGraph",
+                    "KismetCompiler",
+                    "GraphEditor",
+                    "PropertyEditor",
+                    "ContentBrowser",
+                    "EditorStyle",
+                    "ToolMenus",
+                    "WorkspaceMenuStructure",
+                }
+            );
+        }
+
         PrivateDependencyModuleNames.AddRange(
             new string[] {
                 "ApplicationCore",
@@ -113,44 +116,47 @@ public class HephaestusBridge : ModuleRules
                 "LevelSequence",
                 "MovieScene",
                 "MovieSceneTracks",
-                "Sequencer",
-                "GeometryCollectionEngine",
-                "GeometryCollectionSimulationCore",
-                "Chaos",
-                "ChaosSolverEngine",
-                "ChaosNiagara",
-                "FieldSystemEngine",
                 "RenderGraph",
-                "RDG",
                 "GlobalShader",
-                "ShaderCore",
-                "PipelineStateCache",
                 "StaticMeshDescription",
                 "MeshDescription",
-                "MeshUtilities",
-                "MeshReductionInterface",
-                "SkeletalMeshReduction",
                 "Landscape",
                 "Foliage",
-                "InstancedFoliage",
-                "ProceduralMeshComponent",
-                "CustomMeshComponent",
             }
         );
 
-        // --- ThirdParty: llama.cpp / TensorRT-LLM ---
+        // Optional heavy plugins — off unless HEPHAESTUS_FULL_BUILD=1
+        if (WantFullOptionalStack())
+        {
+            PublicDependencyModuleNames.AddRange(new string[] { "PixelStreaming", "WebRTC", "OpenCV" });
+            PublicDefinitions.Add("HEPHAESTUS_WITH_PIXEL_STREAMING=1");
+        }
+        else
+        {
+            PublicDefinitions.Add("HEPHAESTUS_WITH_PIXEL_STREAMING=0");
+        }
+
+        // MetaSound / Quartz are useful but often missing; keep soft for first compile.
+        if (WantFullOptionalStack())
+        {
+            PublicDependencyModuleNames.AddRange(new string[] { "MetaSoundEngine", "QuartzCore", "Synthesis" });
+            PublicDefinitions.Add("HEPHAESTUS_WITH_METASOUND=1");
+        }
+        else
+        {
+            PublicDefinitions.Add("HEPHAESTUS_WITH_METASOUND=0");
+        }
+
+        // Third-party: only enable when the ThirdParty tree exists (never force =1).
+        PublicDefinitions.Add("WITH_TRT_LLM=0");
+        PublicDefinitions.Add("WITH_LLAMA_CPP=0");
+        PublicDefinitions.Add("WITH_GRPC=0");
+        PublicDefinitions.Add("WITH_OPENCV=0");
+        PublicDefinitions.Add("WITH_LLM_INFERENCE=0");
         SetupLLMInference(Target);
-
-        // --- ThirdParty: WebRTC (already in UE via PixelStreaming) ---
-        // WebRTC is included via PixelStreaming module dependency
-
-        // --- ThirdParty: OpenCV ---
         SetupOpenCV(Target);
-
-        // --- ThirdParty: gRPC / Protobuf ---
         SetupGRPC(Target);
 
-        // --- Platform Specific ---
         if (Target.Platform == UnrealTargetPlatform.Win64)
         {
             PublicSystemLibraries.AddRange(new string[] { "ws2_32", "winmm", "bcrypt", "crypt32" });
@@ -164,25 +170,11 @@ public class HephaestusBridge : ModuleRules
             PublicFrameworks.AddRange(new string[] { "Cocoa", "IOKit", "CoreVideo", "CoreAudio", "AudioToolbox" });
         }
 
-        // --- Build Configuration ---
         bUseUnityBuild = true;
         bUsePCHFiles = true;
         MinFilesUsingUnityBuild = 4;
-
-        // C++20 for modern features
         CppStandard = CppStandardVersion.Cpp20;
 
-        // Optimization
-        if (Target.Configuration == UnrealTargetConfiguration.Shipping || Target.Configuration == UnrealTargetConfiguration.Test)
-        {
-            bCompileWithOptimization = true;
-            bUseFastMalloc = true;
-        }
-
-        // Enable modules for hot reload
-        bAllowHotReload = true;
-
-        // --- Definitions ---
         PublicDefinitions.AddRange(
             new string[] {
                 "HEPHAESTUS_BRIDGE_API=DLLEXPORT",
@@ -195,11 +187,6 @@ public class HephaestusBridge : ModuleRules
                 "WITH_HEPHAESTUS_PCG=1",
                 "WITH_HEPHAESTUS_ANIMATION=1",
                 "WITH_HEPHAESTUS_AUDIO=1",
-                "WITH_LLM_INFERENCE=1",
-                "WITH_TRT_LLM=1",
-                "WITH_LLAMA_CPP=1",
-                "WITH_GRPC=1",
-                "WITH_OPENCV=1",
             }
         );
     }
@@ -208,122 +195,86 @@ public class HephaestusBridge : ModuleRules
     {
         string ThirdPartyPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(ModuleDirectory, "../../ThirdParty"));
 
-        // TensorRT-LLM
         string TRTPath = System.IO.Path.Combine(ThirdPartyPath, "TensorRT-LLM");
         if (System.IO.Directory.Exists(TRTPath))
         {
             PublicIncludePaths.Add(System.IO.Path.Combine(TRTPath, "include"));
             PublicLibraryPaths.Add(System.IO.Path.Combine(TRTPath, "lib", Target.Platform.ToString()));
-
             if (Target.Platform == UnrealTargetPlatform.Win64)
             {
                 PublicAdditionalLibraries.Add("tensorrt_llm.lib");
                 PublicAdditionalLibraries.Add("nvinfer.lib");
-                PublicAdditionalLibraries.Add("nvonnxparser.lib");
-                PublicDefinitions.Add("WITH_TRT_LLM=1");
             }
-            else if (Target.Platform == UnrealTargetPlatform.Linux)
+            else
             {
                 PublicAdditionalLibraries.Add("tensorrt_llm");
                 PublicAdditionalLibraries.Add("nvinfer");
-                PublicAdditionalLibraries.Add("nvonnxparser");
-                PublicDefinitions.Add("WITH_TRT_LLM=1");
             }
-
-            // CUDA Runtime
-            string CudaPath = System.Environment.GetEnvironmentVariable("CUDA_PATH") ?? "/usr/local/cuda";
-            PublicIncludePaths.Add(System.IO.Path.Combine(CudaPath, "include"));
-            PublicLibraryPaths.Add(System.IO.Path.Combine(CudaPath, "lib64"));
-            PublicAdditionalLibraries.AddRange(new string[] { "cudart", "cublas", "curand" });
+            PublicDefinitions.Add("WITH_TRT_LLM=1");
+            PublicDefinitions.Add("WITH_LLM_INFERENCE=1");
         }
 
-        // llama.cpp (fallback / CPU offload)
         string LlamaPath = System.IO.Path.Combine(ThirdPartyPath, "llama.cpp");
         if (System.IO.Directory.Exists(LlamaPath))
         {
             PublicIncludePaths.Add(System.IO.Path.Combine(LlamaPath, "include"));
             PublicLibraryPaths.Add(System.IO.Path.Combine(LlamaPath, "build", Target.Platform.ToString()));
-
             if (Target.Platform == UnrealTargetPlatform.Win64)
             {
                 PublicAdditionalLibraries.Add("llama.lib");
                 PublicAdditionalLibraries.Add("ggml.lib");
-                PublicAdditionalLibraries.Add("ggml-base.lib");
-                PublicAdditionalLibraries.Add("ggml-cpu.lib");
-                PublicAdditionalLibraries.Add("ggml-cuda.lib");
-                PublicAdditionalLibraries.Add("ggml-metal.lib");
             }
             else
             {
                 PublicAdditionalLibraries.Add("llama");
                 PublicAdditionalLibraries.Add("ggml");
-                PublicAdditionalLibraries.Add("ggml-base");
-                PublicAdditionalLibraries.Add("ggml-cpu");
             }
             PublicDefinitions.Add("WITH_LLAMA_CPP=1");
+            PublicDefinitions.Add("WITH_LLM_INFERENCE=1");
         }
     }
 
     private void SetupOpenCV(ReadOnlyTargetRules Target)
     {
+        if (!WantFullOptionalStack())
+        {
+            return;
+        }
+
         string ThirdPartyPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(ModuleDirectory, "../../ThirdParty"));
         string OpenCVPath = System.IO.Path.Combine(ThirdPartyPath, "opencv");
-
-        if (System.IO.Directory.Exists(OpenCVPath))
+        if (!System.IO.Directory.Exists(OpenCVPath))
         {
-            PublicIncludePaths.Add(System.IO.Path.Combine(OpenCVPath, "include"));
-            PublicLibraryPaths.Add(System.IO.Path.Combine(OpenCVPath, "lib", Target.Platform.ToString()));
-
-            string[] opencvLibs = {
-                "opencv_world4100",  // Single unified lib (adjust version as needed)
-                // Or individual modules:
-                // "opencv_core4100", "opencv_imgproc4100", "opencv_imgcodecs4100",
-                // "opencv_videoio4100", "opencv_cudaarithm4100", "opencv_cudawarping4100",
-            };
-
-            foreach (string lib in opencvLibs)
-            {
-                if (Target.Platform == UnrealTargetPlatform.Win64)
-                    PublicAdditionalLibraries.Add(lib + ".lib");
-                else
-                    PublicAdditionalLibraries.Add(lib);
-            }
-            PublicDefinitions.Add("WITH_OPENCV=1");
+            return;
         }
+
+        PublicIncludePaths.Add(System.IO.Path.Combine(OpenCVPath, "include"));
+        PublicLibraryPaths.Add(System.IO.Path.Combine(OpenCVPath, "lib", Target.Platform.ToString()));
+        if (Target.Platform == UnrealTargetPlatform.Win64)
+            PublicAdditionalLibraries.Add("opencv_world4100.lib");
         else
-        {
-            // Try system OpenCV (Linux/macOS)
-            if (Target.Platform != UnrealTargetPlatform.Win64)
-            {
-                PublicAdditionalLibraries.AddRange(new string[] {
-                    "opencv_core", "opencv_imgproc", "opencv_imgcodecs",
-                    "opencv_videoio", "opencv_cudaarithm", "opencv_cudawarping"
-                });
-                PublicDefinitions.Add("WITH_OPENCV=1");
-            }
-        }
+            PublicAdditionalLibraries.Add("opencv_world4100");
+        PublicDefinitions.Add("WITH_OPENCV=1");
     }
 
     private void SetupGRPC(ReadOnlyTargetRules Target)
     {
         string ThirdPartyPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(ModuleDirectory, "../../ThirdParty"));
         string GRPCPath = System.IO.Path.Combine(ThirdPartyPath, "grpc");
-
-        if (System.IO.Directory.Exists(GRPCPath))
+        if (!System.IO.Directory.Exists(GRPCPath))
         {
-            PublicIncludePaths.Add(System.IO.Path.Combine(GRPCPath, "include"));
-            PublicLibraryPaths.Add(System.IO.Path.Combine(GRPCPath, "lib", Target.Platform.ToString()));
-
-            string[] grpcLibs = { "grpc", "grpcpp", "grpc++_reflection", "grpc++_unsecure", "upb", "protobuf", "absl_*" };
-
-            foreach (string lib in grpcLibs)
-            {
-                if (Target.Platform == UnrealTargetPlatform.Win64)
-                    PublicAdditionalLibraries.Add(lib + ".lib");
-                else
-                    PublicAdditionalLibraries.Add(lib);
-            }
-            PublicDefinitions.Add("WITH_GRPC=1");
+            return;
         }
+
+        PublicIncludePaths.Add(System.IO.Path.Combine(GRPCPath, "include"));
+        PublicLibraryPaths.Add(System.IO.Path.Combine(GRPCPath, "lib", Target.Platform.ToString()));
+        foreach (string lib in new string[] { "grpc", "grpcpp", "protobuf" })
+        {
+            if (Target.Platform == UnrealTargetPlatform.Win64)
+                PublicAdditionalLibraries.Add(lib + ".lib");
+            else
+                PublicAdditionalLibraries.Add(lib);
+        }
+        PublicDefinitions.Add("WITH_GRPC=1");
     }
 }

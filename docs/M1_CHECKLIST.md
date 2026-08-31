@@ -10,6 +10,19 @@ Use this on the **first** Windows compile attempt. Check each box before moving 
 - [ ] Plugin under `<Project>/Plugins/HephaestusBridge` (or run `forge compile` which auto-copies)
 - [ ] `HephaestusBridge` enabled in `.uproject` Plugins array
 - [ ] Python env: `pip install -e ".[dev]"` and `pytest -q` passes on your machine
+- [ ] Pull latest `cursor/agent-runtime-mvp-be50` (or merge PR #2) — Build.cs defaults are first-compile friendly
+
+## First-compile defaults (important)
+
+By default the plugin **does not** require PixelStreaming, WebRTC, OpenCV, MetaSound, or ThirdParty LLM libs.
+
+- Leave `HEPHAESTUS_FULL_BUILD` **unset** for the first successful compile.
+- Only set `HEPHAESTUS_FULL_BUILD=1` after M1 is green and you want streaming/OpenCV.
+
+```powershell
+# Optional: force full optional stack later
+# setx HEPHAESTUS_FULL_BUILD "1"
+```
 
 ## Dry run
 
@@ -26,7 +39,7 @@ hephaestus_forge compile C:\path\to\Project\Project.uproject
 ```
 
 - [ ] UnrealBuildTool exits 0
-- [ ] No missing module errors for HTTPServer, ImageWrapper, PixelStreaming (enable in .uplugin if needed)
+- [ ] If a **missing module** error appears (PCG, ControlRig, Niagara, …): enable that engine plugin, or note the first error and paste it into the PR
 
 ## Editor smoke test
 
@@ -38,7 +51,7 @@ hephaestus_forge compile C:\path\to\Project\Project.uproject
 curl http://127.0.0.1:8099/health
 ```
 
-- [ ] Returns `{"status":"ok","commands":27}` (or current tool count from `build_default_registry()`)
+- [ ] Returns `{"status":"ok","commands":27}` (or current tool count)
 
 ## Validation smoke test
 
@@ -46,17 +59,7 @@ curl http://127.0.0.1:8099/health
 curl -X POST http://127.0.0.1:8099/command -H "Content-Type: application/json" -d "{\"command\":\"world.spawn_actor\",\"params\":{\"class_path\":\"evil/path\"}}"
 ```
 
-- [ ] Returns `success: false` with class_path prefix denied (ValidateCommand wired in C++)
-
-## Observability (optional)
-
-When `observability.metrics.enabled: true` in config:
-
-```powershell
-curl http://127.0.0.1:9090/metrics
-```
-
-- [ ] Prometheus text exposition responds after `forge deploy --services-only` or `forge agent`
+- [ ] Returns `success: false` with class_path prefix denied (`ValidateCommand` wired)
 
 ## Agent smoke test
 
@@ -70,20 +73,27 @@ hephaestus_forge agent --goal "Spawn a StaticMeshActor and capture a frame" --st
 
 ## Auth (optional)
 
-Set in config or env:
-
 ```
 HEPHAESTUS_BRIDGE_TOKEN=your-secret
 HEPHAESTUS_REQUIRE_AUTH=1
 ```
 
-Restart editor; verify unauthenticated `POST /command` returns 401 and authenticated requests succeed.
+Restart editor; verify unauthenticated `POST /command` returns 401.
+
+## Observability (optional)
+
+When `observability.metrics.enabled: true`:
+
+```powershell
+curl http://127.0.0.1:9090/metrics
+```
 
 ## If compile fails
 
 1. Note the **first** linker or missing-module error (not the cascade).
-2. Check `HephaestusBridge.Build.cs` optional deps — gate behind `WITH_*` if a subsystem is unavailable.
-3. Compare engine plugin versions (PixelStreaming, WebRTC) with your UE 5.8 build.
-4. File the error + `forge compile --dry-run` output in the GitHub issue.
+2. Confirm `HEPHAESTUS_FULL_BUILD` is **not** set.
+3. Enable missing engine plugins (PCG / ControlRig / Niagara) in the Epic launcher / `.uproject`.
+4. Compare `HephaestusBridge.Build.cs` against the missing module name.
+5. Paste the first error + `forge compile --dry-run` output into the GitHub PR/issue.
 
 See also: [plugin_setup_windows.md](plugin_setup_windows.md), [COMMAND_API.md](COMMAND_API.md).

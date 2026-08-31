@@ -3,9 +3,7 @@
 #include "Animation/HephaestusAnimationSubsystem.h"
 #include "ControlRig.h"
 #include "Animation/AnimSequence.h"
-#include "SkeletalMesh.h"
-#include "Animation/Rig.h"
-#include "Animation/IKRetargeter.h"
+#include "Engine/SkeletalMesh.h"
 #include "LiveLinkInterface.h"
 
 #define LOCTEXT_NAMESPACE "HephaestusAnimation"
@@ -78,10 +76,10 @@ bool UHephaestusAnimationSubsystem::EditSequence(UAnimSequence* Sequence, const 
         return false;
     }
 
-    // Apply edits to animation sequence
-    // Could modify keys, curves, compression, etc.
-
+    // Apply edits to animation sequence (stub for runtime; editor builds can mutate).
+#if WITH_EDITOR
     Sequence->PostEditChange();
+#endif
     UE_LOG(LogHephaestusBridge, Log, TEXT("HephaestusAnimationSubsystem: Edited sequence %s"), *Sequence->GetName());
     return true;
 }

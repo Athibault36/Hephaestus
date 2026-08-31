@@ -109,6 +109,7 @@ the bridge's `/command` endpoint.
 | --- | --- |
 | `Unable to find plugin 'HephaestusBridge'` | Ensure it lives under `<Project>/Plugins/HephaestusBridge` (step 2) and is enabled in the `.uproject`. |
 | `UnrealBuildTool not found` / `Build.bat` missing | Fix `UE_PATH` / `system.ue_path`; verify the engine install is complete. |
-| Missing module errors (PixelStreaming, WebRTC, OpenCV) | Enable the PixelStreaming and OpenCV plugins for the engine; these are declared in `HephaestusBridge.uplugin` / `HephaestusBridge.Build.cs`. |
+| Missing module errors (PixelStreaming, WebRTC, OpenCV) | Leave `HEPHAESTUS_FULL_BUILD` unset (default). Those are optional until after M1. |
+| Missing module errors (PCG, ControlRig, Niagara) | Enable the matching engine plugins in UE 5.8 / `.uproject`. |
 | Long first build | Expected — the plugin pulls in rendering, PCG, Niagara, audio, and media modules. Subsequent incremental builds are fast. |
 | `forge health` shows `ue-bridge` WARN | The editor/plugin is not running yet, or the port differs — start UE and/or set `HEPHAESTUS_UE_PORT` / `HEPHAESTUS_UE_URL`. |

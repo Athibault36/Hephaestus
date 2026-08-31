@@ -5,9 +5,7 @@
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "Engine/Texture2D.h"
-#include "RenderGraph.h"
 #include "RHI.h"
-#include "PixelStreaming.h"
 #include "HephaestusVisionSubsystem.generated.h"
 
 // Forward declarations

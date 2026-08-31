@@ -1,85 +1,37 @@
-// Copyright (c) 2024 HephaestusForge. All Rights Reserved.
-
-[PluginSettings]
-PluginName=HephaestusBridge
-PluginDescription="HEPHAESTUS Agent Bridge - Total Engine Authority for UE5.8 Autonomous Agent"
-PluginVersion=1.0.0
-PluginCategory=Hephaestus
-CreatedBy=HephaestusForge
-CreatedByURL=https://github.com/hephaestus-forge
-DocsURL=https://github.com/hephaestus-forge/docs
-MarketplaceURL=
-SupportURL=
-CanContainContent=True
-IsBetaVersion=False
-IsExperimentalVersion=False
-Installed=False
-
-[Modules]
-+Module=(Name="HephaestusBridge", Type="Runtime", LoadingPhase="Default")
-+Module=(Name="HephaestusBridgeEditor", Type="Editor", LoadingPhase="PostEngineInit")
-
-[Platforms]
-+Platforms=Win64
-+Platforms=Linux
-+Platforms=Mac
-
-[Dependencies]
-+Dependencies=(Name="Core", Version="5.8")
-+Dependencies=(Name="CoreUObject", Version="5.8")
-+Dependencies=(Name="Engine", Version="5.8")
-+Dependencies=(Name="Renderer", Version="5.8")
-+Dependencies=(Name="RenderCore", Version="5.8")
-+Dependencies=(Name="RHI", Version="5.8")
-+Dependencies=(Name="Projects", Version="5.8")
-+Dependencies=(Name="GameplayTags", Version="5.8")
-+Dependencies=(Name="GameplayTasks", Version="5.8")
-+Dependencies=(Name="AIModule", Version="5.8")
-+Dependencies=(Name="NavigationSystem", Version="5.8")
-+Dependencies=(Name="AnimGraphRuntime", Version="5.8")
-+Dependencies=(Name="ControlRig", Version="5.8")
-+Dependencies=(Name="LiveLinkInterface", Version="5.8")
-+Dependencies=(Name="PCG", Version="5.8")
-+Dependencies=(Name="Niagara", Version="5.8")
-+Dependencies=(Name="NiagaraCore", Version="5.8")
-+Dependencies=(Name="NiagaraShader", Version="5.8")
-+Dependencies=(Name="MetaSoundEngine", Version="5.8")
-+Dependencies=(Name="QuartzCore", Version="5.8")
-+Dependencies=(Name="Synthesis", Version="5.8")
-+Dependencies=(Name="AudioMixer", Version="5.8")
-+Dependencies=(Name="AssetRegistry", Version="5.8")
-+Dependencies=(Name="AssetTools", Version="5.8")
-+Dependencies=(Name="UnrealEd", Version="5.8")
-+Dependencies=(Name="BlueprintGraph", Version="5.8")
-+Dependencies=(Name="KismetCompiler", Version="5.8")
-+Dependencies=(Name="GraphEditor", Version="5.8")
-+Dependencies=(Name="PropertyEditor", Version="5.8")
-+Dependencies=(Name="ContentBrowser", Version="5.8")
-+Dependencies=(Name="EditorStyle", Version="5.8")
-+Dependencies=(Name="ToolMenus", Version="5.8")
-+Dependencies=(Name="WorkspaceMenuStructure", Version="5.8")
-+Dependencies=(Name="DeveloperSettings", Version="5.8")
-+Dependencies=(Name="Json", Version="5.8")
-+Dependencies=(Name="JsonUtilities", Version="5.8")
-+Dependencies=(Name="HTTP", Version="5.8")
-+Dependencies=(Name="HTTPServer", Version="5.8")
-+Dependencies=(Name="Sockets", Version="5.8")
-+Dependencies=(Name="Networking", Version="5.8")
-+Dependencies=(Name="PacketHandler", Version="5.8")
-+Dependencies=(Name="NetCore", Version="5.8")
-+Dependencies=(Name="OnlineSubsystem", Version="5.8")
-+Dependencies=(Name="OnlineSubsystemUtils", Version="5.8")
-+Dependencies=(Name="PythonScriptPlugin", Version="5.8")
-+Dependencies=(Name="ImageWrapper", Version="5.8")
-+Dependencies=(Name="ImageWriteQueue", Version="5.8")
-+Dependencies=(Name="MediaAssets", Version="5.8")
-+Dependencies=(Name="MediaUtils", Version="5.8")
-+Dependencies=(Name="PixelStreaming", Version="5.8")
-+Dependencies=(Name="WebRTC", Version="5.8")
-+Dependencies=(Name="OpenCV", Version="5.8")
-
-[BuildSettings]
-bUseUnityBuild=True
-bUsePCHFiles=True
-MinFilesUsingUnityBuild=4
-CppStandard=Cpp20
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0.0",
+	"FriendlyName": "Hephaestus Bridge",
+	"Description": "HEPHAESTUS Agent Bridge — HTTP command server for UE5.8 autonomous agents",
+	"Category": "Hephaestus",
+	"CreatedBy": "HephaestusForge",
+	"CreatedByURL": "https://github.com/Athibault36/Hephaestus",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": true,
+	"IsBetaVersion": true,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "HephaestusBridge",
+			"Type": "Runtime",
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [ "Win64", "Linux", "Mac" ]
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "PythonScriptPlugin",
+			"Enabled": false,
+			"Optional": true
+		},
+		{
+			"Name": "PixelStreaming",
+			"Enabled": false,
+			"Optional": true
+		}
+	]
+}
