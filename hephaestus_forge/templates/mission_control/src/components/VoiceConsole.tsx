@@ -127,7 +127,7 @@ export function VoiceConsole() {
 
         <div className="voice-shortcuts">
           <kbd>Space</kbd> Push-to-Talk
-          {isRecording && <kbd>Esc</kbd> Cancel}
+          {isRecording && <><kbd>Esc</kbd> Cancel</>}
         </div>
       </div>
 

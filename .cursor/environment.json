@@ -1,0 +1,11 @@
+{
+  "name": "HephaestusForge",
+  "install": "bash .cursor/install.sh",
+  "terminals": [
+    {
+      "name": "mission-control",
+      "command": "cd hephaestus_forge/templates/mission_control && npm run dev"
+    }
+  ],
+  "ports": [3000]
+}
