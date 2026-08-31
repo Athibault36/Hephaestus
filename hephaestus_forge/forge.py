@@ -2428,6 +2428,114 @@ def attach(
     ))
 
 
+voice_app = typer.Typer(help="Real-time, speaker-verified voice: enroll and manage the operator profile.")
+app.add_typer(voice_app, name="voice")
+
+
+def _voice_store(project_root: Path):
+    from hephaestus_forge.runtime.voice.enrollment import EnrollmentStore
+    return EnrollmentStore(project_root)
+
+
+@voice_app.command("enroll")
+def voice_enroll(
+    embeddings: Annotated[list[Path], typer.Option("--embedding", "-e", help="Speaker embedding .npy file(s); repeatable")] = None,
+    embeddings_dir: Annotated[Optional[Path], typer.Option("--dir", "-d", help="Directory of .npy embedding files")] = None,
+    name: Annotated[str, typer.Option("--name", "-n", help="Operator name")] = "operator",
+    project_path: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project root")] = None,
+    threshold: Annotated[float, typer.Option("--threshold", help="Acceptance threshold (cosine)")] = 0.75,
+):
+    """
+    Enroll the operator's voice from precomputed speaker embeddings.
+
+    Embeddings come from a speaker-embedding model (e.g. ECAPA-TDNN / NVIDIA
+    TitaNet) run on short clips of your voice; this saves a verified profile that
+    Hephaestus uses to accept only your voice.
+    """
+    import numpy as np
+    from hephaestus_forge.runtime.voice.enrollment import enroll_from_embeddings
+
+    project_root = (project_path or Path.cwd()).resolve()
+    files: list[Path] = list(embeddings or [])
+    if embeddings_dir:
+        files += sorted(Path(embeddings_dir).glob("*.npy"))
+    if not files:
+        console.print("[red]✗ Provide at least one --embedding file or a --dir of .npy files.[/red]")
+        raise typer.Exit(1)
+
+    vectors = []
+    for f in files:
+        if not f.exists():
+            console.print(f"[red]✗ Missing embedding file: {f}[/red]")
+            raise typer.Exit(1)
+        vectors.append(np.load(f))
+
+    verifier, result = enroll_from_embeddings(vectors, name=name, threshold=threshold)
+    store = _voice_store(project_root)
+    saved = store.save(verifier)
+
+    console.print(Panel.fit(
+        f"[bold]Voice enrolled: {result.name}[/bold]\n"
+        f"Samples: [cyan]{result.num_samples}[/cyan]  Dim: [cyan]{result.dim}[/cyan]\n"
+        f"Consistency (min pairwise cos): [cyan]{result.consistency:.3f}[/cyan]\n"
+        f"Threshold: [cyan]{threshold}[/cyan]\n"
+        f"Profile: [cyan]{saved}[/cyan]",
+        border_style="green" if result.ok else "yellow",
+    ))
+    for w in result.warnings:
+        console.print(f"[yellow]⚠ {w}[/yellow]")
+
+
+@voice_app.command("status")
+def voice_status(
+    project_path: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project root")] = None,
+):
+    """Show the enrolled operator voice profile, if any."""
+    project_root = (project_path or Path.cwd()).resolve()
+    store = _voice_store(project_root)
+    verifier = store.load()
+    if verifier is None or not verifier.is_enrolled:
+        console.print(f"[yellow]No operator voice enrolled. Run 'hephaestus_forge voice enroll' "
+                      f"(expected at {store.path}).[/yellow]")
+        raise typer.Exit(1)
+    p = verifier.profile
+    console.print(Panel.fit(
+        f"[bold]Operator enrolled: {p.name}[/bold]\n"
+        f"Samples: [cyan]{p.num_samples}[/cyan]  Dim: [cyan]{p.dim}[/cyan]\n"
+        f"Profile: [cyan]{store.path}[/cyan]",
+        border_style="green",
+    ))
+
+
+@voice_app.command("verify")
+def voice_verify(
+    embedding: Annotated[Path, typer.Option("--embedding", "-e", help="Speaker embedding .npy to test")],
+    project_path: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project root")] = None,
+    threshold: Annotated[float, typer.Option("--threshold", help="Acceptance threshold (cosine)")] = 0.75,
+):
+    """Test whether an embedding is recognized as the enrolled operator."""
+    import numpy as np
+
+    project_root = (project_path or Path.cwd()).resolve()
+    verifier = _voice_store(project_root).load(threshold=threshold)
+    if verifier is None or not verifier.is_enrolled:
+        console.print("[red]✗ No operator enrolled. Run 'hephaestus_forge voice enroll' first.[/red]")
+        raise typer.Exit(1)
+    if not embedding.exists():
+        console.print(f"[red]✗ Missing embedding file: {embedding}[/red]")
+        raise typer.Exit(1)
+
+    result = verifier.verify(np.load(embedding))
+    color = "green" if result.accepted else "red"
+    verdict = "RECOGNIZED — operator" if result.accepted else "REJECTED — not the operator"
+    console.print(Panel.fit(
+        f"[{color}]{verdict}[/{color}]\n"
+        f"Similarity: [cyan]{result.similarity:.3f}[/cyan]  Threshold: [cyan]{result.threshold}[/cyan]",
+        border_style=color,
+    ))
+    raise typer.Exit(0 if result.accepted else 1)
+
+
 def main() -> None:
     """Console-script entry point (see pyproject [project.scripts])."""
     app()

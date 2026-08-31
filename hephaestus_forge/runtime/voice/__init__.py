@@ -18,6 +18,13 @@ from .pipeline import (
     UtteranceEvent,
     VADBackend,
 )
+from .enrollment import (
+    EnrollmentResult,
+    EnrollmentStore,
+    enroll_from_embeddings,
+    pairwise_min_similarity,
+)
+from .session import VoiceAgentSession, VoiceCommand
 
 __all__ = [
     "SpeakerProfile",
@@ -29,4 +36,10 @@ __all__ = [
     "VADBackend",
     "RealtimeVoicePipeline",
     "UtteranceEvent",
+    "EnrollmentResult",
+    "EnrollmentStore",
+    "enroll_from_embeddings",
+    "pairwise_min_similarity",
+    "VoiceAgentSession",
+    "VoiceCommand",
 ]
