@@ -1543,7 +1543,7 @@ def observe(
                 if path == "/agent/health" and self.command == "GET":
                     self._json_response(200, {
                         "ok": True,
-                        "planner": "nvidia/nemotron-3-ultra",
+                        "planner": "nvidia/nemotron-3-ultra-550b-a55b",
                         "ue": remote_api,
                     })
                     return True
@@ -2034,7 +2034,9 @@ def agent_loop_cmd(
     goal: Annotated[str, typer.Option("--goal", help="Natural-language goal for the LLM planner")] = (
         "Seed a lit test scene with a few cubes visible in frame, then idle."
     ),
-    llm_model: Annotated[Optional[str], typer.Option("--llm-model", help="Chat model id")] = "nvidia/nemotron-3-ultra",
+    llm_model: Annotated[Optional[str], typer.Option("--llm-model", help="Chat model id")] = (
+        "nvidia/nemotron-3-ultra-550b-a55b"
+    ),
     llm_url: Annotated[Optional[str], typer.Option("--llm-url", help="OpenAI-compatible base URL")] = (
         "https://integrate.api.nvidia.com/v1"
     ),
@@ -2042,8 +2044,8 @@ def agent_loop_cmd(
     """
     Run an observe -> decide -> act -> recapture loop against a live PIE session.
 
-    Default planner LLM is Nemotron-3 Ultra via NVIDIA NIM (NVIDIA_API_KEY).
-    --planner auto uses Nemotron when a key is available, else heuristic.
+    Default planner LLM is Nemotron-3 Ultra (nvidia/nemotron-3-ultra-550b-a55b) via NVIDIA NIM.
+    Requires NVIDIA_API_KEY. --planner auto uses Nemotron when a key is available, else heuristic.
     """
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from ue_agent_loop import ObserveActLoop, RemoteUeClient

@@ -23,7 +23,7 @@ from typing import Any, Optional
 from ue_agent_loop import AgentAction, WorldSnapshot, decide_action
 
 DEFAULT_NIM_URL = "https://integrate.api.nvidia.com/v1"
-DEFAULT_NEMOTRON_MODEL = "nvidia/nemotron-3-ultra"
+DEFAULT_NEMOTRON_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
 
 SYSTEM_PROMPT = """You are HEPHAESTUS, an embodied Unreal Engine agent controlled by Nemotron-3.
 You receive a viewport census (and optional prior step memory). Choose exactly ONE next action.
@@ -276,6 +276,11 @@ class VisionLLMPlanner:
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": content},
             ],
+            # Nemotron-3 reasoning models: keep thinking off for strict JSON actions
+            "chat_template_kwargs": {
+                "enable_thinking": False,
+                "force_nonempty_content": True,
+            },
         }
 
         data = json.dumps(payload).encode("utf-8")
