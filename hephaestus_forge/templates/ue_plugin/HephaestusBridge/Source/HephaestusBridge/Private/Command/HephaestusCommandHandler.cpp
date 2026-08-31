@@ -237,6 +237,30 @@ bool UHephaestusCommandHandler::ValidateCommand(const FString& CommandJSON, FStr
         return false;
     }
 
+    // Mirror Python spawn class_path allowlist (Phase 4 input validation).
+    if (Command == TEXT("world.spawn_actor"))
+    {
+        const TSharedPtr<FJsonObject>* ParamsObj = nullptr;
+        if (!JsonObject->TryGetObjectField(TEXT("params"), ParamsObj) || !ParamsObj->IsValid())
+        {
+            OutErrorMessage = TEXT("Missing 'params' object");
+            return false;
+        }
+        FString ClassPath;
+        if (!(*ParamsObj)->TryGetStringField(TEXT("class_path"), ClassPath) || ClassPath.IsEmpty())
+        {
+            OutErrorMessage = TEXT("missing class_path");
+            return false;
+        }
+        if (!ClassPath.StartsWith(TEXT("/Script/")) &&
+            !ClassPath.StartsWith(TEXT("/Game/")) &&
+            !ClassPath.StartsWith(TEXT("/Engine/")))
+        {
+            OutErrorMessage = TEXT("class_path prefix denied");
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -246,6 +270,16 @@ FHephaestusCommandResult UHephaestusCommandHandler::ExecuteCommand_GameThread(co
 
     // Generate command ID
     FString CommandID = FString::Printf(TEXT("cmd_%llu"), ++CommandCounter);
+
+    FString ValidationError;
+    if (!ValidateCommand(CommandJSON, ValidationError))
+    {
+        FHephaestusCommandResult ErrorResult = MakeErrorResult(CommandID, ValidationError);
+        ErrorResult.ExecutionTimeMs = static_cast<float>((FPlatformTime::Seconds() - StartTime) * 1000.0);
+        OnCommandFailed.Broadcast(CommandID, ValidationError);
+        TotalCommandsFailed++;
+        return ErrorResult;
+    }
 
     // Parse JSON
     TSharedPtr<FJsonObject> JsonObject;

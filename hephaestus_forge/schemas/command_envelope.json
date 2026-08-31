@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "HephaestusCommandEnvelope",
+  "type": "object",
+  "required": ["command", "params"],
+  "additionalProperties": false,
+  "properties": {
+    "command": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Dotted command name, e.g. world.spawn_actor"
+    },
+    "params": {
+      "type": "object",
+      "description": "Command-specific parameters; always includes action for routed handlers"
+    }
+  }
+}

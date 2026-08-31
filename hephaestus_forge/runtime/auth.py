@@ -1,8 +1,9 @@
-"""Bridge authentication scaffolding (Python-side).
+"""Bridge authentication helpers (Python-side).
 
-The UE plugin will enforce the same shared token on mutation endpoints once
-compiled (Phase 4). Until then, the Python client sends ``X-Hephaestus-Token``
-when configured so wiring can be tested without the engine.
+The UE plugin enforces the same shared token on mutation endpoints when
+``HEPHAESTUS_REQUIRE_AUTH`` or ``HEPHAESTUS_BRIDGE_TOKEN`` is set. The Python
+client sends ``X-Hephaestus-Token`` when configured so the full stack can be
+tested with FakeUE and integration tests before a Windows compile.
 """
 
 from __future__ import annotations

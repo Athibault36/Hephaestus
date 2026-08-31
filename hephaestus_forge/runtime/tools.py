@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .errors import ErrorInfo, ToolError, infer_command_error, validation_error
+from .envelope import validate_command_envelope
 from .validation import (
     validate_actor_path,
     validate_actor_path_list,
@@ -117,6 +118,9 @@ class Tool:
             if info:
                 return ToolResult.failure(self.name, info)
             return ToolResult.failure(self.name, validation_error("TOOL_INVALID", str(exc)))
+        ok, err = validate_command_envelope({"command": command, "params": params})
+        if not ok:
+            return ToolResult.failure(self.name, validation_error("VALIDATION_ENVELOPE", err))
         result = client.execute(command, params)
         return ToolResult.from_command(self.name, result)
 
