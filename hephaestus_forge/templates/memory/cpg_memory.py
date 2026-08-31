@@ -6,21 +6,16 @@ Neo4j/Kuzu for code graphs + LanceDB for visual/asset memory
 
 from __future__ import annotations
 
-import asyncio
-import hashlib
 import json
-import os
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
-from typing import Any, AsyncGenerator, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 import lancedb
 import numpy as np
-from neo4j import AsyncGraphDatabase, AsyncDriver, AsyncSession
-from pydantic import BaseModel, Field
+from neo4j import AsyncGraphDatabase, AsyncDriver
 
 
 # ─── Data Models ──────────────────────────────────────────────────────────────
@@ -592,7 +587,7 @@ class KuzuGraphStore(GraphStore):
         property_value: Any
     ) -> List[CodeNode]:
         query = f"MATCH (n:{label}) WHERE n.{property_name} = $value RETURN n"
-        result = self.conn.execute(query, value=property_value)
+        self.conn.execute(query, value=property_value)
         # Parse result
         return []
     
@@ -725,7 +720,7 @@ class LanceDBVectorStore(VectorStore):
         alpha: float = 0.5
     ) -> List[Dict[str, Any]]:
         # LanceDB supports hybrid search via FTS + vector
-        table = self.db.open_table(table_name)
+        self.db.open_table(table_name)
         # This would use LanceDB's hybrid search when available
         return await self.search(table_name, query_vector, limit)
 
@@ -784,7 +779,6 @@ class MemoryManager:
     
     async def ingest_codebase(self, repo_path: str) -> Dict[str, int]:
         """Parse codebase and populate CPG."""
-        from tree_sitter import Language, Parser
         # This would use tree-sitter to parse all files
         # For each file, extract: classes, functions, imports, calls
         # Upsert to graph store

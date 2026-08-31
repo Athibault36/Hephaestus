@@ -6,10 +6,8 @@ Supports Fish-Speech (primary), XTTS v2, OpenVoice v2, and RVC v2.
 
 import asyncio
 import base64
-import hashlib
 import json
 import os
-import tempfile
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -18,7 +16,6 @@ from typing import AsyncGenerator, Dict, List, Optional, Any
 
 import numpy as np
 import torch
-import torchaudio
 
 
 # ─── Data Models ──────────────────────────────────────────────────────────────
@@ -725,7 +722,7 @@ async def create_tts_manager(config: Dict[str, Any]) -> TTSManager:
 
 try:
     from fastapi import FastAPI, HTTPException
-    from pydantic import BaseModel, Field
+    from pydantic import BaseModel
     import uvicorn
 
     app = FastAPI(title="Hephaestus TTS Server", version="1.0.0")

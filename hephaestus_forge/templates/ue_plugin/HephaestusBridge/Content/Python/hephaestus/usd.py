@@ -4,7 +4,7 @@ USD (Universal Scene Description) Python API for Hephaestus Agent.
 """
 
 import unreal
-from typing import Dict, List, Optional, Any
+from typing import Dict, List
 from dataclasses import dataclass
 
 @dataclass

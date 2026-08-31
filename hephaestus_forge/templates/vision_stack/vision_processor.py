@@ -4,14 +4,10 @@ Vision Stack Processor - Frame decoding, SAM2/YOLO-World inference, structured J
 Runs as a standalone FastAPI service or library.
 """
 
-import asyncio
 import base64
-import io
-import json
 import time
 from dataclasses import dataclass, asdict
 from typing import Dict, List, Optional, Any
-from pathlib import Path
 
 import cv2
 import numpy as np
@@ -127,7 +123,6 @@ class VisionProcessor:
     
     def _load_sam2(self):
         """Load SAM2 for segmentation."""
-        model_path = self.config.get("segmentation_model", "sam2_hiera_large.pt")
         try:
             # SAM2 loading would go here
             pass

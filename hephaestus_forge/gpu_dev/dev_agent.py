@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Optional
 
 import httpx
 
@@ -16,7 +15,6 @@ class DevAgent:
         self.model = model
 
     def _system_prompt(self) -> str:
-        persona = self.repo_root / "hephaestus_forge" / "forge_config" / "config.yaml"
         extra = ""
         forge_persona = self.repo_root / ".hephaestus_forge" / "agent_persona.md"
         if forge_persona.exists():

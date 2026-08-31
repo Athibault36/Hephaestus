@@ -71,7 +71,6 @@ def test_emit_voice_active_and_speaker():
     bridge.emit_speaker(True)
     bridge.emit_speaker(False)
     bridge.emit_speaker(None)
-    events = dict(sio.emitted)  # last value per event name
     assert ("voiceActive", True) in sio.emitted
     speaker_payloads = [d for e, d in sio.emitted if e == "speaker"]
     assert speaker_payloads[0] == {"recognized": True}

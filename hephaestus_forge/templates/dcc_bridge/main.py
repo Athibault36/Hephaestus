@@ -5,17 +5,13 @@ Called by HEPHAESTUS agent via HTTP tools.
 """
 
 import asyncio
-import json
 import os
-import subprocess
 import tempfile
-import uuid
-from pathlib import Path
 from typing import Dict, List, Optional, Any
 
 import requests
-from fastapi import FastAPI, HTTPException, BackgroundTasks
-from pydantic import BaseModel, Field
+from fastapi import FastAPI
+from pydantic import BaseModel
 import uvicorn
 
 

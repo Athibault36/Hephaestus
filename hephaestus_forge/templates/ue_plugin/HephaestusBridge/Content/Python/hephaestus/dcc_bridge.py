@@ -5,11 +5,8 @@ Interfaces with external DCC tools: CC5/iClone, Meshy API.
 """
 
 import requests
-import json
-import os
-from typing import Dict, List, Optional, Any
+from typing import Dict, Optional, Any
 from dataclasses import dataclass
-from pathlib import Path
 
 
 @dataclass

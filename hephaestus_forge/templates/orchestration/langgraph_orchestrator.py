@@ -6,22 +6,20 @@ Multi-persona agent orchestration: Architect → Engineer → Reviewer → QA �
 
 from __future__ import annotations
 
-import asyncio
 import json
 import uuid
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, AsyncGenerator, Dict, List, Optional, TypedDict, Annotated, Literal
+from typing import Any, AsyncGenerator, Dict, List, Optional, TypedDict, Annotated
 
-from langgraph.graph import StateGraph, END
+from langgraph.graph import StateGraph
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.memory import MemorySaver
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, ToolMessage
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
-from pydantic import BaseModel, Field
 
 
 # ─── State Definitions ────────────────────────────────────────────────────────
@@ -315,7 +313,7 @@ Create a TaskGraph (JSON) that decomposes this goal into atomic tasks.
                 )
                 graph.add_task(task)
             return graph
-        except Exception as e:
+        except Exception:
             # Fallback: create minimal task graph
             graph = TaskGraph()
             task = Task(

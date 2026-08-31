@@ -205,7 +205,7 @@ class LlamaServerManager:
     def _cuda_wheel_index() -> Optional[str]:
         """Pick a llama-cpp-python CUDA wheel index from the driver's CUDA version."""
         try:
-            out = subprocess.check_output(
+            subprocess.check_output(
                 ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
                 text=True, stderr=subprocess.DEVNULL,
             )

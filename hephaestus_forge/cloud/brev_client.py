@@ -7,10 +7,8 @@ Default hard ceiling: $15 USD.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import os
-import re
 import shutil
 import subprocess
 import threading
@@ -317,7 +315,6 @@ class BrevClient:
 
 
 def Path_write_startup(script: str) -> str:
-    from pathlib import Path
     import tempfile
     fd, path = tempfile.mkstemp(prefix="heph-brev-", suffix=".sh", text=True)
     with os.fdopen(fd, "w", encoding="utf-8") as f:

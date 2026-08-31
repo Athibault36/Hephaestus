@@ -12,7 +12,6 @@ import json
 import os
 import platform
 import shutil
-import signal
 import subprocess
 import sys
 import textwrap
@@ -22,13 +21,12 @@ from pathlib import Path
 from typing import Annotated, Optional
 
 import typer
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 from rich.table import Table
-from rich.tree import Tree
 import yaml
 
 # Cloud imports (optional - only used if cloud features enabled)
@@ -1088,6 +1086,26 @@ scaffold = ProjectScaffold(console)
 downloader = ModelDownloader(console)
 
 
+def _version_callback(value: bool) -> None:
+    if value:
+        try:
+            from importlib.metadata import PackageNotFoundError, version
+            v = version("hephaestus-forge")
+        except (PackageNotFoundError, ImportError):
+            v = "0.1.0"
+        console.print(f"hephaestus_forge {v}")
+        raise typer.Exit()
+
+
+@app.callback()
+def _root(
+    version: Annotated[
+        bool, typer.Option("--version", callback=_version_callback, is_eager=True, help="Show version and exit.")
+    ] = False,
+) -> None:
+    """HephaestusForge — Local-First Agent Factory for UE5.8 Autonomous Agents."""
+
+
 @app.command()
 def init(
     project_name: Annotated[str, typer.Argument(help="Project name (directory will be created)")],
@@ -1547,12 +1565,12 @@ def evolve(
         raise typer.Exit(1)
     
     with open(manifest_path) as f:
-        manifest = json.load(f)
+        json.load(f)  # validate the manifest is parseable
     
     if file:
         # Inject code snippet
         console.print(f"[dim]Injecting code from {file}[/dim]")
-        snippet = file.read_text()
+        file.read_text()
         
         # Determine if Python or C++ based on extension
         if file.suffix == ".py":
@@ -1600,7 +1618,7 @@ def gpu_dev(
     models_dir = repo_root / "Agent_Runtime" / "models"
     mgr = LlamaServerManager(models_dir=models_dir, host=host, port=port)
 
-    scan = scanner.scan()
+    scanner.scan()
     console.print(f"[cyan]GPU:[/cyan] {mgr.nvidia_smi_summary()}")
 
     if download:
@@ -2197,7 +2215,6 @@ def health(
 
     # --- Model files (large, gitignored; warn if absent) ---
     runtime_cfg = cfg.get("agent_runtime") or {}
-    runtime_dir = project_root / (cfg.get("paths", {}) or {}).get("agent_runtime_dir", "Agent_Runtime")
     for svc in ("llama_server", "tts_server", "vision_stack"):
         model_rel = (runtime_cfg.get(svc) or {}).get("model_path")
         if model_rel:

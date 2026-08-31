@@ -5,12 +5,10 @@ Executes Blender Python scripts via subprocess or persistent Blender MCP server.
 """
 
 import subprocess
-import json
 import tempfile
 import os
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
-from pathlib import Path
 
 
 @dataclass

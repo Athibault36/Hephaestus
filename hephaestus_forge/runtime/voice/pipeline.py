@@ -12,8 +12,8 @@ the GPU, while this gating state machine is fully unit tested with fakes.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Callable, List, Optional, Protocol
+from dataclasses import dataclass
+from typing import Callable, List, Optional, Protocol
 
 import numpy as np
 
