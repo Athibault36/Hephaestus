@@ -203,6 +203,7 @@ TArray<FString> UHephaestusCommandHandler::GetAvailableCommands() const
         TEXT("world.list_actors"),
         TEXT("world.set_transform"),
         TEXT("world.set_light"),
+        TEXT("world.get_view"),
         TEXT("world.batch_edit"),
         TEXT("world.query_spatial"),
         TEXT("asset.create_material"),
@@ -312,7 +313,18 @@ FHephaestusCommandResult UHephaestusCommandHandler::ExecuteCommand_GameThread(co
 FHephaestusCommandResult UHephaestusCommandHandler::RouteCommand(const TSharedPtr<FJsonObject>& CommandObject)
 {
     FString Command = CommandObject->GetStringField(TEXT("command"));
-    TSharedPtr<FJsonObject> Params = CommandObject->GetObjectField(TEXT("params"));
+    // Prefer "params"; fall back to "args". Do NOT use GetObjectField — missing keys
+    // return a valid empty object, which would swallow the args alias.
+    TSharedPtr<FJsonObject> Params;
+    const TSharedPtr<FJsonObject>* ParamsObj = nullptr;
+    if (CommandObject->TryGetObjectField(TEXT("params"), ParamsObj) && ParamsObj && ParamsObj->IsValid())
+    {
+        Params = *ParamsObj;
+    }
+    else if (CommandObject->TryGetObjectField(TEXT("args"), ParamsObj) && ParamsObj && ParamsObj->IsValid())
+    {
+        Params = *ParamsObj;
+    }
 
     // Check custom commands first
     {
@@ -394,18 +406,30 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleWorldCommand(const FSt
             return MakeErrorResult(TEXT(""), TEXT("Missing params for world.spawn_actor"));
         }
 
-        FString ClassPath = Params->GetStringField(TEXT("class_path"));
+        FString ClassPath;
+        if (!Params->TryGetStringField(TEXT("class_path"), ClassPath) || ClassPath.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("class"), ClassPath);
+        }
         if (ClassPath.IsEmpty())
         {
             ClassPath = TEXT("/Script/Engine.PointLight");
         }
 
         FTransform Transform = FTransform::Identity;
-        if (Params->HasField(TEXT("transform")))
+        if (!ParseTransformParams(Params, Transform))
         {
-            if (!ParseTransform(Params->GetObjectField(TEXT("transform")), Transform))
+            return MakeErrorResult(TEXT(""), TEXT("Invalid transform"));
+        }
+        // Identity / missing transform → spawn in front of the player camera
+        if (Transform.Equals(FTransform::Identity) || Transform.GetLocation().IsNearlyZero())
+        {
+            FVector Loc, Forward;
+            FRotator Rot;
+            if (WorldSubsystem->GetView(Loc, Rot, Forward))
             {
-                return MakeErrorResult(TEXT(""), TEXT("Invalid transform"));
+                Transform.SetLocation(Loc + Forward * 400.f + FVector(0.f, 0.f, 80.f));
+                Transform.SetRotation(Rot.Quaternion());
             }
         }
 
@@ -429,14 +453,29 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleWorldCommand(const FSt
         }
 
         FString MeshPath;
-        Params->TryGetStringField(TEXT("mesh_path"), MeshPath);
+        if (!Params->TryGetStringField(TEXT("mesh_path"), MeshPath) || MeshPath.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("mesh"), MeshPath);
+        }
 
         FTransform Transform = FTransform::Identity;
-        if (Params->HasField(TEXT("transform")))
+        if (!ParseTransformParams(Params, Transform))
         {
-            if (!ParseTransform(Params->GetObjectField(TEXT("transform")), Transform))
+            return MakeErrorResult(TEXT(""), TEXT("Invalid transform"));
+        }
+        if (Transform.Equals(FTransform::Identity) || Transform.GetLocation().IsNearlyZero())
+        {
+            FVector Loc, Forward;
+            FRotator Rot;
+            if (WorldSubsystem->GetView(Loc, Rot, Forward))
             {
-                return MakeErrorResult(TEXT(""), TEXT("Invalid transform"));
+                Transform.SetLocation(Loc + Forward * 400.f + FVector(0.f, 0.f, 50.f));
+                Transform.SetScale3D(FVector(2.f));
+            }
+            else
+            {
+                Transform.SetLocation(FVector(0.f, 0.f, 100.f));
+                Transform.SetScale3D(FVector(2.f));
             }
         }
 
@@ -459,9 +498,15 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleWorldCommand(const FSt
         {
             return MakeErrorResult(TEXT(""), TEXT("Missing params for world.destroy_actor"));
         }
-        FString ActorPath = Params->GetStringField(TEXT("actor_path"));
-        bool bSuccess = WorldSubsystem->DestroyActor(ActorPath);
-        return MakeErrorResult(TEXT(""), TEXT("Failed to destroy actor"));
+        FString ActorPath;
+        if (!Params->TryGetStringField(TEXT("actor_path"), ActorPath) || ActorPath.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("actor"), ActorPath);
+        }
+        const bool bSuccess = WorldSubsystem->DestroyActor(ActorPath);
+        return bSuccess
+            ? MakeSuccessResult(TEXT(""), FString::Printf(TEXT("{\"destroyed\":\"%s\"}"), *ActorPath), {}, { ActorPath })
+            : MakeErrorResult(TEXT(""), TEXT("Failed to destroy actor"));
     }
     else if (Action == TEXT("set_transform"))
     {
@@ -469,10 +514,13 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleWorldCommand(const FSt
         {
             return MakeErrorResult(TEXT(""), TEXT("Missing params for world.set_transform"));
         }
-        FString ActorPath = Params->GetStringField(TEXT("actor_path"));
+        FString ActorPath;
+        if (!Params->TryGetStringField(TEXT("actor_path"), ActorPath) || ActorPath.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("actor"), ActorPath);
+        }
         FTransform Transform = FTransform::Identity;
-        if (!Params->HasField(TEXT("transform")) ||
-            !ParseTransform(Params->GetObjectField(TEXT("transform")), Transform))
+        if (!ParseTransformParams(Params, Transform))
         {
             return MakeErrorResult(TEXT(""), TEXT("Invalid transform"));
         }
@@ -487,7 +535,11 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleWorldCommand(const FSt
         {
             return MakeErrorResult(TEXT(""), TEXT("Missing params for world.set_light"));
         }
-        FString ActorPath = Params->GetStringField(TEXT("actor_path"));
+        FString ActorPath;
+        if (!Params->TryGetStringField(TEXT("actor_path"), ActorPath) || ActorPath.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("actor"), ActorPath);
+        }
         double Intensity = 5000.0;
         Params->TryGetNumberField(TEXT("intensity"), Intensity);
         double Radius = 1000.0;
@@ -503,11 +555,36 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleWorldCommand(const FSt
             (*ColorObj)->TryGetNumberField(TEXT("a"), A);
             Color = FLinearColor(static_cast<float>(R), static_cast<float>(G), static_cast<float>(B), static_cast<float>(A));
         }
+        else
+        {
+            const TArray<TSharedPtr<FJsonValue>>* ColorArr = nullptr;
+            if (Params->TryGetArrayField(TEXT("color"), ColorArr) && ColorArr && ColorArr->Num() >= 3)
+            {
+                Color = FLinearColor(
+                    static_cast<float>((*ColorArr)[0]->AsNumber()),
+                    static_cast<float>((*ColorArr)[1]->AsNumber()),
+                    static_cast<float>((*ColorArr)[2]->AsNumber()),
+                    ColorArr->Num() >= 4 ? static_cast<float>((*ColorArr)[3]->AsNumber()) : 1.f);
+            }
+        }
         const bool bOk = WorldSubsystem->SetPointLightProperties(
             ActorPath, static_cast<float>(Intensity), Color, static_cast<float>(Radius));
         return bOk
             ? MakeSuccessResult(TEXT(""), FString::Printf(TEXT("{\"actor_path\":\"%s\",\"intensity\":%.1f}"), *ActorPath, Intensity), {}, { ActorPath })
             : MakeErrorResult(TEXT(""), TEXT("Failed to set light (actor not a PointLight?)"));
+    }
+    else if (Action == TEXT("get_view"))
+    {
+        FVector Loc, Forward;
+        FRotator Rot;
+        if (!WorldSubsystem->GetView(Loc, Rot, Forward))
+        {
+            return MakeErrorResult(TEXT(""), TEXT("No player view (is PIE running?)"));
+        }
+        const FString ResultJSON = FString::Printf(
+            TEXT("{\"location\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},\"rotation\":{\"pitch\":%.3f,\"yaw\":%.3f,\"roll\":%.3f},\"forward\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f}}"),
+            Loc.X, Loc.Y, Loc.Z, Rot.Pitch, Rot.Yaw, Rot.Roll, Forward.X, Forward.Y, Forward.Z);
+        return MakeSuccessResult(TEXT(""), ResultJSON);
     }
     else if (Action == TEXT("list_actors"))
     {
@@ -872,28 +949,55 @@ bool UHephaestusCommandHandler::ParseTransform(const TSharedPtr<FJsonObject>& Js
         return false;
     }
 
-    FVector Location, Scale;
-    FRotator Rotation;
+    FVector Location = FVector::ZeroVector;
+    FVector Scale = FVector(1.0f);
+    FRotator Rotation = FRotator::ZeroRotator;
 
-    if (Json->HasField(TEXT("location")))
-    {
-        ParseVector(Json->GetObjectField(TEXT("location")), Location);
-    }
-    if (Json->HasField(TEXT("rotation")))
-    {
-        ParseRotator(Json->GetObjectField(TEXT("rotation")), Rotation);
-    }
-    if (Json->HasField(TEXT("scale")))
-    {
-        ParseVector(Json->GetObjectField(TEXT("scale")), Scale);
-    }
-    else
+    ParseVectorField(Json, TEXT("location"), Location);
+    ParseRotatorField(Json, TEXT("rotation"), Rotation);
+    if (!ParseVectorField(Json, TEXT("scale"), Scale))
     {
         Scale = FVector(1.0f);
     }
 
     OutTransform = FTransform(Rotation, Location, Scale);
     return true;
+}
+
+bool UHephaestusCommandHandler::ParseTransformParams(const TSharedPtr<FJsonObject>& Params, FTransform& OutTransform) const
+{
+    OutTransform = FTransform::Identity;
+    if (!Params.IsValid())
+    {
+        return true;
+    }
+
+    bool bOk = true;
+    if (Params->HasField(TEXT("transform")))
+    {
+        const TSharedPtr<FJsonObject>* TransformObj = nullptr;
+        if (Params->TryGetObjectField(TEXT("transform"), TransformObj) && TransformObj && TransformObj->IsValid())
+        {
+            bOk = ParseTransform(*TransformObj, OutTransform);
+        }
+        else
+        {
+            bOk = false;
+        }
+    }
+
+    // Flat aliases override nested transform fields when present
+    FVector Location = OutTransform.GetLocation();
+    FVector Scale = OutTransform.GetScale3D();
+    FRotator Rotation = OutTransform.Rotator();
+    const bool bHadLoc = ParseVectorField(Params, TEXT("location"), Location);
+    const bool bHadRot = ParseRotatorField(Params, TEXT("rotation"), Rotation);
+    const bool bHadScale = ParseVectorField(Params, TEXT("scale"), Scale);
+    if (bHadLoc || bHadRot || bHadScale)
+    {
+        OutTransform = FTransform(Rotation, Location, Scale);
+    }
+    return bOk;
 }
 
 bool UHephaestusCommandHandler::ParseVector(const TSharedPtr<FJsonObject>& Json, FVector& OutVector) const
@@ -903,10 +1007,46 @@ bool UHephaestusCommandHandler::ParseVector(const TSharedPtr<FJsonObject>& Json,
         return false;
     }
 
-    OutVector.X = Json->GetNumberField(TEXT("x"));
-    OutVector.Y = Json->GetNumberField(TEXT("y"));
-    OutVector.Z = Json->GetNumberField(TEXT("z"));
+    double X = 0, Y = 0, Z = 0;
+    Json->TryGetNumberField(TEXT("x"), X);
+    Json->TryGetNumberField(TEXT("y"), Y);
+    Json->TryGetNumberField(TEXT("z"), Z);
+    OutVector = FVector(static_cast<float>(X), static_cast<float>(Y), static_cast<float>(Z));
     return true;
+}
+
+bool UHephaestusCommandHandler::ParseVectorField(const TSharedPtr<FJsonObject>& Parent, const FString& FieldName, FVector& OutVector) const
+{
+    if (!Parent.IsValid())
+    {
+        return false;
+    }
+
+    const TSharedPtr<FJsonValue> Field = Parent->TryGetField(FieldName);
+    if (!Field.IsValid() || Field->IsNull())
+    {
+        return false;
+    }
+
+    if (Field->Type == EJson::Object)
+    {
+        return ParseVector(Field->AsObject(), OutVector);
+    }
+
+    if (Field->Type == EJson::Array)
+    {
+        const TArray<TSharedPtr<FJsonValue>>& Arr = Field->AsArray();
+        if (Arr.Num() < 3 || !Arr[0].IsValid() || !Arr[1].IsValid() || !Arr[2].IsValid())
+        {
+            return false;
+        }
+        OutVector = FVector(
+            static_cast<float>(Arr[0]->AsNumber()),
+            static_cast<float>(Arr[1]->AsNumber()),
+            static_cast<float>(Arr[2]->AsNumber()));
+        return true;
+    }
+    return false;
 }
 
 bool UHephaestusCommandHandler::ParseRotator(const TSharedPtr<FJsonObject>& Json, FRotator& OutRotator) const
@@ -916,10 +1056,46 @@ bool UHephaestusCommandHandler::ParseRotator(const TSharedPtr<FJsonObject>& Json
         return false;
     }
 
-    OutRotator.Pitch = Json->GetNumberField(TEXT("pitch"));
-    OutRotator.Yaw = Json->GetNumberField(TEXT("yaw"));
-    OutRotator.Roll = Json->GetNumberField(TEXT("roll"));
+    double Pitch = 0, Yaw = 0, Roll = 0;
+    Json->TryGetNumberField(TEXT("pitch"), Pitch);
+    Json->TryGetNumberField(TEXT("yaw"), Yaw);
+    Json->TryGetNumberField(TEXT("roll"), Roll);
+    OutRotator = FRotator(static_cast<float>(Pitch), static_cast<float>(Yaw), static_cast<float>(Roll));
     return true;
+}
+
+bool UHephaestusCommandHandler::ParseRotatorField(const TSharedPtr<FJsonObject>& Parent, const FString& FieldName, FRotator& OutRotator) const
+{
+    if (!Parent.IsValid())
+    {
+        return false;
+    }
+
+    const TSharedPtr<FJsonValue> Field = Parent->TryGetField(FieldName);
+    if (!Field.IsValid() || Field->IsNull())
+    {
+        return false;
+    }
+
+    if (Field->Type == EJson::Object)
+    {
+        return ParseRotator(Field->AsObject(), OutRotator);
+    }
+
+    if (Field->Type == EJson::Array)
+    {
+        const TArray<TSharedPtr<FJsonValue>>& Arr = Field->AsArray();
+        if (Arr.Num() < 3 || !Arr[0].IsValid() || !Arr[1].IsValid() || !Arr[2].IsValid())
+        {
+            return false;
+        }
+        OutRotator = FRotator(
+            static_cast<float>(Arr[0]->AsNumber()),
+            static_cast<float>(Arr[1]->AsNumber()),
+            static_cast<float>(Arr[2]->AsNumber()));
+        return true;
+    }
+    return false;
 }
 
 FHephaestusCommandResult UHephaestusCommandHandler::MakeSuccessResult(const FString& CommandID, const FString& ResultJSON,

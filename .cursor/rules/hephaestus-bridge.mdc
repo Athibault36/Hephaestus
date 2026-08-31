@@ -1,0 +1,13 @@
+---
+description: UE HephaestusBridge C++ — spawn, capture, command routing
+globs: "**/HephaestusBridge/**/*.{cpp,h},**/hephaestus_forge/templates/ue_plugin/**/*.{cpp,h}"
+alwaysApply: false
+---
+
+# HephaestusBridge
+
+- Sync edits to both the **live** UE project plugin and `hephaestus_forge/templates/ue_plugin/HephaestusBridge/`.
+- `RouteCommand`: resolve params with `TryGetObjectField("params")` then `"args"` — never `GetObjectField` (empty object swallows args).
+- `SpawnStaticMeshActor`: Movable mobility before `SetStaticMesh`; fail loudly if mesh load fails.
+- Vision: force pixel alpha 255 after `ReadPixels`; do not vertical-flip GameViewport captures on UE 5.8.
+- Rebuild requires closing Live Coding / editor lock; then retest PIE `:8765`.

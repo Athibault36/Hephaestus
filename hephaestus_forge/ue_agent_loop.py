@@ -28,6 +28,7 @@ class WorldSnapshot:
     frame_meta: dict[str, Any] = field(default_factory=dict)
     frame_bytes: int = 0
     frame_png: bytes = b""
+    view: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -107,37 +108,27 @@ def summarize_actors(paths: list[str]) -> tuple[int, int]:
 
 
 def decide_action(snapshot: WorldSnapshot, rng: random.Random) -> AgentAction:
-    """Heuristic policy: seed light + cubes, then idle."""
-    x = float(rng.randint(-200, 200))
-    y = float(rng.randint(-200, 200))
+    """Heuristic policy: seed light + cubes in front of the camera, then idle."""
+    view = snapshot.view or {}
+    loc = view.get("location") or {"x": 0.0, "y": 0.0, "z": 200.0}
+    fwd = view.get("forward") or {"x": 1.0, "y": 0.0, "z": 0.0}
+    dist = 450.0 + float(rng.randint(0, 150))
+    side = float(rng.randint(-80, 80))
+    # Camera-relative spawn so objects appear in the captured frame
+    x = float(loc.get("x", 0)) + float(fwd.get("x", 1)) * dist - float(fwd.get("y", 0)) * side
+    y = float(loc.get("y", 0)) + float(fwd.get("y", 0)) * dist + float(fwd.get("x", 1)) * side
+    z = float(loc.get("z", 100)) + float(fwd.get("z", 0)) * dist - 40.0
 
     if snapshot.lights < 1:
         return AgentAction(
             kind="spawn_light",
-            reason=f"No lights yet (meshes={snapshot.meshes}). Seed a PointLight.",
+            reason=f"No lights yet (meshes={snapshot.meshes}). Seed a PointLight in view.",
             command={
                 "command": "world.spawn_actor",
                 "params": {
                     "class_path": "/Script/Engine.PointLight",
                     "transform": {
-                        "location": {"x": x, "y": y, "z": 280.0},
-                        "rotation": {"pitch": 0.0, "yaw": 0.0, "roll": 0.0},
-                        "scale": {"x": 1.0, "y": 1.0, "z": 1.0},
-                    },
-                },
-            },
-        )
-
-    if snapshot.meshes < 1:
-        return AgentAction(
-            kind="spawn_cube",
-            reason=f"Have light(s)={snapshot.lights} but no cubes. Seed a cube.",
-            command={
-                "command": "world.spawn_mesh",
-                "params": {
-                    "mesh_path": "/Engine/BasicShapes/Cube.Cube",
-                    "transform": {
-                        "location": {"x": x, "y": y, "z": 100.0},
+                        "location": {"x": x, "y": y, "z": z + 120.0},
                         "rotation": {"pitch": 0.0, "yaw": 0.0, "roll": 0.0},
                         "scale": {"x": 1.0, "y": 1.0, "z": 1.0},
                     },
@@ -148,15 +139,15 @@ def decide_action(snapshot: WorldSnapshot, rng: random.Random) -> AgentAction:
     if snapshot.meshes < 3:
         return AgentAction(
             kind="spawn_cube",
-            reason=f"Only {snapshot.meshes} cube(s). Add another for spatial variety.",
+            reason=f"lights={snapshot.lights} meshes={snapshot.meshes}. Seed/add a cube in view.",
             command={
                 "command": "world.spawn_mesh",
                 "params": {
                     "mesh_path": "/Engine/BasicShapes/Cube.Cube",
                     "transform": {
-                        "location": {"x": x, "y": y, "z": 100.0},
-                        "rotation": {"pitch": 0.0, "yaw": float(rng.randint(0, 90)), "roll": 0.0},
-                        "scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+                        "location": {"x": x, "y": y, "z": max(z, 50.0)},
+                        "rotation": {"pitch": 0.0, "yaw": float(rng.randint(0, 45)), "roll": 0.0},
+                        "scale": {"x": 2.0, "y": 2.0, "z": 2.0},
                     },
                 },
             },
@@ -212,6 +203,10 @@ class ObserveActLoop:
         listed = self.client.command({"command": "world.list_actors", "params": {}})
         paths = _parse_actor_paths(listed)
         lights, meshes = summarize_actors(paths)
+        view = {}
+        view_res = self.client.command({"command": "world.get_view", "params": {}})
+        if view_res.get("success"):
+            view = _parse_result_json(view_res)
         snap = WorldSnapshot(
             actor_paths=paths,
             lights=lights,
@@ -219,12 +214,14 @@ class ObserveActLoop:
             frame_meta=meta,
             frame_bytes=frame_bytes,
             frame_png=frame,
+            view=view,
         )
         self._thought(
             "observation",
             f"Frame {meta.get('width')}x{meta.get('height')} ({frame_bytes} bytes); "
-            f"actors={len(paths)} lights={lights} meshes={meshes}",
-            {"frame": meta, "lights": lights, "meshes": meshes},
+            f"actors={len(paths)} lights={lights} meshes={meshes}"
+            + (f"; view=({view.get('location', {})})" if view else ""),
+            {"frame": meta, "lights": lights, "meshes": meshes, "view": view},
         )
         return snap
 

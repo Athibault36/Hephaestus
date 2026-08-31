@@ -2,7 +2,7 @@
 """
 Nemotron-3 planner for the UE observe→act loop (NVIDIA NIM OpenAI-compatible API).
 
-Default model: nvidia/nemotron-3-ultra @ https://integrate.api.nvidia.com/v1
+Default model: nvidia/nemotron-3-ultra-550b-a55b @ https://integrate.api.nvidia.com/v1
 Auth: NVIDIA_API_KEY or HEPHAESTUS_LLM_API_KEY
 
 Nemotron is used as a text planner over frame census + step memory (multimodal
@@ -42,10 +42,13 @@ Allowed JSON (no markdown):
 }
 
 Rules:
-- Prefer small reversible edits. |x|,|y| <= 400 unless memory says otherwise.
+- ALWAYS place new actors in front of the camera using the provided view location+forward
+  (spawn ~300-600 cm along forward, near ground). Never use world origin unless view is missing.
+- Prefer scale 2 for cubes so they are visible in the viewport capture.
+- Prefer small reversible edits. |offset from view| should stay within a few meters.
 - destroy/set_* only with actor_path from the provided interesting-actor list.
 - set_light only on PointLight paths.
-- noop when goal is met (e.g. >=1 light and >=3 cubes for a basic seed goal).
+- noop when goal is met (e.g. >=1 light and >=3 cubes IN VIEW for a basic seed goal).
 - Use memory so you do not repeat the same failed or redundant spawn.
 """
 
@@ -92,6 +95,7 @@ def plan_dict_to_action(plan: dict[str, Any], snapshot: WorldSnapshot) -> AgentA
         )
 
     if action in ("spawn_cube", "spawn_mesh", "cube"):
+        scale = float(plan.get("scale", 2.0))
         return AgentAction(
             kind="spawn_cube",
             reason=reason,
@@ -99,7 +103,11 @@ def plan_dict_to_action(plan: dict[str, Any], snapshot: WorldSnapshot) -> AgentA
                 "command": "world.spawn_mesh",
                 "params": {
                     "mesh_path": "/Engine/BasicShapes/Cube.Cube",
-                    "transform": transform(z if z else 100.0),
+                    "transform": {
+                        "location": {"x": x, "y": y, "z": z if z else 100.0},
+                        "rotation": {"pitch": 0.0, "yaw": yaw, "roll": 0.0},
+                        "scale": {"x": scale, "y": scale, "z": scale},
+                    },
                 },
             },
         )
@@ -253,9 +261,10 @@ class VisionLLMPlanner:
             f"Frame: {snapshot.frame_meta.get('width')}x{snapshot.frame_meta.get('height')} "
             f"({snapshot.frame_bytes} bytes) path={snapshot.frame_meta.get('path', '')}\n"
             f"Census: lights={snapshot.lights}, meshes={snapshot.meshes}, actors={len(snapshot.actor_paths)}\n"
+            f"Camera view JSON: {json.dumps(snapshot.view) if snapshot.view else '(unknown — use x=0,y=0,z=150 as last resort)'}\n"
             f"Memory:\n" + ("\n".join(mem_lines) if mem_lines else "(none)") + "\n"
             f"Interesting actors:\n" + "\n".join(interesting[:30]) + "\n"
-            "Respond with a single JSON object only."
+            "Respond with a single JSON object only. Spawn/move INTO the camera frustum."
         )
 
         content: Any

@@ -1,0 +1,18 @@
+---
+description: Hephaestus core conventions — Remote API, NIM models, MCPs, debug discipline
+alwaysApply: true
+---
+
+# Hephaestus core
+
+- Read `AGENTS.md` at repo root for paths, ports, and model ids.
+- Remote commands: use JSON key **`params`** (bridge also accepts `args`). Prefer nested `transform` with `{x,y,z}` objects.
+- Spawn/edit in **camera frustum** via `world.get_view`; never assume world origin is visible.
+- NIM models (both valid, use in parallel when asked):
+  - Ultra `nvidia/nemotron-3-ultra-550b-a55b`
+  - Lightning `nvidia/nemotron-3.5-lightning-30b-a3b`
+  - Never call dead ids `nvidia/nemotron-3-ultra` or `nvidia/nemotron-3-8b` without alias remap.
+- Docs: use **Context7** MCP for library/UE API truth.
+- Live UE: use **user-ue58-python** MCP when available to verify PIE.
+- Bugs/regressions: **ce-debug** before multi-file speculative edits; plans → **ce-work**.
+- Never commit secrets or `.~cursorconfig.json`.

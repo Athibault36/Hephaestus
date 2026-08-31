@@ -13,7 +13,7 @@ autonomous:
     download_if_missing: false
 
   nim:
-    model: "nvidia/nemotron-3-8b"
+    model: "nvidia/nemotron-3-ultra-550b-a55b"
     base_url: "https://integrate.api.nvidia.com/v1"
 
   budget:

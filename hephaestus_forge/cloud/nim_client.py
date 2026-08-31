@@ -18,6 +18,20 @@ except ImportError:
 
 console = Console()
 
+# Canonical NIM model ids (verified against integrate.api.nvidia.com)
+DEFAULT_CHAT_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
+DEFAULT_FAST_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
+
+# Old / shorthand ids → working NIM ids
+MODEL_ALIASES = {
+    "nvidia/nemotron-3-ultra": DEFAULT_CHAT_MODEL,
+    "nvidia/Nemotron-3-Ultra": DEFAULT_CHAT_MODEL,
+    "nvidia/nemotron-3-8b": DEFAULT_FAST_MODEL,
+    "nemotron-3-ultra": DEFAULT_CHAT_MODEL,
+    "nemotron-3-8b": DEFAULT_FAST_MODEL,
+    "nemotron-3-ultra-550b-a55b": DEFAULT_CHAT_MODEL,
+}
+
 
 @dataclass
 class NIMModel:
@@ -32,19 +46,19 @@ class NIMClient:
     """NVIDIA NIM API client with automatic budget tracking."""
 
     MODELS = {
-        "nvidia/nemotron-3-ultra": NIMModel(
-            name="nvidia/nemotron-3-ultra",
+        DEFAULT_CHAT_MODEL: NIMModel(
+            name=DEFAULT_CHAT_MODEL,
             input_cost_per_1m=0.15,
             output_cost_per_1m=0.60,
             max_tokens=4096,
             context_window=128000,
         ),
-        "nvidia/nemotron-3-8b": NIMModel(
-            name="nvidia/nemotron-3-8b",
-            input_cost_per_1m=0.03,
-            output_cost_per_1m=0.12,
+        DEFAULT_FAST_MODEL: NIMModel(
+            name=DEFAULT_FAST_MODEL,
+            input_cost_per_1m=0.06,
+            output_cost_per_1m=0.24,
             max_tokens=4096,
-            context_window=8192,
+            context_window=128000,
         ),
         "nvidia/nv-embed-qa": NIMModel(
             name="nvidia/nv-embed-qa",
@@ -54,6 +68,16 @@ class NIMClient:
             context_window=8192,
         ),
     }
+
+    @classmethod
+    def resolve_model(cls, model: str) -> str:
+        """Map aliases / dead ids to a known working NIM model id."""
+        resolved = MODEL_ALIASES.get(model, model)
+        if resolved not in cls.MODELS and resolved != "nvidia/nv-embed-qa":
+            # Allow unknown ids through only if explicitly configured; prefer default chat
+            if model in MODEL_ALIASES:
+                return resolved
+        return resolved
 
     def __init__(
         self,
@@ -75,7 +99,7 @@ class NIMClient:
         return len(self.encoder.encode(text))
 
     def estimate_cost(self, model_name: str, input_tokens: int, output_tokens: int) -> float:
-        model = self.MODELS.get(model_name)
+        model = self.MODELS.get(self.resolve_model(model_name))
         if not model:
             return 0.0
         input_cost = (input_tokens / 1_000_000) * model.input_cost_per_1m
@@ -91,9 +115,12 @@ class NIMClient:
         stream: bool = False,
     ) -> dict | AsyncGenerator[str, None]:
         """Chat completion with budget enforcement."""
+        model = self.resolve_model(model)
         model_info = self.MODELS.get(model)
         if not model_info:
-            raise ValueError(f"Unknown model: {model}")
+            raise ValueError(
+                f"Unknown model: {model}. Known: {', '.join(sorted(self.MODELS))}"
+            )
 
         # Estimate input tokens
         input_text = " ".join(m.get("content", "") for m in messages)
@@ -111,6 +138,11 @@ class NIMClient:
             "max_tokens": max_tokens,
             "temperature": temperature,
             "stream": stream,
+            # Nemotron reasoning models: keep content non-empty for tool/coding use
+            "chat_template_kwargs": {
+                "enable_thinking": False,
+                "force_nonempty_content": True,
+            },
         }
 
         if stream:
@@ -151,6 +183,7 @@ class NIMClient:
 
     async def embeddings(self, model: str, texts: list[str]) -> list[list[float]]:
         """Get embeddings with budget tracking."""
+        model = self.resolve_model(model)
         model_info = self.MODELS.get(model)
         if not model_info:
             raise ValueError(f"Unknown embedding model: {model}")

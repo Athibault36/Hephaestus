@@ -100,7 +100,7 @@ class AutonomousRunner:
         config_path = forge_dir / "config.yaml" if (forge_dir / "config.yaml").exists() else self.repo_root / "hephaestus_forge" / "forge_config" / "config.yaml"
         budget = BudgetManager(config_path if config_path.exists() else forge_dir / "config.yaml")
         client = NIMClient(budget, base_url=nim_cfg.get("base_url", "https://integrate.api.nvidia.com/v1"))
-        model = nim_cfg.get("model", "nvidia/nemotron-3-8b")
+        model = nim_cfg.get("model", "nvidia/nemotron-3-ultra-550b-a55b")
 
         async def _go():
             resp = await client.chat_completion(

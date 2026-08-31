@@ -11,6 +11,9 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/PointLightComponent.h"
 #include "EngineUtils.h"
+#include "Kismet/GameplayStatics.h"
+#include "Camera/PlayerCameraManager.h"
+#include "GameFramework/PlayerController.h"
 #include "GameFramework/Actor.h"
 #include "UObject/Class.h"
 #include "UObject/Package.h"
@@ -102,21 +105,58 @@ AActor* UHephaestusWorldSubsystem::SpawnStaticMeshActor(const FString& MeshPath,
         return Actor;
     }
 
-    const FString ResolvedMesh = MeshPath.IsEmpty()
-        ? TEXT("/Engine/BasicShapes/Cube.Cube")
-        : MeshPath;
+    const TArray<FString> Candidates = {
+        MeshPath.IsEmpty() ? FString(TEXT("/Engine/BasicShapes/Cube.Cube")) : MeshPath,
+        TEXT("/Engine/BasicShapes/Cube.Cube"),
+        TEXT("/Engine/EngineMeshes/Cube.Cube"),
+        TEXT("/Engine/BasicShapes/Shape_Cube.Shape_Cube"),
+    };
 
-    if (UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, *ResolvedMesh))
+    UStaticMeshComponent* Comp = MeshActor->GetStaticMeshComponent();
+    if (!Comp)
     {
-        if (UStaticMeshComponent* Comp = MeshActor->GetStaticMeshComponent())
+        UE_LOG(LogHephaestusBridge, Error, TEXT("SpawnStaticMeshActor: no StaticMeshComponent"));
+        return MeshActor;
+    }
+
+    // Runtime mesh assignment requires Movable mobility
+    Comp->SetMobility(EComponentMobility::Movable);
+    Comp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    Comp->SetVisibility(true, true);
+    Comp->SetHiddenInGame(false);
+    MeshActor->SetActorHiddenInGame(false);
+
+    UStaticMesh* Mesh = nullptr;
+    FString UsedPath;
+    for (const FString& Candidate : Candidates)
+    {
+        if (Candidate.IsEmpty())
         {
-            Comp->SetStaticMesh(Mesh);
+            continue;
+        }
+        Mesh = LoadObject<UStaticMesh>(nullptr, *Candidate);
+        if (!Mesh)
+        {
+            Mesh = Cast<UStaticMesh>(StaticLoadObject(UStaticMesh::StaticClass(), nullptr, *Candidate));
+        }
+        if (Mesh)
+        {
+            UsedPath = Candidate;
+            break;
         }
     }
-    else
+
+    if (!Mesh)
     {
-        UE_LOG(LogHephaestusBridge, Warning, TEXT("HephaestusWorldSubsystem: Failed to load mesh %s"), *ResolvedMesh);
+        UE_LOG(LogHephaestusBridge, Error, TEXT("SpawnStaticMeshActor: failed to load any cube mesh"));
+        return MeshActor;
     }
+
+    Comp->SetStaticMesh(Mesh);
+    Comp->MarkRenderStateDirty();
+    MeshActor->MarkComponentsRenderStateDirty();
+    UE_LOG(LogHephaestusBridge, Log, TEXT("SpawnStaticMeshActor: mesh=%s at %s scale=%s"),
+        *UsedPath, *MeshActor->GetActorLocation().ToString(), *MeshActor->GetActorScale3D().ToString());
 
     return MeshActor;
 }
@@ -440,6 +480,37 @@ bool UHephaestusWorldSubsystem::SetPointLightProperties(
         Comp->SetAttenuationRadius(AttenuationRadius);
     }
     return true;
+}
+
+
+bool UHephaestusWorldSubsystem::GetView(FVector& OutLocation, FRotator& OutRotation, FVector& OutForward) const
+{
+    OutLocation = FVector::ZeroVector;
+    OutRotation = FRotator::ZeroRotator;
+    OutForward = FVector::ForwardVector;
+
+    UWorld* World = ResolveWorld();
+    if (!World)
+    {
+        return false;
+    }
+
+    if (APlayerController* PC = World->GetFirstPlayerController())
+    {
+        PC->GetPlayerViewPoint(OutLocation, OutRotation);
+        OutForward = OutRotation.Vector();
+        return true;
+    }
+
+    if (APlayerCameraManager* CamMgr = UGameplayStatics::GetPlayerCameraManager(World, 0))
+    {
+        OutLocation = CamMgr->GetCameraLocation();
+        OutRotation = CamMgr->GetCameraRotation();
+        OutForward = OutRotation.Vector();
+        return true;
+    }
+
+    return false;
 }
 
 #undef LOCTEXT_NAMESPACE

@@ -65,6 +65,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
 	bool SetPointLightProperties(const FString& ActorPath, float Intensity, const FLinearColor& Color, float AttenuationRadius = 1000.f);
 
+	/** Player / PIE camera location + forward (for in-view spawns) */
+	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
+	bool GetView(FVector& OutLocation, FRotator& OutRotation, FVector& OutForward) const;
+
 	/** Native (non-UHT) asset registry access */
 	IAssetRegistry& GetAssetRegistry();
 

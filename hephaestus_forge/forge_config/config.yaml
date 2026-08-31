@@ -29,7 +29,7 @@ system:
 # ─── Model Configuration ──────────────────────────────────────────────────────
 models:
   nemotron:
-    model_id: "nvidia/Nemotron-3-Ultra"
+    model_id: "nvidia/nemotron-3-ultra-550b-a55b"
     quantization: "Q4_K_M"
     context_length: 131072
     rope_scaling:

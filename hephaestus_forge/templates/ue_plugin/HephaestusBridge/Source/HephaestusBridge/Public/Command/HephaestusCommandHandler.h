@@ -135,8 +135,12 @@ protected:
 	FHephaestusCommandResult HandleCustomCommand(const TSharedPtr<FJsonObject>& Params);
 
 	bool ParseTransform(const TSharedPtr<FJsonObject>& Json, FTransform& OutTransform) const;
+	/** Parse transform from nested "transform" and/or flat location/rotation/scale fields (object or [x,y,z] arrays). */
+	bool ParseTransformParams(const TSharedPtr<FJsonObject>& Params, FTransform& OutTransform) const;
 	bool ParseVector(const TSharedPtr<FJsonObject>& Json, FVector& OutVector) const;
+	bool ParseVectorField(const TSharedPtr<FJsonObject>& Parent, const FString& FieldName, FVector& OutVector) const;
 	bool ParseRotator(const TSharedPtr<FJsonObject>& Json, FRotator& OutRotator) const;
+	bool ParseRotatorField(const TSharedPtr<FJsonObject>& Parent, const FString& FieldName, FRotator& OutRotator) const;
 
 	FHephaestusCommandResult MakeSuccessResult(const FString& CommandID, const FString& ResultJSON = TEXT("{}"),
 		const TArray<FString>& Assets = TArray<FString>(), const TArray<FString>& Actors = TArray<FString>(), float TimeMs = 0.0f);

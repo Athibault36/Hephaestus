@@ -84,7 +84,7 @@ class SystemScanResult(BaseModel):
 
 class ModelConfig(BaseModel):
     nemotron: dict = Field(default_factory=lambda: {
-        "model_id": "nvidia/Nemotron-3-Ultra",
+        "model_id": "nvidia/nemotron-3-ultra-550b-a55b",
         "quantization": "Q4_K_M",
         "context_length": 131072,
         "rope_scaling": {"type": "linear", "factor": 2.0},
@@ -1272,7 +1272,7 @@ def deploy(
     no_agent: Annotated[bool, typer.Option("--no-agent", help="Launch UE without agent runtime")] = False,
     # NIM API options
     use_nim: Annotated[bool, typer.Option("--use-nim", help="Use NVIDIA NIM API instead of local llama-server")] = False,
-    nim_model: Annotated[str, typer.Option("--nim-model", help="NIM model to use")] = "nvidia/nemotron-3-ultra",
+    nim_model: Annotated[str, typer.Option("--nim-model", help="NIM model to use")] = "nvidia/nemotron-3-ultra-550b-a55b",
 ):
     """
     Deploy and launch UE5.8 with the Hephaestus agent.
@@ -2232,6 +2232,70 @@ def evolve(
     console.print("[green]✓ Evolution complete (stub)[/green]")
 
 
+@app.command("nim-parallel")
+def nim_parallel(
+    task: Annotated[str, typer.Option("--task", "-t", help="Coding task for dual Nemotron")],
+    context_file: Annotated[
+        Optional[Path],
+        typer.Option("--context", "-c", help="Optional file/dir notes to attach"),
+    ] = None,
+    out: Annotated[
+        Optional[Path],
+        typer.Option("--out", "-o", help="Write merged markdown here"),
+    ] = None,
+):
+    """
+    Run Nemotron-3 Ultra and Nemotron-3.5 Lightning in parallel on one coding task.
+
+    Ultra returns architecture/plan; Lightning returns an implementation draft.
+    Requires NVIDIA_API_KEY.
+    """
+    if not (os.environ.get("NVIDIA_API_KEY") or os.environ.get("HEPHAESTUS_LLM_API_KEY")):
+        console.print("[red]✗ Set NVIDIA_API_KEY (or HEPHAESTUS_LLM_API_KEY)[/red]")
+        raise typer.Exit(1)
+
+    try:
+        from hephaestus_forge.cloud.parallel_nim import ParallelNemotronCoder
+        from hephaestus_forge.cloud.nim_client import DEFAULT_CHAT_MODEL, DEFAULT_FAST_MODEL
+    except ImportError:
+        from cloud.parallel_nim import ParallelNemotronCoder
+        from cloud.nim_client import DEFAULT_CHAT_MODEL, DEFAULT_FAST_MODEL
+
+    context = ""
+    if context_file and context_file.exists():
+        if context_file.is_file():
+            context = context_file.read_text(encoding="utf-8", errors="replace")[:12000]
+        else:
+            context = f"(directory) {context_file}"
+
+    console.print(Panel.fit(
+        f"[bold]Parallel Nemotron coding[/bold]\n"
+        f"Ultra: [cyan]{DEFAULT_CHAT_MODEL}[/cyan]\n"
+        f"Lightning: [cyan]{DEFAULT_FAST_MODEL}[/cyan]\n"
+        f"Task: {task[:200]}",
+        border_style="blue",
+    ))
+
+    coder = ParallelNemotronCoder()
+    with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console) as progress:
+        progress.add_task("Calling Ultra + Lightning concurrently...", total=None)
+        result = coder.run_sync(task, context=context)
+
+    if result.ultra_error:
+        console.print(f"[yellow]Ultra error:[/yellow] {result.ultra_error}")
+    if result.lightning_error:
+        console.print(f"[yellow]Lightning error:[/yellow] {result.lightning_error}")
+    if not result.ok:
+        console.print("[red]✗ Both models failed[/red]")
+        raise typer.Exit(1)
+
+    console.print(result.merged_markdown)
+    if out:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(result.merged_markdown, encoding="utf-8")
+        console.print(f"[green]✓ Wrote[/green] {out}")
+
+
 @app.command("gpu-dev")
 def gpu_dev(
     repo: Annotated[Optional[Path], typer.Option("--repo", "-r", help="Hephaestus repo root")] = None,
@@ -2710,7 +2774,7 @@ async def _run_nim_session(task: str, budget_mgr: BudgetManager, cfg: dict):
 
     if task:
         response = await nim_client.chat_completion(
-            model="nvidia/nemotron-3-8b",
+            model="nvidia/nemotron-3-ultra-550b-a55b",
             messages=[{"role": "user", "content": task}],
             max_tokens=512,
         )

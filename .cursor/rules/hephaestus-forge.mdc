@@ -1,0 +1,13 @@
+---
+description: Forge Python CLI, NIM, agent loop, Mission Control
+globs: "hephaestus_forge/**/*.py"
+alwaysApply: false
+---
+
+# hephaestus_forge Python
+
+- Planner LLM defaults to Ultra `nvidia/nemotron-3-ultra-550b-a55b` via NIM; Lightning is the fast parallel peer.
+- Dual coding: `cloud/parallel_nim.py` + `forge nim-parallel` — Ultra plans, Lightning implements (concurrent).
+- Mission Control `/agent/*` only works on a live `forge observe` process; path args with spaces must be quoted.
+- When LLM is requested, do not hide NIM 404/503 behind quiet heuristic — keep `llm_error` visible.
+- Prefer adding pytest for command JSON shapes and model id aliases over manual-only checks.

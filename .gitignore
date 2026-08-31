@@ -1,3 +1,6 @@
+# Cursor OpenAI-compatible local model config (contains API keys)
+.~cursorconfig.json
+
 # Python
 .venv/
 venv/

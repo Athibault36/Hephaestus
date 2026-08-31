@@ -51,14 +51,14 @@ cloud:
         base_url: "https://integrate.api.nvidia.com/v1"
         models:
           - "nvidia/nemotron-3-ultra-550b-a55b"
-          - "nvidia/nemotron-3-ultra"
+          - "nvidia/nemotron-3.5-lightning-30b-a3b"
         pricing:
           nemotron-3-ultra-550b-a55b:
             input: 0.15
             output: 0.60
-          nemotron-3-ultra:
-            input: 0.15
-            output: 0.60
+          nemotron-3.5-lightning-30b-a3b:
+            input: 0.06
+            output: 0.24
 
     - name: "bitdeer"
       priority: 3
@@ -90,7 +90,7 @@ cloud:
         target: "brev:l40s"
         max_cost_per_hour: 3.00
       - condition: "task.type == 'embedding' || task.type == 'fast_edit'"
-        target: "nim:nemotron-3-8b"
+        target: "nim:nemotron-3.5-lightning-30b-a3b"
         max_cost_per_hour: 0.10
       - condition: "always"
         target: "local"

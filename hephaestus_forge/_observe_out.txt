@@ -1,0 +1,12 @@
+✓ Wrote static Mission Control → C:\Users\Alex\OneDrive\Documents\Unreal 
+Projects\test\MissionControl\dist\index.html
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ Mission Control Dashboard                                                    │
+│ Port: 3000                                                                   │
+│ Remote API (proxied): http://127.0.0.1:8765                                  │
+│ Dashboard: C:\Users\Alex\OneDrive\Documents\Unreal                           │
+│ Projects\test\MissionControl\dist                                            │
+└──────────────────────────────────────────────────────────────────────────────┘
+Starting dashboard on http://127.0.0.1:3000
+Press Ctrl+C to stop. Start PIE in UE first for live data.
+If observe was already running: Ctrl+C it, then re-run this command.
