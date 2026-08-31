@@ -29,6 +29,11 @@ else
   pip install -r hephaestus_forge/requirements.txt
 fi
 
+# Install the package itself (editable) so the 'hephaestus_forge' command exists.
+if [ -f pyproject.toml ]; then
+  pip install -e .
+fi
+
 # --- Frontend: Mission Control dashboard (React + Vite) ----------------------
 (
   cd hephaestus_forge/templates/mission_control

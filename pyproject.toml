@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hephaestus-forge"
+version = "0.1.0"
+description = "HephaestusForge — local-first agent factory and runtime for UE5.8 autonomous agents"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+
+# Core CLI + agent runtime dependencies (kept light so the CLI installs fast).
+dependencies = [
+    "typer>=0.12.0",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "rich>=13.0",
+    "pyyaml>=6.0",
+    "httpx>=0.27.0",
+    "huggingface_hub>=0.23.0",
+    "python-socketio>=5.11",
+]
+
+[project.optional-dependencies]
+# Deploy-time FastAPI services (vision, dcc, tts).
+services = [
+    "fastapi>=0.111.0",
+    "uvicorn>=0.30.0",
+    "sse-starlette>=2.0.0",
+    "starlette-context>=0.3.6",
+]
+# GPU dev / autonomous worker extras.
+gpu = [
+    "tiktoken>=0.7.0",
+    "sentence-transformers>=3.0.0",
+]
+dev = [
+    "pytest>=8.2,<10",
+]
+
+[project.scripts]
+hephaestus_forge = "hephaestus_forge.forge:main"
+
+[tool.setuptools.packages.find]
+include = ["hephaestus_forge*"]
+
+[tool.setuptools.package-data]
+"hephaestus_forge" = [
+    "templates/**/*",
+    "forge_config/*",
+    "schemas/*",
+    "scripts/*",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

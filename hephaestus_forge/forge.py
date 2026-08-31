@@ -2419,5 +2419,10 @@ def attach(
     ))
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Console-script entry point (see pyproject [project.scripts])."""
     app()
+
+
+if __name__ == "__main__":
+    main()
