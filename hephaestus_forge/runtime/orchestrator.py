@@ -15,12 +15,14 @@ It is deliberately small and synchronous. Swap in a fake ``LLM`` and a mocked
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from .llm import LLM, LLMResponse, extract_tool_calls_from_text
-from .tools import ToolError, ToolRegistry, ToolResult
+from .errors import ErrorKind, ToolError, tool_error
+from .tools import ToolRegistry, ToolResult
 from .ue_client import UEClient, UEConnectionError
 
 DEFAULT_SYSTEM_PROMPT = (
@@ -100,6 +102,7 @@ class AgentRuntime:
         observe_first: bool = False,
         on_event: Optional[Callable[[TrajectoryEvent], None]] = None,
         allow_text_tool_calls: bool = True,
+        metrics: Optional[Any] = None,
     ):
         self.llm = llm
         self.ue = ue_client
@@ -108,8 +111,8 @@ class AgentRuntime:
         self.max_steps = max(1, int(max_steps))
         self.observe_first = observe_first
         self.on_event = on_event
-        # Recover tool calls from plain text for models without native tool-calling.
         self.allow_text_tool_calls = allow_text_tool_calls
+        self.metrics = metrics
 
     def _emit(self, trajectory: List[TrajectoryEvent], event: TrajectoryEvent) -> None:
         trajectory.append(event)
@@ -123,9 +126,21 @@ class AgentRuntime:
         try:
             return self.registry.execute(self.ue, name, args)
         except ToolError as exc:
-            return ToolResult(tool=name, success=False, error=str(exc))
+            info = getattr(exc, "info", None)
+            if info:
+                return ToolResult.failure(name, info)
+            return ToolResult.failure(name, tool_error("TOOL_INVALID", str(exc)))
         except UEConnectionError as exc:
-            return ToolResult(tool=name, success=False, error=f"UE unreachable: {exc}")
+            info = getattr(exc, "info", None)
+            if info:
+                return ToolResult.failure(name, info)
+            return ToolResult(
+                tool=name,
+                success=False,
+                error=f"UE unreachable: {exc}",
+                error_kind=ErrorKind.TRANSPORT.value,
+                error_code="BRIDGE_TRANSPORT",
+            )
 
     def run(self, goal: str) -> RunResult:
         messages: List[Dict[str, Any]] = [
@@ -149,7 +164,13 @@ class AgentRuntime:
         tools = self.registry.openai_schemas()
 
         for step in range(1, self.max_steps + 1):
+            if self.metrics is not None:
+                self.metrics.record_step()
+            t0 = time.perf_counter()
             response: LLMResponse = self.llm.chat(messages, tools=tools)
+            llm_ms = (time.perf_counter() - t0) * 1000.0
+            if self.metrics is not None:
+                self.metrics.record_llm(llm_ms)
 
             native = bool(response.tool_calls)
             calls = list(response.tool_calls)
@@ -169,7 +190,10 @@ class AgentRuntime:
                 )
 
             if response.content:
-                self._emit(trajectory, TrajectoryEvent("thought", response.content))
+                self._emit(
+                    trajectory,
+                    TrajectoryEvent("thought", response.content, {"llm_time_ms": round(llm_ms, 2)}),
+                )
 
             if native:
                 # OpenAI tool-calling protocol: assistant tool_calls + tool-role results.
@@ -200,12 +224,22 @@ class AgentRuntime:
                 )
                 result = self._execute_tool(call.name, call.arguments)
                 summary = result.to_summary()
+                if self.metrics is not None:
+                    self.metrics.record_tool(
+                        call.name,
+                        result.success,
+                        result.execution_time_ms or 0.0,
+                        error_kind=result.error_kind,
+                    )
+                meta = dict(summary)
+                if result.asset_references:
+                    meta["assets"] = result.asset_references
                 self._emit(
                     trajectory,
                     TrajectoryEvent(
                         "tool_result" if result.success else "error",
                         f"{call.name} -> {'ok' if result.success else result.error}",
-                        summary,
+                        meta,
                     ),
                 )
                 if native:

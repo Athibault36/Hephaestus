@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import httpx
 
 from .config import AUTH_HEADER, RuntimeConfig, load_runtime_config
+from .errors import ErrorInfo, auth_error, transport_error
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8099"
 DEFAULT_TIMEOUT = 10.0
@@ -39,6 +40,10 @@ class UEError(Exception):
 class UEConnectionError(UEError):
     """Raised when the UE bridge cannot be reached or returns a transport error."""
 
+    def __init__(self, message: str, *, code: str = "BRIDGE_TRANSPORT", info: Optional[ErrorInfo] = None):
+        super().__init__(message)
+        self.info = info or transport_error(code, message)
+
 
 @dataclass
 class CommandResult:
@@ -51,6 +56,8 @@ class CommandResult:
     actor_references: List[str] = field(default_factory=list)
     execution_time_ms: float = 0.0
     command_id: str = ""
+    error_kind: Optional[str] = None
+    error_code: Optional[str] = None
 
     @property
     def result(self) -> Dict[str, Any]:
@@ -74,6 +81,8 @@ class CommandResult:
             actor_references=list(data.get("actor_references", data.get("ActorReferences", [])) or []),
             execution_time_ms=float(data.get("execution_time_ms", data.get("ExecutionTimeMs", 0.0)) or 0.0),
             command_id=str(data.get("command_id", data.get("CommandID", "")) or ""),
+            error_kind=data.get("error_kind"),
+            error_code=data.get("error_code"),
         )
 
     @classmethod
@@ -148,6 +157,12 @@ class UEClient:
                     time.sleep(min(0.5 * (2 ** attempt), 2.0))
                     continue
                 raise last_exc
+            if resp.status_code == 401:
+                raise UEConnectionError(
+                    "UE bridge rejected request (401): unauthorized",
+                    code="BRIDGE_UNAUTHORIZED",
+                    info=auth_error("BRIDGE_UNAUTHORIZED", "unauthorized"),
+                )
             if resp.status_code >= 400:
                 raise UEConnectionError(f"UE bridge rejected request ({resp.status_code}): {resp.text[:200]}")
             try:
@@ -163,6 +178,12 @@ class UEClient:
             resp = self._client.get(path)
         except httpx.TransportError as exc:
             raise UEConnectionError(f"Failed to reach UE bridge at {self.base_url}: {exc}") from exc
+        if resp.status_code == 401:
+            raise UEConnectionError(
+                "UE bridge rejected request (401): unauthorized",
+                code="BRIDGE_UNAUTHORIZED",
+                info=auth_error("BRIDGE_UNAUTHORIZED", "unauthorized"),
+            )
         if resp.status_code >= 400:
             raise UEConnectionError(f"UE bridge error ({resp.status_code}): {resp.text[:200]}")
         try:
@@ -176,6 +197,12 @@ class UEClient:
             resp = self._client.get(path)
         except httpx.TransportError as exc:
             raise UEConnectionError(f"Failed to reach UE bridge at {self.base_url}: {exc}") from exc
+        if resp.status_code == 401:
+            raise UEConnectionError(
+                "UE bridge rejected request (401): unauthorized",
+                code="BRIDGE_UNAUTHORIZED",
+                info=auth_error("BRIDGE_UNAUTHORIZED", "unauthorized"),
+            )
         if resp.status_code >= 400:
             raise UEConnectionError(f"UE bridge error ({resp.status_code}) for {path}")
         return resp.content

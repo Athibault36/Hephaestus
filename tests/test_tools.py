@@ -57,7 +57,7 @@ def test_openai_schemas_cover_all_tools_and_use_safe_names():
     schemas = reg.openai_schemas()
     names = {s["function"]["name"] for s in schemas}
     assert "world__spawn_actor" in names  # dots replaced for schema safety
-    assert len(schemas) == 26
+    assert len(schemas) == 27
 
 
 def test_registry_alias_lookup():

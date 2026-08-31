@@ -5,7 +5,8 @@ from __future__ import annotations
 import os
 import subprocess
 import time
-from typing import Callable, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .health import default_http_getter
 
@@ -75,3 +76,38 @@ def shutdown_processes(
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait(timeout=timeout)
+
+
+@dataclass
+class ManagedProcess:
+    name: str
+    proc: subprocess.Popen
+
+
+class ProcessSupervisor:
+    """Track child processes with readiness probes and graceful shutdown."""
+
+    def __init__(self, *, shutdown_timeout: float = 5.0):
+        self._processes: List[ManagedProcess] = []
+        self.shutdown_timeout = shutdown_timeout
+
+    def add(self, name: str, proc: Optional[subprocess.Popen]) -> None:
+        if proc is not None:
+            self._processes.append(ManagedProcess(name, proc))
+
+    def wait_ready(self, name: str, url: str, *, timeout: float = 45.0) -> bool:
+        return wait_for_url(url, timeout=timeout)
+
+    def shutdown(self, log: Optional[Callable[[str], None]] = None) -> None:
+        shutdown_processes(
+            [(m.name, m.proc) for m in self._processes],
+            timeout=self.shutdown_timeout,
+            log=log,
+        )
+        self._processes.clear()
+
+    def __enter__(self) -> "ProcessSupervisor":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.shutdown()

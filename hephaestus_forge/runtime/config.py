@@ -105,3 +105,32 @@ def load_runtime_config(project_root: Optional[Path] = None) -> RuntimeConfig:
     if path is not None:
         return RuntimeConfig.from_yaml(path)
     return RuntimeConfig.defaults()
+
+
+@dataclass(frozen=True)
+class ObservabilityConfig:
+    log_format: str = "text"
+    log_dir: str = "logs"
+    metrics_enabled: bool = False
+    metrics_host: str = DEFAULT_HOST
+    metrics_port: int = 9090
+
+
+def load_observability_config(project_root: Optional[Path] = None) -> ObservabilityConfig:
+    path = find_project_config(project_root)
+    data: Dict[str, Any] = {}
+    if path is not None:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    obs = data.get("observability") or {}
+    metrics = obs.get("metrics") or {}
+    return ObservabilityConfig(
+        log_format=str(obs.get("log_format", "text")),
+        log_dir=str(obs.get("log_dir", "logs")),
+        metrics_enabled=bool(metrics.get("enabled", False)),
+        metrics_host=str(metrics.get("host", DEFAULT_HOST)),
+        metrics_port=int(metrics.get("port", 9090)),
+    )
+
+
+def default_trajectory_log_path(project_root: Path, obs: ObservabilityConfig) -> Path:
+    return project_root / obs.log_dir / "agent_trajectory.jsonl"

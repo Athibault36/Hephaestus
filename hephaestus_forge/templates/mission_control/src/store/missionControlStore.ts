@@ -32,19 +32,26 @@ export interface AssetInfo {
 }
 
 export interface PerformanceMetrics {
-  fps: number;
-  frameTime: number;
-  gpuTime: number;
-  cpuTime: number;
-  drawCalls: number;
-  triangles: number;
-  textureMemory: number;
+  fps: number | null;
+  frameTime: number | null;
+  gpuTime: number | null;
+  cpuTime: number | null;
+  drawCalls: number | null;
+  triangles: number | null;
+  textureMemory: number | null;
+  toolCallCount?: number;
+  measured?: {
+    fps?: boolean;
+    gpuTime?: boolean;
+    toolLatency?: boolean;
+    llmLatency?: boolean;
+  };
   latency: {
-    stt: number;
-    llm: number;
-    tool: number;
-    tts: number;
-    total: number;
+    stt: number | null;
+    llm: number | null;
+    tool: number | null;
+    tts: number | null;
+    total: number | null;
   };
 }
 

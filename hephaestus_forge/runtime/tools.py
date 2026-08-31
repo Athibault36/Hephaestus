@@ -12,13 +12,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from .errors import ErrorInfo, ToolError, infer_command_error, validation_error
+from .validation import validate_required_string, validate_spawn_class_path
 from .ue_client import CommandResult, UEClient
 
 Vec3 = Tuple[float, float, float]
-
-
-class ToolError(Exception):
-    """Raised for unknown tools or invalid tool arguments (not engine failures)."""
 
 
 @dataclass
@@ -32,9 +30,17 @@ class ToolResult:
     actor_references: List[str] = field(default_factory=list)
     asset_references: List[str] = field(default_factory=list)
     execution_time_ms: float = 0.0
+    error_kind: Optional[str] = None
+    error_code: Optional[str] = None
 
     @classmethod
     def from_command(cls, tool: str, result: CommandResult) -> "ToolResult":
+        err_kind = result.error_kind
+        err_code = result.error_code
+        if not result.success and not err_kind:
+            inferred = infer_command_error(result.error_message)
+            err_kind = inferred.kind.value
+            err_code = inferred.code
         return cls(
             tool=tool,
             success=result.success,
@@ -43,6 +49,18 @@ class ToolResult:
             actor_references=result.actor_references,
             asset_references=result.asset_references,
             execution_time_ms=result.execution_time_ms,
+            error_kind=err_kind,
+            error_code=err_code,
+        )
+
+    @classmethod
+    def failure(cls, tool: str, info: ErrorInfo) -> "ToolResult":
+        return cls(
+            tool=tool,
+            success=False,
+            error=info.message,
+            error_kind=info.kind.value,
+            error_code=info.code,
         )
 
     def to_summary(self) -> Dict[str, Any]:
@@ -58,6 +76,10 @@ class ToolResult:
             summary["execution_time_ms"] = self.execution_time_ms
         if not self.success:
             summary["error"] = self.error or "command failed"
+            if self.error_kind:
+                summary["error_kind"] = self.error_kind
+            if self.error_code:
+                summary["error_code"] = self.error_code
         return summary
 
 
@@ -82,7 +104,13 @@ class Tool:
         }
 
     def invoke(self, client: UEClient, args: Dict[str, Any]) -> ToolResult:
-        command, params = self.builder(args or {})
+        try:
+            command, params = self.builder(args or {})
+        except ToolError as exc:
+            info = getattr(exc, "info", None)
+            if info:
+                return ToolResult.failure(self.name, info)
+            return ToolResult.failure(self.name, validation_error("TOOL_INVALID", str(exc)))
         result = client.execute(command, params)
         return ToolResult.from_command(self.name, result)
 
@@ -157,9 +185,7 @@ def _as_rotator(value: Any) -> Dict[str, float]:
 
 # --- concrete tool builders -------------------------------------------------
 def _build_spawn_actor(args: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
-    class_path = args.get("class_path")
-    if not class_path or not isinstance(class_path, str):
-        raise ToolError("world.spawn_actor requires a string 'class_path'")
+    class_path = validate_spawn_class_path(args.get("class_path"))
     params: Dict[str, Any] = {
         "action": "spawn_actor",
         "class_path": class_path,
@@ -191,6 +217,18 @@ def _build_query_spatial(args: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
             "extent": _as_vec3(args.get("extent"), (1000.0, 1000.0, 1000.0)),
         }
     return "world.query_spatial", params
+
+
+def _build_batch_edit(args: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    actors = args.get("actors")
+    if not isinstance(actors, list) or not actors:
+        raise ToolError("world.batch_edit requires a non-empty 'actors' list", code="VALIDATION_MISSING_FIELD")
+    params: Dict[str, Any] = {
+        "action": "batch_edit",
+        "actors": [str(a) for a in actors],
+        "property_edits": args.get("property_edits") or [],
+    }
+    return "world.batch_edit", params
 
 
 def _build_capture_frame(args: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
@@ -265,6 +303,28 @@ QUERY_SPATIAL = Tool(
     builder=_build_query_spatial,
 )
 
+BATCH_EDIT = Tool(
+    name="world.batch_edit",
+    description="Apply property edits to multiple actors in one command.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "actors": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Actor paths to edit.",
+            },
+            "property_edits": {
+                "type": "array",
+                "items": {"type": "object"},
+                "description": "List of {property, value} edits.",
+            },
+        },
+        "required": ["actors"],
+    },
+    builder=_build_batch_edit,
+)
+
 CAPTURE_FRAME = Tool(
     name="vision.capture_frame",
     description=(
@@ -283,10 +343,7 @@ CAPTURE_FRAME = Tool(
 )
 
 def _require_str(args: Dict[str, Any], key: str, tool_name: str) -> str:
-    value = args.get(key)
-    if not value or not isinstance(value, str):
-        raise ToolError(f"{tool_name} requires a string '{key}'")
-    return value
+    return validate_required_string(args.get(key), key, tool_name)
 
 
 def _action_tool(
@@ -495,7 +552,7 @@ EXTENDED_TOOLS: List[Tool] = [
     AUDIO_SYNTHESIZE,
 ]
 
-DEFAULT_TOOLS: List[Tool] = [SPAWN_ACTOR, DESTROY_ACTOR, QUERY_SPATIAL, CAPTURE_FRAME]
+DEFAULT_TOOLS: List[Tool] = [SPAWN_ACTOR, DESTROY_ACTOR, QUERY_SPATIAL, BATCH_EDIT, CAPTURE_FRAME]
 
 
 def build_default_registry(include_extended: bool = True) -> ToolRegistry:

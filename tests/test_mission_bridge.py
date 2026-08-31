@@ -41,9 +41,11 @@ def test_metrics_emitted_with_real_tool_latency():
     last = metrics[-1]
     assert last["latency"]["tool"] == 7.5      # most recent tool time
     assert last["latency"]["total"] == 20.0    # accumulated
-    assert last["drawCalls"] == 2              # tool-call count
-    # Unmeasured fields are honestly zero, not fabricated.
-    assert last["fps"] == 0 and last["gpuTime"] == 0.0
+    assert last["toolCallCount"] == 2
+    assert last["drawCalls"] is None
+    assert last["measured"]["toolLatency"] is True
+    # Unmeasured UE GPU fields are honestly null, not fabricated.
+    assert last["fps"] is None and last["gpuTime"] is None
 
 
 def test_emit_frame_sends_png_data_url():

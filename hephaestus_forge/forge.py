@@ -1294,6 +1294,7 @@ def deploy(
     project_path: Annotated[Optional[Path], typer.Argument(help="Project root directory")] = None,
     headless: Annotated[bool, typer.Option("--headless", help="Run UE in headless mode")] = False,
     no_agent: Annotated[bool, typer.Option("--no-agent", help="Launch UE without agent runtime")] = False,
+    services_only: Annotated[bool, typer.Option("--services-only", help="Start agent services without launching UE (Linux-testable)")] = False,
     # NIM API options
     use_nim: Annotated[bool, typer.Option("--use-nim", help="Use NVIDIA NIM API instead of local llama-server")] = False,
     nim_model: Annotated[str, typer.Option("--nim-model", help="NIM model to use")] = "nvidia/nemotron-3-ultra",
@@ -1318,16 +1319,17 @@ def deploy(
     config = ForgeConfig.load(config_path)
     
     ue_path = Path(config.system.ue_path) if config.system.ue_path else None
-    if not ue_path or not ue_path.exists():
+    if not services_only and (not ue_path or not ue_path.exists()):
         console.print("[red]✗ UE5.8 not found. Set UE_PATH in config.yaml[/red]")
         raise typer.Exit(1)
     
     nim_msg = f"\nLLM Backend: [cyan]NVIDIA NIM ({nim_model})[/cyan]" if use_nim else ""
+    mode_label = "Services only" if services_only else ("Headless" if headless else "Editor")
     
     console.print(Panel.fit(
         f"[bold]Deploying Hephaestus Agent[/bold]\n"
-        f"UE5.8: [cyan]{ue_path}[/cyan]\n"
-        f"Mode: [cyan]{'Headless' if headless else 'Editor'}[/cyan]\n"
+        f"UE5.8: [cyan]{ue_path or 'skipped (--services-only)'}[/cyan]\n"
+        f"Mode: [cyan]{mode_label}[/cyan]\n"
         f"Agent Runtime: [cyan]{'Disabled' if no_agent else 'Enabled'}[/cyan]"
         f"{nim_msg}",
         border_style="green",
@@ -1426,7 +1428,21 @@ def deploy(
             else:
                 console.print(f"[yellow]⚠ DCC bridge not found in {dcc_dir}[/yellow]")
     
-    # Launch UE
+    # Launch UE (skip when --services-only for Linux lifecycle testing)
+    if services_only:
+        console.print("[cyan]Services-only mode: UE launch skipped. Press Ctrl+C to stop services.[/cyan]")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Shutting down...[/yellow]")
+        finally:
+            from hephaestus_forge.runtime.deploy_helpers import shutdown_processes
+            shutdown_processes(processes, log=lambda msg: console.print(f"[dim]{msg}[/dim]"))
+            if nim_client:
+                asyncio.run(nim_client.close())
+        return
+
     ue_editor = ue_path / "Engine" / "Binaries" / "Win64" / "UnrealEditor.exe"
     if not ue_editor.exists():
         console.print("[red]✗ UnrealEditor.exe not found[/red]")
@@ -2323,14 +2339,37 @@ def agent(
     from hephaestus_forge.runtime import UEClient, build_default_registry
     from hephaestus_forge.runtime.llm import LLMClient
     from hephaestus_forge.runtime.orchestrator import AgentRuntime, TrajectoryEvent
-    from hephaestus_forge.runtime.config import load_runtime_config
+    from hephaestus_forge.runtime.config import (
+        default_trajectory_log_path,
+        load_observability_config,
+        load_runtime_config,
+    )
 
     project_root = (project_path or Path.cwd()).resolve()
     runtime_cfg = load_runtime_config(project_root)
+    obs_cfg = load_observability_config(project_root)
     resolved_ue_url = ue_url or runtime_cfg.ue_bridge_url
     resolved_llm_url = llm_url if llm_url != "http://127.0.0.1:8080/v1" else runtime_cfg.llm_base_url
     resolved_bridge_port = bridge_port if bridge_port != 8081 else runtime_cfg.mission_bridge_port
     registry = build_default_registry()
+
+    if trajectory_log is None and obs_cfg.log_format.lower() == "jsonl":
+        trajectory_log = default_trajectory_log_path(project_root, obs_cfg)
+
+    metrics_server = None
+    metrics_registry = None
+    if obs_cfg.metrics_enabled:
+        from hephaestus_forge.runtime.metrics import MetricsServer, get_metrics_registry
+
+        metrics_registry = get_metrics_registry()
+        metrics_server = MetricsServer(
+            host=obs_cfg.metrics_host,
+            port=obs_cfg.metrics_port,
+            registry=metrics_registry,
+        ).start()
+        console.print(
+            f"[green]✓ Metrics at http://{obs_cfg.metrics_host}:{obs_cfg.metrics_port}/metrics[/green]"
+        )
 
     console.print(Panel.fit(
         f"[bold]Hephaestus Agent[/bold]\n"
@@ -2358,6 +2397,7 @@ def agent(
     if trajectory_log is not None:
         from hephaestus_forge.runtime.logging_jsonl import JsonlTrajectoryLogger
 
+        trajectory_log.parent.mkdir(parents=True, exist_ok=True)
         jsonl_logger = JsonlTrajectoryLogger(trajectory_log, goal=goal).open()
         console.print(f"[green]✓ Logging trajectory to {trajectory_log}[/green]")
 
@@ -2394,7 +2434,13 @@ def agent(
 
     llm = LLMClient(base_url=resolved_llm_url, model=model)
     runtime = AgentRuntime(
-        llm, ue_client, registry, max_steps=max_steps, observe_first=observe_first, on_event=on_event
+        llm,
+        ue_client,
+        registry,
+        max_steps=max_steps,
+        observe_first=observe_first,
+        on_event=on_event,
+        metrics=metrics_registry,
     )
 
     try:
@@ -2406,6 +2452,8 @@ def agent(
             mission_bridge.stop()
         if jsonl_logger is not None:
             jsonl_logger.close()
+        if metrics_server is not None:
+            metrics_server.stop()
 
     console.print(Panel.fit(
         f"[bold]{'Completed' if result.completed else 'Stopped'}[/bold]\n"
@@ -2604,6 +2652,109 @@ def voice_verify(
         border_style=color,
     ))
     raise typer.Exit(0 if result.accepted else 1)
+
+
+@voice_app.command("listen")
+def voice_listen(
+    wav: Annotated[Optional[Path], typer.Option("--wav", help="16-bit PCM WAV to feed through stub pipeline")] = None,
+    project_path: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project root")] = None,
+    stream: Annotated[bool, typer.Option("--stream", help="Stream voice events to Mission Control")] = False,
+    bridge_port: Annotated[int, typer.Option("--bridge-port", help="Mission Control Socket.IO port")] = 8081,
+    threshold: Annotated[float, typer.Option("--threshold", help="Speaker acceptance threshold")] = 0.75,
+    transcript: Annotated[str, typer.Option("--transcript", help="Stub ASR transcript when speech is detected")] = "spawn a cube at the origin",
+    vad_threshold: Annotated[float, typer.Option("--vad-threshold", help="Stub VAD energy threshold")] = 0.01,
+):
+    """
+    Process audio through the stub voice pipeline (Linux-testable, no mic/GPU).
+
+    Loads the enrolled operator profile, segments speech with StubVAD, verifies
+    the speaker, and transcribes with StubASR. Use --wav with a short clip or
+    rely on synthetic silence (no utterances). Pair with --stream to push events
+    to Mission Control.
+    """
+    import numpy as np
+
+    from hephaestus_forge.runtime.config import load_runtime_config
+    from hephaestus_forge.runtime.voice.backends import StubASR, StubEmbedder, StubVAD, frames_from_wav
+    from hephaestus_forge.runtime.voice.pipeline import RealtimeVoicePipeline
+
+    project_root = (project_path or Path.cwd()).resolve()
+    verifier = _voice_store(project_root).load(threshold=threshold)
+    if verifier is None or not verifier.is_enrolled:
+        console.print("[red]✗ No operator enrolled. Run 'hephaestus_forge voice enroll' first.[/red]")
+        raise typer.Exit(1)
+
+    mission_bridge = None
+    if stream:
+        from hephaestus_forge.runtime.mission_bridge import MissionBridge
+
+        runtime_cfg = load_runtime_config(project_root)
+        port = bridge_port if bridge_port != 8081 else runtime_cfg.mission_bridge_port
+        mission_bridge = MissionBridge(port=port).start()
+        mission_bridge.emit_voice_active(True)
+        console.print(f"[green]✓ Streaming voice events on port {port}[/green]")
+
+    accepted: list[str] = []
+    events: list[str] = []
+
+    def on_utterance(event) -> None:
+        accepted.append(event.text)
+        console.print(f"[green]✓ Operator: {event.text}[/green] (sim={event.similarity:.3f})")
+        if mission_bridge is not None:
+            mission_bridge.emit_speaker(True)
+            from hephaestus_forge.runtime.orchestrator import TrajectoryEvent
+
+            mission_bridge.on_agent_event(
+                TrajectoryEvent("observation", f'Heard: "{event.text}"', {"similarity": round(event.similarity, 3)})
+            )
+
+    def on_event(event) -> None:
+        events.append(event.reason)
+        if not event.accepted and event.reason == "unrecognized_speaker":
+            console.print(f"[yellow]Ignored unrecognized speaker (sim={event.similarity:.3f})[/yellow]")
+            if mission_bridge is not None:
+                mission_bridge.emit_speaker(False)
+
+    pipeline = RealtimeVoicePipeline(
+        StubVAD(threshold=vad_threshold),
+        StubEmbedder(),
+        StubASR(text=transcript),
+        verifier,
+        min_speech_frames=3,
+        hangover_frames=2,
+        on_utterance=on_utterance,
+        on_event=on_event,
+    )
+
+    if wav is not None:
+        if not wav.exists():
+            console.print(f"[red]✗ WAV not found: {wav}[/red]")
+            raise typer.Exit(1)
+        frames = frames_from_wav(str(wav))
+    else:
+        # Synthetic speech burst for stub testing without a file.
+        frames = [np.full(512, 0.5, dtype=np.float32) for _ in range(6)] + [np.zeros(512, dtype=np.float32) for _ in range(3)]
+
+    console.print(Panel.fit(
+        f"[bold]Voice listen (stub)[/bold]\n"
+        f"Frames: [cyan]{len(frames)}[/cyan]  Operator: [cyan]{verifier.profile.name}[/cyan]",
+        border_style="blue",
+    ))
+
+    try:
+        for frame in frames:
+            pipeline.process_frame(frame)
+    finally:
+        if mission_bridge is not None:
+            mission_bridge.emit_voice_active(False)
+            mission_bridge.stop()
+
+    console.print(Panel.fit(
+        f"[bold]{'Accepted' if accepted else 'No operator utterance'}[/bold]\n"
+        f"Accepted: [cyan]{len(accepted)}[/cyan]  Events: [cyan]{len(events)}[/cyan]",
+        border_style="green" if accepted else "yellow",
+    ))
+    raise typer.Exit(0 if accepted else 1)
 
 
 def main() -> None:

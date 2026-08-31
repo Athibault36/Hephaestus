@@ -66,6 +66,7 @@ class MissionBridge:
         self._tool_calls = 0
         self._latency_total_ms = 0.0
         self._last_tool_ms = 0.0
+        self._last_llm_ms = 0.0
 
     # -- event mapping (pure; testable) --------------------------------------
     def _emit(self, event: str, data: Any) -> None:
@@ -97,27 +98,54 @@ class MissionBridge:
         # Emit real tool-latency metrics for the Performance panel.
         if event.type in ("tool_result", "error"):
             self._tool_calls += 1
-            tool_ms = float((event.metadata or {}).get("execution_time_ms", 0.0) or 0.0)
+            meta = event.metadata or {}
+            tool_ms = float(meta.get("execution_time_ms", 0.0) or 0.0)
+            llm_ms = float(meta.get("llm_time_ms", 0.0) or 0.0)
+            if llm_ms:
+                self._last_llm_ms = llm_ms
             self._last_tool_ms = tool_ms
             self._latency_total_ms += tool_ms
             self._emit("metrics", self._metrics_payload())
 
+        # Push asset references to the Asset Browser.
+        assets = (event.metadata or {}).get("assets")
+        if assets:
+            asset_infos = [
+                {
+                    "path": path,
+                    "name": path.rsplit("/", 1)[-1],
+                    "type": "Asset",
+                    "size": 0,
+                    "modified": 0,
+                    "tags": [],
+                }
+                for path in assets
+            ]
+            self._emit("assets", asset_infos)
+
     def _metrics_payload(self) -> Dict[str, Any]:
-        """Full PerformanceMetrics shape; measured latency is real, rest 0 (unmeasured)."""
+        """PerformanceMetrics shape; agent-measured fields set, UE GPU fields marked unmeasured."""
         return {
-            "fps": 0,
-            "frameTime": 0.0,
-            "gpuTime": 0.0,
-            "cpuTime": 0.0,
-            "drawCalls": self._tool_calls,  # repurposed: agent tool-call count
-            "triangles": 0,
-            "textureMemory": 0,
+            "fps": None,
+            "frameTime": None,
+            "gpuTime": None,
+            "cpuTime": None,
+            "drawCalls": None,
+            "triangles": None,
+            "textureMemory": None,
+            "toolCallCount": self._tool_calls,
+            "measured": {
+                "fps": False,
+                "gpuTime": False,
+                "toolLatency": self._last_tool_ms > 0,
+                "llmLatency": self._last_llm_ms > 0,
+            },
             "latency": {
-                "stt": 0,
-                "llm": 0,
-                "tool": round(self._last_tool_ms, 2),
-                "tts": 0,
-                "total": round(self._latency_total_ms, 2),
+                "stt": None,
+                "llm": round(self._last_llm_ms, 2) if self._last_llm_ms else None,
+                "tool": round(self._last_tool_ms, 2) if self._last_tool_ms else None,
+                "tts": None,
+                "total": round(self._latency_total_ms, 2) if self._latency_total_ms else None,
             },
         }
 
@@ -155,6 +183,7 @@ class MissionBridge:
         self._tool_calls = 0
         self._latency_total_ms = 0.0
         self._last_tool_ms = 0.0
+        self._last_llm_ms = 0.0
 
     # -- optional live server ------------------------------------------------
     def start(self) -> "MissionBridge":

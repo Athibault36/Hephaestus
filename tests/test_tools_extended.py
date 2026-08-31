@@ -32,12 +32,12 @@ def test_extended_tools_build_and_execute(tool_name, args):
 
 def test_extended_registry_count():
     reg = build_default_registry()
-    assert len(reg.names()) == 26
+    assert len(reg.names()) == 27
 
 
 def test_build_without_extended():
     reg = build_default_registry(include_extended=False)
-    assert len(reg.names()) == 4
+    assert len(reg.names()) == 5
 
 
 def test_blueprint_compile_requires_path():

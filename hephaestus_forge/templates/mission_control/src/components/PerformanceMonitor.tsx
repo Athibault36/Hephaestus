@@ -1,4 +1,13 @@
-import { useMissionControlStore } from '../store/missionControlStore';
+import { useMissionControlStore, PerformanceMetrics } from '../store/missionControlStore';
+
+function isMeasured(metrics: PerformanceMetrics, key: keyof NonNullable<PerformanceMetrics['measured']>): boolean {
+  return metrics.measured?.[key] === true;
+}
+
+function fmtNum(value: number | null | undefined, digits = 1, suffix = ''): string {
+  if (value == null) return '--';
+  return `${value.toFixed(digits)}${suffix}`;
+}
 
 export function PerformanceMonitor() {
   const metrics = useMissionControlStore((s) => s.metrics);
@@ -41,57 +50,79 @@ export function PerformanceMonitor() {
     );
   }
 
-  const fpsStatus = getMetricStatus(metrics.fps, { warning: 45, critical: 30 }, false);
-  const gpuTimeStatus = getMetricStatus(metrics.gpuTime, { warning: 12, critical: 16 });
-  const drawCallsStatus = getMetricStatus(metrics.drawCalls, { warning: 2000, critical: 4000 });
-  const textureMemoryStatus = getMetricStatus(metrics.textureMemory / (1024 ** 3), { warning: 8, critical: 12 });
-  const latencyStatus = getMetricStatus(metrics.latency.total, { warning: 300, critical: 500 });
+  const fpsValue = metrics.fps ?? null;
+  const gpuTimeValue = metrics.gpuTime ?? null;
+  const toolCalls = metrics.toolCallCount ?? metrics.drawCalls ?? null;
+  const textureMemGb = metrics.textureMemory != null ? metrics.textureMemory / (1024 ** 3) : null;
+  const totalLatency = metrics.latency.total ?? null;
 
-  const networkMs =
-    metrics.latency.total - metrics.latency.stt - metrics.latency.llm - metrics.latency.tool - metrics.latency.tts;
-  // Scale bars by the largest component so the breakdown reads clearly.
-  const latencyDenom = Math.max(
-    metrics.latency.stt, metrics.latency.llm, metrics.latency.tool, metrics.latency.tts, networkMs, 1,
-  );
-  const latencyRows: { label: string; value: number }[] = [
-    { label: 'STT (Whisper)', value: metrics.latency.stt },
-    { label: 'LLM (Nemotron)', value: metrics.latency.llm },
-    { label: 'Tool Execution', value: metrics.latency.tool },
-    { label: 'TTS (Kokoro)', value: metrics.latency.tts },
-    { label: 'Network', value: networkMs },
+  const fpsStatus = fpsValue != null
+    ? getMetricStatus(fpsValue, { warning: 45, critical: 30 }, false)
+    : 'neutral';
+  const gpuTimeStatus = gpuTimeValue != null
+    ? getMetricStatus(gpuTimeValue, { warning: 12, critical: 16 })
+    : 'neutral';
+  const toolCallStatus = toolCalls != null
+    ? getMetricStatus(toolCalls, { warning: 2000, critical: 4000 })
+    : 'neutral';
+  const textureMemoryStatus = textureMemGb != null
+    ? getMetricStatus(textureMemGb, { warning: 8, critical: 12 })
+    : 'neutral';
+  const latencyStatus = totalLatency != null
+    ? getMetricStatus(totalLatency, { warning: 300, critical: 500 })
+    : 'neutral';
+
+  const stt = metrics.latency.stt ?? 0;
+  const llm = metrics.latency.llm ?? 0;
+  const tool = metrics.latency.tool ?? 0;
+  const tts = metrics.latency.tts ?? 0;
+  const total = metrics.latency.total ?? 0;
+  const networkMs = total - stt - llm - tool - tts;
+
+  const latencyDenom = Math.max(stt, llm, tool, tts, networkMs, 1);
+  const latencyRows: { label: string; value: number | null; measured: boolean }[] = [
+    { label: 'STT (Whisper)', value: metrics.latency.stt, measured: metrics.latency.stt != null },
+    { label: 'LLM (Nemotron)', value: metrics.latency.llm, measured: isMeasured(metrics, 'llmLatency') },
+    { label: 'Tool Execution', value: metrics.latency.tool, measured: isMeasured(metrics, 'toolLatency') },
+    { label: 'TTS (Kokoro)', value: metrics.latency.tts, measured: metrics.latency.tts != null },
+    { label: 'Network', value: metrics.latency.total != null ? networkMs : null, measured: false },
   ];
 
   return (
     <div className="perf-grid">
       {renderMetricCard(
         'FPS',
-        metrics.fps,
+        fpsValue != null ? fpsValue : 'N/A',
         fpsStatus,
-        `${metrics.frameTime.toFixed(1)} ms/frame`
+        fpsValue != null ? `${fmtNum(metrics.frameTime)} ms/frame` : 'Not measured (UE GPU required)'
       )}
       {renderMetricCard(
         'GPU Time',
-        `${metrics.gpuTime.toFixed(1)} ms`,
+        gpuTimeValue != null ? `${fmtNum(gpuTimeValue)} ms` : 'N/A',
         gpuTimeStatus,
-        `CPU: ${metrics.cpuTime.toFixed(1)} ms`
+        gpuTimeValue != null ? `CPU: ${fmtNum(metrics.cpuTime)} ms` : 'Not measured'
       )}
       {renderMetricCard(
-        'Draw Calls',
-        metrics.drawCalls.toLocaleString(),
-        drawCallsStatus,
-        `${(metrics.triangles / 1_000_000).toFixed(1)}M tris`
+        toolCalls != null && metrics.toolCallCount != null ? 'Tool Calls' : 'Draw Calls',
+        toolCalls != null ? toolCalls.toLocaleString() : 'N/A',
+        toolCallStatus,
+        metrics.triangles != null
+          ? `${(metrics.triangles / 1_000_000).toFixed(1)}M tris`
+          : metrics.toolCallCount != null
+            ? 'Agent-measured'
+            : 'Not measured'
       )}
       {renderMetricCard(
         'Texture Mem',
-        `${(metrics.textureMemory / (1024 ** 3)).toFixed(1)} GB`,
+        textureMemGb != null ? `${textureMemGb.toFixed(1)} GB` : 'N/A',
         textureMemoryStatus,
-        'Budget: 8 GB'
+        textureMemGb != null ? 'Budget: 8 GB' : 'Not measured'
       )}
       {renderMetricCard(
         'Total Latency',
-        `${metrics.latency.total} ms`,
+        totalLatency != null ? `${totalLatency} ms` : 'N/A',
         latencyStatus,
-        'Target: <300ms'
+        totalLatency != null ? 'Target: <300ms' : 'Awaiting agent activity'
       )}
 
       <div className="perf-card" style={{ gridColumn: '1 / -1' }}>
@@ -103,10 +134,16 @@ export function PerformanceMonitor() {
               <div className="latency-bar">
                 <div
                   className="latency-bar-fill"
-                  style={{ width: `${Math.min(100, (row.value / latencyDenom) * 100)}%` }}
+                  style={{
+                    width: row.value != null
+                      ? `${Math.min(100, (row.value / latencyDenom) * 100)}%`
+                      : '0%',
+                  }}
                 />
               </div>
-              <span className="latency-value">{row.value} ms</span>
+              <span className="latency-value">
+                {row.value != null ? `${row.value} ms` : '--'}
+              </span>
             </div>
           ))}
         </div>
