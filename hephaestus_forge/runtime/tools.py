@@ -54,6 +54,8 @@ class ToolResult:
             summary["actors"] = self.actor_references
         if self.asset_references:
             summary["assets"] = self.asset_references
+        if self.execution_time_ms:
+            summary["execution_time_ms"] = self.execution_time_ms
         if not self.success:
             summary["error"] = self.error or "command failed"
         return summary

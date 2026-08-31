@@ -31,6 +31,21 @@ def test_action_and_error_states():
     assert "acting" in states and "error" in states
 
 
+def test_metrics_emitted_with_real_tool_latency():
+    sio = FakeSio()
+    bridge = MissionBridge(server=sio)
+    bridge.on_agent_event(TrajectoryEvent("tool_result", "ok", {"execution_time_ms": 12.5}))
+    bridge.on_agent_event(TrajectoryEvent("tool_result", "ok", {"execution_time_ms": 7.5}))
+    metrics = [d for e, d in sio.emitted if e == "metrics"]
+    assert len(metrics) == 2
+    last = metrics[-1]
+    assert last["latency"]["tool"] == 7.5      # most recent tool time
+    assert last["latency"]["total"] == 20.0    # accumulated
+    assert last["drawCalls"] == 2              # tool-call count
+    # Unmeasured fields are honestly zero, not fabricated.
+    assert last["fps"] == 0 and last["gpuTime"] == 0.0
+
+
 def test_actors_accumulate_and_emit_full_list():
     sio = FakeSio()
     bridge = MissionBridge(server=sio)

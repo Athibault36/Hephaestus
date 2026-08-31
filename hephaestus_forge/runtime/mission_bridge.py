@@ -62,6 +62,9 @@ class MissionBridge:
         self._wsgi_thread: Optional[threading.Thread] = None
         self._httpd = None
         self._actors: List[Dict[str, Any]] = []
+        self._tool_calls = 0
+        self._latency_total_ms = 0.0
+        self._last_tool_ms = 0.0
 
     # -- event mapping (pure; testable) --------------------------------------
     def _emit(self, event: str, data: Any) -> None:
@@ -90,6 +93,33 @@ class MissionBridge:
                 self._actors.append(self._actor_info(path))
             self._emit("actors", self._actors)
 
+        # Emit real tool-latency metrics for the Performance panel.
+        if event.type in ("tool_result", "error"):
+            self._tool_calls += 1
+            tool_ms = float((event.metadata or {}).get("execution_time_ms", 0.0) or 0.0)
+            self._last_tool_ms = tool_ms
+            self._latency_total_ms += tool_ms
+            self._emit("metrics", self._metrics_payload())
+
+    def _metrics_payload(self) -> Dict[str, Any]:
+        """Full PerformanceMetrics shape; measured latency is real, rest 0 (unmeasured)."""
+        return {
+            "fps": 0,
+            "frameTime": 0.0,
+            "gpuTime": 0.0,
+            "cpuTime": 0.0,
+            "drawCalls": self._tool_calls,  # repurposed: agent tool-call count
+            "triangles": 0,
+            "textureMemory": 0,
+            "latency": {
+                "stt": 0,
+                "llm": 0,
+                "tool": round(self._last_tool_ms, 2),
+                "tts": 0,
+                "total": round(self._latency_total_ms, 2),
+            },
+        }
+
     @staticmethod
     def _actor_info(path: str) -> Dict[str, Any]:
         name = path.rsplit(".", 1)[-1] if path else "Actor"
@@ -106,6 +136,9 @@ class MissionBridge:
 
     def reset(self) -> None:
         self._actors = []
+        self._tool_calls = 0
+        self._latency_total_ms = 0.0
+        self._last_tool_ms = 0.0
 
     # -- optional live server ------------------------------------------------
     def start(self) -> "MissionBridge":
