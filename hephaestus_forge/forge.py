@@ -176,7 +176,6 @@ class CloudConfig(BaseModel):
 
 class ForgeConfig(BaseSettings):
     model_config = SettingsConfigDict(
-        yaml_file="config.yaml",
         env_prefix="HEPHAESTUS_",
         case_sensitive=False,
         extra="allow",
@@ -195,6 +194,18 @@ class ForgeConfig(BaseSettings):
         # Load cloud config from template if exists
         cloud_config = CloudConfig()
         return cls(project_name=project_name, system=scan, paths=paths, cloud=cloud_config)
+
+    @classmethod
+    def load(cls, config_path: "str | Path") -> "ForgeConfig":
+        """Load a project's ``config.yaml`` into a ForgeConfig.
+
+        The pydantic-settings ``yaml_file`` config key is ignored without a
+        YamlConfigSettingsSource, so read and validate the YAML explicitly.
+        Extra keys (e.g. ``agent_runtime``) are preserved via ``extra="allow"``.
+        """
+        path = Path(config_path)
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        return cls.model_validate(data)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1265,7 +1276,7 @@ def deploy(
     
     # Load config
     config_path = forge_dir / "config.yaml"
-    config = ForgeConfig(_yaml_file=str(config_path))
+    config = ForgeConfig.load(config_path)
     
     ue_path = Path(config.system.ue_path) if config.system.ue_path else None
     if not ue_path or not ue_path.exists():
@@ -1434,7 +1445,7 @@ def observe(
     
     # Load config
     config_path = forge_dir / "config.yaml"
-    config = ForgeConfig(_yaml_file=str(config_path))
+    config = ForgeConfig.load(config_path)
     
     dashboard_dir = project_root / config.paths.mission_control_dir
     
