@@ -2249,6 +2249,8 @@ def agent(
     model: Annotated[str, typer.Option("--model", help="LLM model id")] = "nvidia/nemotron-3-ultra",
     max_steps: Annotated[int, typer.Option("--max-steps", help="Max think/act iterations")] = 12,
     observe_first: Annotated[bool, typer.Option("--observe-first", help="Capture a frame before first thought")] = False,
+    stream: Annotated[bool, typer.Option("--stream", help="Stream chain-of-thought to Mission Control")] = False,
+    bridge_port: Annotated[int, typer.Option("--bridge-port", help="Mission Control Socket.IO port")] = 8081,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Show tools/config and exit without calling the LLM")] = False,
 ):
     """
@@ -2286,10 +2288,18 @@ def agent(
         "tool_result": "✅", "error": "❌", "final": "🏁",
     }
 
+    mission_bridge = None
+    if stream:
+        from hephaestus_forge.runtime.mission_bridge import MissionBridge
+        mission_bridge = MissionBridge(port=bridge_port).start()
+        console.print(f"[green]✓ Streaming to Mission Control on port {bridge_port}[/green]")
+
     def on_event(event: "TrajectoryEvent") -> None:
         icon = icons.get(event.type, "•")
         color = "red" if event.type == "error" else "cyan" if event.type == "thought" else "white"
         console.print(f"  {icon} [{color}]{event.type}[/{color}]: {event.content}")
+        if mission_bridge is not None:
+            mission_bridge.on_agent_event(event)
 
     ue_client = UEClient(base_url=resolved_ue_url)
     if not ue_client.is_healthy():
@@ -2306,6 +2316,8 @@ def agent(
     finally:
         ue_client.close()
         llm.close()
+        if mission_bridge is not None:
+            mission_bridge.stop()
 
     console.print(Panel.fit(
         f"[bold]{'Completed' if result.completed else 'Stopped'}[/bold]\n"

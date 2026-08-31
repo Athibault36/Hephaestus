@@ -90,8 +90,8 @@ export const useMissionControlStore = create<MissionControlState>((set, get) => 
   socket: null,
   isConnected: false,
   connect: () => {
-    const socket = io('ws://127.0.0.1:8081', {
-      transports: ['websocket'],
+    const socket = io('http://127.0.0.1:8081', {
+      transports: ['polling', 'websocket'],
       reconnection: true,
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
