@@ -1358,7 +1358,10 @@ def deploy(
             console.print(f"[yellow]⚠ {name} not ready after {timeout:.0f}s (continuing)[/yellow]")
 
     try:
-        with ProcessSupervisor(shutdown_timeout=5.0) as supervisor:
+        with ProcessSupervisor(
+            shutdown_timeout=5.0,
+            log=lambda msg: console.print(f"[dim]{msg}[/dim]"),
+        ) as supervisor:
             if not no_agent:
                 obs_runtime = start_observability(
                     load_observability_config(project_root),

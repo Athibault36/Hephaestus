@@ -38,7 +38,25 @@ hephaestus_forge compile C:\path\to\Project\Project.uproject
 curl http://127.0.0.1:8099/health
 ```
 
-- [ ] Returns `{"status":"ok","commands":N}` with N > 0
+- [ ] Returns `{"status":"ok","commands":27}` (or current tool count from `build_default_registry()`)
+
+## Validation smoke test
+
+```powershell
+curl -X POST http://127.0.0.1:8099/command -H "Content-Type: application/json" -d "{\"command\":\"world.spawn_actor\",\"params\":{\"class_path\":\"evil/path\"}}"
+```
+
+- [ ] Returns `success: false` with class_path prefix denied (ValidateCommand wired in C++)
+
+## Observability (optional)
+
+When `observability.metrics.enabled: true` in config:
+
+```powershell
+curl http://127.0.0.1:9090/metrics
+```
+
+- [ ] Prometheus text exposition responds after `forge deploy --services-only` or `forge agent`
 
 ## Agent smoke test
 

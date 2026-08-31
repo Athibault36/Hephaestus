@@ -87,9 +87,10 @@ class ManagedProcess:
 class ProcessSupervisor:
     """Track child processes with readiness probes and graceful shutdown."""
 
-    def __init__(self, *, shutdown_timeout: float = 5.0):
+    def __init__(self, *, shutdown_timeout: float = 5.0, log: Optional[Callable[[str], None]] = None):
         self._processes: List[ManagedProcess] = []
         self.shutdown_timeout = shutdown_timeout
+        self._log = log
 
     def add(self, name: str, proc: Optional[subprocess.Popen]) -> None:
         if proc is not None:
@@ -110,4 +111,4 @@ class ProcessSupervisor:
         return self
 
     def __exit__(self, *exc: Any) -> None:
-        self.shutdown()
+        self.shutdown(log=self._log)
