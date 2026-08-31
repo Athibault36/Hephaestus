@@ -16,13 +16,13 @@ from hephaestus_forge.runtime.deploy_helpers import (
 def test_bridge_env_from_config_includes_token_and_port():
     cfg = {
         "network": {"ue_bridge_port": 8199},
-        "security": {"bridge_token": "abc", "require_auth": True, "localhost_only": True},
+        "security": {"bridge_token": "abc", "require_auth": True, "localhost_only": False},
     }
     env = bridge_env_from_config(cfg)
     assert env["HEPHAESTUS_UE_PORT"] == "8199"
     assert env["HEPHAESTUS_BRIDGE_TOKEN"] == "abc"
     assert env["HEPHAESTUS_REQUIRE_AUTH"] == "1"
-    assert env["HEPHAESTUS_LOCALHOST_ONLY"] == "1"
+    assert "HEPHAESTUS_LOCALHOST_ONLY" not in env
 
 
 def test_wait_for_url_times_out_on_unreachable():

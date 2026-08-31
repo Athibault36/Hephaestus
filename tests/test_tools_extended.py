@@ -40,7 +40,7 @@ def test_build_without_extended():
     assert len(reg.names()) == 5
 
 
-def test_blueprint_compile_requires_path():
+def test_blueprint_compile_requires_valid_game_path():
     reg = build_default_registry()
     with pytest.raises(ToolError):
-        reg.get("blueprint.compile").builder({})
+        reg.get("blueprint.compile").builder({"blueprint_path": "/tmp/evil.uasset"})
