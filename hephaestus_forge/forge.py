@@ -2307,6 +2307,10 @@ def agent(
     observe_first: Annotated[bool, typer.Option("--observe-first", help="Capture a frame before first thought")] = False,
     stream: Annotated[bool, typer.Option("--stream", help="Stream chain-of-thought to Mission Control")] = False,
     bridge_port: Annotated[int, typer.Option("--bridge-port", help="Mission Control Socket.IO port")] = 8081,
+    trajectory_log: Annotated[
+        Optional[Path],
+        typer.Option("--trajectory-log", help="Append JSONL trajectory log to this file"),
+    ] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Show tools/config and exit without calling the LLM")] = False,
 ):
     """
@@ -2350,6 +2354,13 @@ def agent(
     }
 
     mission_bridge = None
+    jsonl_logger = None
+    if trajectory_log is not None:
+        from hephaestus_forge.runtime.logging_jsonl import JsonlTrajectoryLogger
+
+        jsonl_logger = JsonlTrajectoryLogger(trajectory_log, goal=goal).open()
+        console.print(f"[green]✓ Logging trajectory to {trajectory_log}[/green]")
+
     if stream:
         from hephaestus_forge.runtime.mission_bridge import MissionBridge
         mission_bridge = MissionBridge(port=resolved_bridge_port).start()
@@ -2362,6 +2373,8 @@ def agent(
         icon = icons.get(event.type, "•")
         color = "red" if event.type == "error" else "cyan" if event.type == "thought" else "white"
         console.print(f"  {icon} [{color}]{event.type}[/{color}]: {event.content}")
+        if jsonl_logger is not None:
+            jsonl_logger.on_event(event)
         if mission_bridge is not None:
             mission_bridge.on_agent_event(event)
             # Relay captured viewport frames to the dashboard's Viewport panel.
@@ -2391,6 +2404,8 @@ def agent(
         llm.close()
         if mission_bridge is not None:
             mission_bridge.stop()
+        if jsonl_logger is not None:
+            jsonl_logger.close()
 
     console.print(Panel.fit(
         f"[bold]{'Completed' if result.completed else 'Stopped'}[/bold]\n"

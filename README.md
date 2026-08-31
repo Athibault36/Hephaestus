@@ -68,6 +68,7 @@ Open http://127.0.0.1:3000. The viewport panel polls `capture_frame` → `GET /f
 - [User guide](docs/USER_GUIDE.md) — onboarding
 - [Production roadmap](docs/ROADMAP.md) — milestones and gates
 - [Windows plugin compile](docs/plugin_setup_windows.md) — first engine bring-up
+- [M1 compile checklist](docs/M1_CHECKLIST.md) — step-by-step verification on Windows
 
 ## Development
 
