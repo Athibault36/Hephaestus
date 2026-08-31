@@ -2131,5 +2131,187 @@ async def _wait_for_deployment(ip: str, budget_mgr: BudgetManager, timeout: int 
     raise TimeoutError("Deployment did not become healthy")
 
 
+def _load_project_config(project_root: Path) -> dict:
+    """Load a scaffolded project's config.yaml into a plain dict."""
+    config_path = project_root / ".hephaestus_forge" / "config.yaml"
+    if not config_path.exists():
+        return {}
+    with config_path.open(encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+
+@app.command()
+def health(
+    project_path: Annotated[Optional[Path], typer.Argument(help="Project root directory")] = None,
+    as_json: Annotated[bool, typer.Option("--json", help="Emit machine-readable JSON")] = False,
+    strict: Annotated[bool, typer.Option("--strict", help="Exit non-zero on any warning too")] = False,
+    timeout: Annotated[float, typer.Option("--timeout", help="Per-service probe timeout (s)")] = 2.0,
+):
+    """
+    Pre-deploy status check: verifies toolchain, config, models, and services.
+
+    Green means ready; warnings are non-fatal (e.g. a service not started yet);
+    a critical failure (missing project/config) exits non-zero.
+    """
+    from hephaestus_forge.runtime.health import (
+        FAIL, OK, WARN, Check, HealthReport, check_file, check_service, check_tool,
+    )
+    from hephaestus_forge.gpu_dev.llama_manager import LlamaServerManager
+
+    project_root = (project_path or Path.cwd()).resolve()
+    cfg = _load_project_config(project_root)
+    report = HealthReport()
+
+    # --- Project & config ---
+    config_file = project_root / ".hephaestus_forge" / "config.yaml"
+    report.add(check_file("project config", config_file, critical=True))
+
+    # --- Toolchain ---
+    report.add(check_tool("python", Path(sys.executable).name, critical=True,
+                          which=lambda e: sys.executable))
+    report.add(check_tool("node", "node"))
+    report.add(check_tool("npm", "npm"))
+    gpu_check = check_tool("nvidia-smi (GPU)", "nvidia-smi")
+    if gpu_check.status == OK:
+        gpu_check.detail = LlamaServerManager.nvidia_smi_summary()
+    report.add(gpu_check)
+
+    # --- UE engine ---
+    ue_path = (cfg.get("system") or {}).get("ue_path")
+    if ue_path:
+        report.add(check_file("UE5.8 engine", Path(ue_path), warn_only=True))
+    else:
+        report.add(Check("UE5.8 engine", WARN, "system.ue_path not set (needed for compile/deploy)"))
+
+    # --- Model files (large, gitignored; warn if absent) ---
+    runtime_cfg = cfg.get("agent_runtime") or {}
+    runtime_dir = project_root / (cfg.get("paths", {}) or {}).get("agent_runtime_dir", "Agent_Runtime")
+    for svc in ("llama_server", "tts_server", "vision_stack"):
+        model_rel = (runtime_cfg.get(svc) or {}).get("model_path")
+        if model_rel:
+            report.add(check_file(f"model: {svc}", project_root / model_rel, warn_only=True))
+
+    # --- Services (probed over HTTP; usually down before deploy) ---
+    net = cfg.get("network") or {}
+    inference = ((cfg.get("models") or {}).get("inference")) or {}
+    llama_host = inference.get("host", "127.0.0.1")
+    llama_port = inference.get("port", 8080)
+    endpoints = [
+        ("llama-server", f"http://{llama_host}:{llama_port}/v1/models"),
+        ("tts-server", f"http://127.0.0.1:{net.get('tts_port', 8082)}/health"),
+        ("vision-stack", f"http://127.0.0.1:{net.get('vision_port', 8083)}/health"),
+        ("dcc-bridge", f"http://127.0.0.1:{net.get('dcc_bridge_port', 8084)}/health"),
+        ("mission-control", f"http://127.0.0.1:{net.get('dashboard_port', 3000)}/"),
+        ("ue-bridge", os.environ.get("HEPHAESTUS_UE_URL", "http://127.0.0.1:8099") + "/health"),
+    ]
+    for name, url in endpoints:
+        report.add(check_service(name, url, timeout=timeout))
+
+    # --- Mission Control build artifact ---
+    mc_dir = project_root / (cfg.get("paths", {}) or {}).get("mission_control_dir", "MissionControl")
+    report.add(check_file("dashboard build (dist)", mc_dir / "dist", warn_only=True))
+
+    if as_json:
+        console.print_json(json.dumps(report.to_dict()))
+    else:
+        table = Table(title="HephaestusForge Health", show_lines=False)
+        table.add_column("Check", style="bold")
+        table.add_column("Status")
+        table.add_column("Detail", style="dim", overflow="fold")
+        style_for = {OK: "[green]OK[/green]", WARN: "[yellow]WARN[/yellow]", FAIL: "[red]FAIL[/red]"}
+        for c in report.checks:
+            label = style_for.get(c.status, c.status)
+            if c.status == FAIL and c.critical:
+                label = "[bold red]FAIL*[/bold red]"
+            table.add_row(c.name, label, c.detail)
+        console.print(table)
+        counts = report.counts()
+        verdict_color = {OK: "green", WARN: "yellow", FAIL: "red"}[report.overall]
+        console.print(Panel.fit(
+            f"Overall: [{verdict_color}]{report.overall.upper()}[/{verdict_color}]  "
+            f"([green]{counts[OK]} ok[/green], [yellow]{counts[WARN]} warn[/yellow], [red]{counts[FAIL]} fail[/red])",
+            border_style=verdict_color,
+        ))
+
+    if not report.healthy or (strict and report.overall != OK):
+        raise typer.Exit(1)
+
+
+@app.command()
+def agent(
+    goal: Annotated[str, typer.Option("--goal", "-g", help="Natural-language goal for the agent")],
+    project_path: Annotated[Optional[Path], typer.Argument(help="Project root directory")] = None,
+    ue_url: Annotated[Optional[str], typer.Option("--ue-url", help="UE bridge URL")] = None,
+    llm_url: Annotated[str, typer.Option("--llm-url", help="OpenAI-compatible LLM base URL")] = "http://127.0.0.1:8080/v1",
+    model: Annotated[str, typer.Option("--model", help="LLM model id")] = "nvidia/nemotron-3-ultra",
+    max_steps: Annotated[int, typer.Option("--max-steps", help="Max think/act iterations")] = 12,
+    observe_first: Annotated[bool, typer.Option("--observe-first", help="Capture a frame before first thought")] = False,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Show tools/config and exit without calling the LLM")] = False,
+):
+    """
+    Run the MVP orchestrator: LLM -> tools -> UE loop toward a goal.
+
+    Connects to a running UE editor (HephaestusBridge HTTP server) and an
+    OpenAI-compatible LLM (local llama-server or NIM), then reasons and acts
+    with world.* / vision.* tools until the goal is complete.
+    """
+    from hephaestus_forge.runtime import UEClient, build_default_registry
+    from hephaestus_forge.runtime.llm import LLMClient
+    from hephaestus_forge.runtime.orchestrator import AgentRuntime, TrajectoryEvent
+
+    resolved_ue_url = ue_url or os.environ.get("HEPHAESTUS_UE_URL", "http://127.0.0.1:8099")
+    registry = build_default_registry()
+
+    console.print(Panel.fit(
+        f"[bold]Hephaestus Agent[/bold]\n"
+        f"Goal: [cyan]{goal}[/cyan]\n"
+        f"UE bridge: [cyan]{resolved_ue_url}[/cyan]\n"
+        f"LLM: [cyan]{model} @ {llm_url}[/cyan]\n"
+        f"Tools: [cyan]{', '.join(registry.names())}[/cyan]",
+        border_style="green",
+    ))
+
+    if dry_run:
+        console.print("[yellow]Dry run — not contacting LLM or UE.[/yellow]")
+        for schema in registry.openai_schemas():
+            fn = schema["function"]
+            console.print(f"  • [bold]{fn['name']}[/bold]: {fn['description']}")
+        return
+
+    icons = {
+        "observation": "👁️", "thought": "🧠", "action": "⚡",
+        "tool_result": "✅", "error": "❌", "final": "🏁",
+    }
+
+    def on_event(event: "TrajectoryEvent") -> None:
+        icon = icons.get(event.type, "•")
+        color = "red" if event.type == "error" else "cyan" if event.type == "thought" else "white"
+        console.print(f"  {icon} [{color}]{event.type}[/{color}]: {event.content}")
+
+    ue_client = UEClient(base_url=resolved_ue_url)
+    if not ue_client.is_healthy():
+        console.print(f"[yellow]⚠ UE bridge not reachable at {resolved_ue_url}. "
+                      f"Start UE via 'hephaestus_forge deploy' first.[/yellow]")
+
+    llm = LLMClient(base_url=llm_url, model=model)
+    runtime = AgentRuntime(
+        llm, ue_client, registry, max_steps=max_steps, observe_first=observe_first, on_event=on_event
+    )
+
+    try:
+        result = runtime.run(goal)
+    finally:
+        ue_client.close()
+        llm.close()
+
+    console.print(Panel.fit(
+        f"[bold]{'Completed' if result.completed else 'Stopped'}[/bold]\n"
+        f"Steps: {result.steps}  Tool calls: {result.tool_calls}\n"
+        f"{result.final_message}",
+        border_style="green" if result.completed else "yellow",
+    ))
+    raise typer.Exit(0 if result.completed else 1)
+
+
 if __name__ == "__main__":
     app()
