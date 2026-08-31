@@ -1180,7 +1180,7 @@ def compile(
     """
     from hephaestus_forge.ue_build import (
         build_ubt_command, default_target_platform, editor_target_name,
-        find_uproject, resolve_ue_root,
+        find_uproject, link_plugin, resolve_ue_root,
     )
 
     project_root = (project_path or Path.cwd()).resolve()
@@ -1193,6 +1193,15 @@ def compile(
 
     # Resolve the engine from config.system.ue_path or the environment.
     cfg = _load_project_config(project_root)
+
+    # Ensure the plugin is discoverable under Plugins/ (UE ignores other dirs).
+    plugin_rel = (cfg.get("paths") or {}).get("ue_plugin_dir", "UE5_Plugin_Source/HephaestusBridge")
+    if not dry_run:
+        dest, action = link_plugin(uproject.parent, plugin_rel)
+        if action == "missing-source":
+            dest, action = link_plugin(project_root, plugin_rel)
+        if action in ("linked", "copied"):
+            console.print(f"[green]✓ Plugin {action} into {dest}[/green]")
     ue_root = resolve_ue_root((cfg.get("system") or {}).get("ue_path"))
 
     tp = target_platform or default_target_platform()

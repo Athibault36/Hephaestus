@@ -86,6 +86,33 @@ def editor_target_name(uproject: Path) -> str:
     return f"{uproject.stem}Editor"
 
 
+def link_plugin(project_root: Path, plugin_source_rel: str) -> tuple[Path, str]:
+    """Ensure the plugin is discoverable under ``<project>/Plugins/<Name>``.
+
+    The scaffold places sources under a non-standard dir (e.g.
+    ``UE5_Plugin_Source/HephaestusBridge``), but Unreal only auto-discovers
+    plugins in ``Plugins/``. This links (or copies as a fallback) the source
+    into place. Returns ``(dest_path, action)`` where action is one of
+    ``exists`` | ``linked`` | ``copied`` | ``missing-source``.
+    """
+    import os
+    import shutil
+
+    source = (project_root / plugin_source_rel).resolve()
+    dest = project_root / "Plugins" / source.name
+    if not source.exists():
+        return dest, "missing-source"
+    if dest.exists():
+        return dest, "exists"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.symlink(source, dest, target_is_directory=True)
+        return dest, "linked"
+    except (OSError, NotImplementedError):
+        shutil.copytree(source, dest)
+        return dest, "copied"
+
+
 def build_ubt_command(
     ue_root: Path,
     uproject: Path,

@@ -55,6 +55,30 @@ def test_build_ubt_command_editor_target():
     assert "-clean" in clean_cmd
 
 
+def test_link_plugin_symlinks_into_plugins(tmp_path: Path):
+    from hephaestus_forge.ue_build import link_plugin
+
+    src = tmp_path / "UE5_Plugin_Source" / "HephaestusBridge"
+    src.mkdir(parents=True)
+    (src / "HephaestusBridge.uplugin").write_text("{}")
+
+    dest, action = link_plugin(tmp_path, "UE5_Plugin_Source/HephaestusBridge")
+    assert action in ("linked", "copied")
+    assert dest == tmp_path / "Plugins" / "HephaestusBridge"
+    assert (dest / "HephaestusBridge.uplugin").exists()
+
+    # Idempotent: second call sees it already in place.
+    _, action2 = link_plugin(tmp_path, "UE5_Plugin_Source/HephaestusBridge")
+    assert action2 == "exists"
+
+
+def test_link_plugin_missing_source(tmp_path: Path):
+    from hephaestus_forge.ue_build import link_plugin
+
+    _, action = link_plugin(tmp_path, "UE5_Plugin_Source/HephaestusBridge")
+    assert action == "missing-source"
+
+
 def test_resolve_ue_root_from_env(tmp_path: Path):
     engine = tmp_path / "UE_5.8"
     engine.mkdir()
