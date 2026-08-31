@@ -238,8 +238,10 @@ class AgentRuntime:
                         if self.tracer is not None
                         else _null_context()
                     )
-                    with tool_ctx:
+                    with tool_ctx as span:
                         result = self._execute_tool(call.name, call.arguments)
+                        if result.command_id and hasattr(span, "attributes"):
+                            span.attributes["command_id"] = result.command_id
                     summary = result.to_summary()
                     if self.metrics is not None:
                         self.metrics.record_tool(

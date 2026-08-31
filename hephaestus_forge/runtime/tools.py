@@ -39,6 +39,7 @@ class ToolResult:
     execution_time_ms: float = 0.0
     error_kind: Optional[str] = None
     error_code: Optional[str] = None
+    command_id: str = ""
 
     @classmethod
     def from_command(cls, tool: str, result: CommandResult) -> "ToolResult":
@@ -58,6 +59,7 @@ class ToolResult:
             execution_time_ms=result.execution_time_ms,
             error_kind=err_kind,
             error_code=err_code,
+            command_id=result.command_id,
         )
 
     @classmethod
@@ -81,6 +83,8 @@ class ToolResult:
             summary["assets"] = self.asset_references
         if self.execution_time_ms:
             summary["execution_time_ms"] = self.execution_time_ms
+        if self.command_id:
+            summary["command_id"] = self.command_id
         if not self.success:
             summary["error"] = self.error or "command failed"
             if self.error_kind:

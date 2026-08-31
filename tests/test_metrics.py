@@ -16,6 +16,15 @@ def test_registry_render_includes_counters():
     assert 'tool="world.spawn_actor"' in text
 
 
+def test_latency_summary_percentiles():
+    reg = MetricsRegistry()
+    for ms in (10.0, 20.0, 30.0, 40.0, 100.0):
+        reg.record_tool("world.query_spatial", True, ms)
+    summary = reg.latency_summary()
+    assert summary["tool_p50_ms"] is not None
+    assert summary["tool_p95_ms"] >= summary["tool_p50_ms"]
+
+
 def test_metrics_server_serves_metrics():
     reg = MetricsRegistry()
     reg.record_step()

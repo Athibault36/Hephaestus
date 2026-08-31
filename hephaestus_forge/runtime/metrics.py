@@ -68,6 +68,26 @@ def _format_labels(labels: Dict[str, str]) -> str:
     return "{" + inner + "}"
 
 
+@dataclass
+class _LatencySamples:
+    """Ring buffer for percentile estimates alongside Prometheus histograms."""
+
+    max_samples: int = 2048
+    values: List[float] = field(default_factory=list)
+
+    def observe(self, value: float) -> None:
+        self.values.append(value)
+        if len(self.values) > self.max_samples:
+            self.values = self.values[-self.max_samples :]
+
+    def percentile(self, p: float) -> Optional[float]:
+        if not self.values:
+            return None
+        ordered = sorted(self.values)
+        idx = min(len(ordered) - 1, max(0, int(round((p / 100.0) * (len(ordered) - 1)))))
+        return ordered[idx]
+
+
 class MetricsRegistry:
     """Thread-safe metrics registry with Prometheus text exposition."""
 
@@ -78,6 +98,8 @@ class MetricsRegistry:
         self.ue_errors = _Counter("hephaestus_ue_errors_total", "UE bridge errors by kind")
         self.tool_latency = _Histogram("hephaestus_tool_latency_ms", "Tool execution latency in ms")
         self.llm_latency = _Histogram("hephaestus_llm_latency_ms", "LLM chat latency in ms")
+        self._tool_samples = _LatencySamples()
+        self._llm_samples = _LatencySamples()
 
     def record_step(self) -> None:
         with self._lock:
@@ -88,12 +110,26 @@ class MetricsRegistry:
         with self._lock:
             self.tool_calls.inc({"tool": tool, "status": status})
             self.tool_latency.observe({"tool": tool}, latency_ms)
+            self._tool_samples.observe(latency_ms)
             if not success and error_kind:
                 self.ue_errors.inc({"kind": error_kind})
 
     def record_llm(self, latency_ms: float) -> None:
         with self._lock:
             self.llm_latency.observe({}, latency_ms)
+            self._llm_samples.observe(latency_ms)
+
+    def latency_summary(self) -> Dict[str, Optional[float]]:
+        """Estimated p50/p95/p99 latencies in ms for tool and LLM paths."""
+        with self._lock:
+            return {
+                "tool_p50_ms": self._tool_samples.percentile(50),
+                "tool_p95_ms": self._tool_samples.percentile(95),
+                "tool_p99_ms": self._tool_samples.percentile(99),
+                "llm_p50_ms": self._llm_samples.percentile(50),
+                "llm_p95_ms": self._llm_samples.percentile(95),
+                "llm_p99_ms": self._llm_samples.percentile(99),
+            }
 
     def render(self) -> str:
         with self._lock:
