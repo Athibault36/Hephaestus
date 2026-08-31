@@ -1156,90 +1156,82 @@ def compile(
     project_path: Annotated[Optional[Path], typer.Argument(help="Project root directory")] = None,
     clean: Annotated[bool, typer.Option("--clean", help="Clean build")] = False,
     hot_reload: Annotated[bool, typer.Option("--hot-reload", help="Attempt hot reload in running editor")] = False,
+    configuration: Annotated[str, typer.Option("--configuration", help="Build configuration")] = "Development",
+    target_platform: Annotated[Optional[str], typer.Option("--platform", help="Target platform (Win64/Linux/Mac)")] = None,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Print the build command without running it")] = False,
 ):
     """
-    Compile the HephaestusBridge UE5.8 plugin.
+    Compile the project editor target (builds the HephaestusBridge plugin).
 
-    Generates C++ headers from skill_manifest.json, runs UnrealBuildTool,
-    and prepares the plugin for deployment.
+    Locates the project's .uproject (root or a subfolder such as Hephaestus/),
+    resolves the UE5.8 engine from config/env, and invokes UnrealBuildTool on
+    the '<Project>Editor' target. Use --dry-run to print the exact command.
     """
-    project_root = project_path or Path.cwd()
-    forge_dir = project_root / ".hephaestus_forge"
-    
-    if not forge_dir.exists():
-        console.print(f"[red]✗ Not a Hephaestus project: {project_root}[/red]")
+    from hephaestus_forge.ue_build import (
+        build_ubt_command, default_target_platform, editor_target_name,
+        find_uproject, resolve_ue_root,
+    )
+
+    project_root = (project_path or Path.cwd()).resolve()
+
+    # Locate the .uproject (repo keeps it under Hephaestus/).
+    uproject = find_uproject(project_root)
+    if not uproject:
+        console.print(f"[red]✗ No .uproject found under {project_root}[/red]")
         raise typer.Exit(1)
-    
-    # Load config
-    config_path = forge_dir / "config.yaml"
-    config = ForgeConfig(_yaml_file=str(config_path))
-    
-    ue_path = Path(config.system.ue_path) if config.system.ue_path else None
-    if not ue_path or not ue_path.exists():
-        console.print("[red]✗ UE5.8 not found. Set UE_PATH in config.yaml[/red]")
-        raise typer.Exit(1)
-    
-    plugin_dir = project_root / config.paths.ue_plugin_dir
-    if not plugin_dir.exists():
-        console.print(f"[red]✗ Plugin source not found: {plugin_dir}[/red]")
-        raise typer.Exit(1)
-    
+
+    # Resolve the engine from config.system.ue_path or the environment.
+    cfg = _load_project_config(project_root)
+    ue_root = resolve_ue_root((cfg.get("system") or {}).get("ue_path"))
+
+    tp = target_platform or default_target_platform()
+    target = editor_target_name(uproject)
+
     console.print(Panel.fit(
-        f"[bold]Compiling HephaestusBridge Plugin[/bold]\n"
-        f"UE5.8: [cyan]{ue_path}[/cyan]\n"
-        f"Plugin: [cyan]{plugin_dir}[/cyan]",
+        f"[bold]Compiling {uproject.stem} (editor target)[/bold]\n"
+        f"Project: [cyan]{uproject}[/cyan]\n"
+        f"Target: [cyan]{target} {tp} {configuration}[/cyan]\n"
+        f"UE5.8: [cyan]{ue_root or 'NOT FOUND'}[/cyan]",
         border_style="blue",
     ))
-    
-    # Find UnrealBuildTool
-    ubt_path = ue_path / "Engine" / "Build" / "BatchFiles" / "UnrealBuildTool.exe"
-    if not ubt_path.exists():
-        ubt_path = ue_path / "Engine" / "Binaries" / "DotNET" / "UnrealBuildTool" / "UnrealBuildTool.exe"
-    
-    if not ubt_path.exists():
-        console.print("[red]✗ UnrealBuildTool not found[/red]")
+
+    if not ue_root:
+        console.print("[red]✗ UE5.8 engine not found. Set system.ue_path in config.yaml "
+                      "or the UE_PATH environment variable.[/red]")
+        if not dry_run:
+            raise typer.Exit(1)
+        console.print("[yellow](dry-run) Using placeholder engine path for command preview.[/yellow]")
+        ue_root = Path("C:/Program Files/Epic Games/UE_5.8")
+
+    cmd = build_ubt_command(
+        ue_root, uproject, target=target, target_platform=tp,
+        configuration=configuration, clean=clean,
+    )
+
+    if dry_run:
+        console.print("[bold]Build command:[/bold]")
+        console.print(f"  [cyan]{' '.join(cmd)}[/cyan]")
+        return
+
+    build_script = Path(cmd[0])
+    if not build_script.exists():
+        console.print(f"[red]✗ Build script not found: {build_script}[/red]")
         raise typer.Exit(1)
-    
-    # Build command
-    target = "HephaestusBridge"
-    platform_arg = "Win64"
-    config_arg = "Development"
-    
-    cmd = [
-        str(ubt_path),
-        target,
-        platform_arg,
-        config_arg,
-        f"-Project=\"{plugin_dir / 'HephaestusBridge.uplugin'}\"",
-        "-Module=HephaestusBridge",
-        "-NoEngineChanges",
-    ]
-    
-    if clean:
-        cmd.append("-Clean")
-    
+
     console.print(f"[dim]Running: {' '.join(cmd)}[/dim]")
-    
+
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
         console=console,
     ) as progress:
-        task = progress.add_task("Compiling with UnrealBuildTool...", total=None)
-        
+        progress.add_task("Compiling with UnrealBuildTool...", total=None)
         start_time = time.time()
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            cwd=str(ue_path),
-        )
+        result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(ue_root))
         elapsed = time.time() - start_time
-    
+
     if result.returncode == 0:
         console.print(f"[green]✓ Compilation successful ({elapsed:.1f}s)[/green]")
-        
-        # Check for hot reload
         if hot_reload:
             console.print("[yellow]Hot reload not yet implemented[/yellow]")
     else:
