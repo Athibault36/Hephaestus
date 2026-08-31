@@ -46,6 +46,24 @@ def test_metrics_emitted_with_real_tool_latency():
     assert last["fps"] == 0 and last["gpuTime"] == 0.0
 
 
+def test_emit_frame_sends_png_data_url():
+    sio = FakeSio()
+    bridge = MissionBridge(server=sio)
+    png = b"\x89PNG\r\n\x1a\n fake-bytes"
+    bridge.emit_frame(png, width=1920, height=1080)
+    frames = [d for e, d in sio.emitted if e == "frame"]
+    assert len(frames) == 1
+    assert frames[0]["dataUrl"].startswith("data:image/png;base64,")
+    assert frames[0]["width"] == 1920 and frames[0]["height"] == 1080
+
+
+def test_emit_frame_ignores_empty():
+    sio = FakeSio()
+    bridge = MissionBridge(server=sio)
+    bridge.emit_frame(b"")
+    assert not [e for e, _ in sio.emitted if e == "frame"]
+
+
 def test_actors_accumulate_and_emit_full_list():
     sio = FakeSio()
     bridge = MissionBridge(server=sio)

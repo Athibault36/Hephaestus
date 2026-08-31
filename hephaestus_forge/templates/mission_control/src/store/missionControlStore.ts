@@ -83,6 +83,10 @@ interface MissionControlState {
   setIsRecording: (recording: boolean) => void;
   audioLevel: number;
   setAudioLevel: (level: number) => void;
+
+  // Viewport frame (PNG data URL pushed by the agent bridge)
+  latestFrame: string | null;
+  setLatestFrame: (dataUrl: string | null) => void;
 }
 
 export const useMissionControlStore = create<MissionControlState>((set, get) => ({
@@ -131,6 +135,10 @@ export const useMissionControlStore = create<MissionControlState>((set, get) => 
       set({ audioLevel: level });
     });
 
+    socket.on('frame', (frame: { dataUrl: string }) => {
+      if (frame && frame.dataUrl) set({ latestFrame: frame.dataUrl });
+    });
+
     set({ socket });
   },
 
@@ -177,4 +185,8 @@ export const useMissionControlStore = create<MissionControlState>((set, get) => 
   setIsRecording: (recording) => set({ isRecording: recording }),
   audioLevel: 0,
   setAudioLevel: (level) => set({ audioLevel: level }),
+
+  // Viewport frame
+  latestFrame: null,
+  setLatestFrame: (dataUrl) => set({ latestFrame: dataUrl }),
 }));

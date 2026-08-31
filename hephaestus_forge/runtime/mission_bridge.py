@@ -11,6 +11,7 @@ emitter) so it can be unit tested without sockets.
 
 from __future__ import annotations
 
+import base64
 import threading
 import time
 import uuid
@@ -133,6 +134,13 @@ class MissionBridge:
             "isSelected": False,
             "components": [],
         }
+
+    def emit_frame(self, png_bytes: bytes, width: int = 0, height: int = 0) -> None:
+        """Relay a captured viewport frame to the dashboard as a PNG data URL."""
+        if not png_bytes:
+            return
+        data_url = "data:image/png;base64," + base64.b64encode(png_bytes).decode("ascii")
+        self._emit("frame", {"dataUrl": data_url, "width": width, "height": height, "timestamp": _now_ms()})
 
     def reset(self) -> None:
         self._actors = []

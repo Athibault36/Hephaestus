@@ -2309,6 +2309,15 @@ def agent(
         console.print(f"  {icon} [{color}]{event.type}[/{color}]: {event.content}")
         if mission_bridge is not None:
             mission_bridge.on_agent_event(event)
+            # Relay captured viewport frames to the dashboard's Viewport panel.
+            result = (event.metadata or {}).get("result") or {}
+            frame_id = result.get("frame_id")
+            if frame_id is not None:
+                try:
+                    png = ue_client.get_frame(int(frame_id))
+                    mission_bridge.emit_frame(png, int(result.get("width", 0) or 0), int(result.get("height", 0) or 0))
+                except Exception:
+                    pass
 
     ue_client = UEClient(base_url=resolved_ue_url)
     if not ue_client.is_healthy():

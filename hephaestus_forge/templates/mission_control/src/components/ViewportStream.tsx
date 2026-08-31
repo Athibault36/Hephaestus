@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useMissionControlStore } from '../store/missionControlStore';
 
 export function ViewportStream() {
-  const { isConnected } = useMissionControlStore();
+  const { isConnected, latestFrame } = useMissionControlStore();
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
   const [stats, setStats] = useState({ fps: 0, bitrate: 0, latency: 0 });
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -50,6 +50,13 @@ export function ViewportStream() {
           playsInline
           muted
           style={{ width: '100%', height: '100%' }}
+        />
+      ) : latestFrame ? (
+        <img
+          className="viewport-stream"
+          src={latestFrame}
+          alt="Latest captured UE viewport frame"
+          style={{ width: '100%', height: '100%', objectFit: 'contain' }}
         />
       ) : (
         <canvas
