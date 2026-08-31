@@ -140,5 +140,6 @@ See Mission Control **Voice Console** for live status (no push-to-talk).
 ## Next steps
 
 - [ROADMAP.md](ROADMAP.md) — production milestones
+- [COMMAND_API.md](COMMAND_API.md) — HTTP bridge and tool reference
 - [plugin_setup_windows.md](plugin_setup_windows.md) — first Windows compile
 - GitHub issue #2 — agent-runtime MVP tracking
