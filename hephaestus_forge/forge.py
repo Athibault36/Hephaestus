@@ -1464,55 +1464,163 @@ def observe(
     dist_dir = dashboard_dir / "dist"
     index_html = dist_dir / "index.html"
 
-    # Prefer prebuilt static dashboard; only run npm if package.json exists and dist is missing
-    if not index_html.exists():
-        package_json = dashboard_dir / "package.json"
-        if package_json.exists():
-            console.print("[yellow]Dashboard not built. Building with npm...[/yellow]")
-            result = subprocess.run(
-                ["npm", "run", "build"],
-                cwd=str(dashboard_dir),
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode != 0:
-                console.print("[red]✗ npm build failed — writing static fallback[/red]")
-                console.print(result.stderr)
-                _write_mission_control_fallback(dist_dir, api)
-        else:
-            _write_mission_control_fallback(dist_dir, api)
-
-    if not index_html.exists():
-        _write_mission_control_fallback(dist_dir, api)
+    # Always refresh dashboard HTML; empty API base = same-origin /v1/* via proxy below
+    _write_mission_control_fallback(dist_dir, "")
 
     console.print(Panel.fit(
         f"[bold]Mission Control Dashboard[/bold]\n"
         f"Port: [cyan]{port}[/cyan]\n"
-        f"Remote API: [cyan]{api}[/cyan]\n"
+        f"Remote API (proxied): [cyan]{api}[/cyan]\n"
         f"Dashboard: [cyan]{dist_dir}[/cyan]",
         border_style="blue",
     ))
 
     console.print(f"[green]Starting dashboard on http://127.0.0.1:{port}[/green]")
     console.print("[dim]Press Ctrl+C to stop. Start PIE in UE first for live data.[/dim]")
+    console.print("[yellow]If observe was already running: Ctrl+C it, then re-run this command.[/yellow]")
 
     try:
         import http.server
         import socketserver
+        import urllib.error
+        import urllib.request
         import webbrowser
+
+        remote_api = api.rstrip("/")
 
         class SPAHandler(http.server.SimpleHTTPRequestHandler):
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, directory=str(dist_dir), **kwargs)
 
+            def _proxy(self, method: str) -> bool:
+                path = self.path.split("?")[0]
+                if not path.startswith("/v1/"):
+                    return False
+                url = remote_api + self.path
+                length = int(self.headers.get("Content-Length", "0") or 0)
+                body = self.rfile.read(length) if length > 0 else None
+                req = urllib.request.Request(url, data=body, method=method)
+                ctype = self.headers.get("Content-Type")
+                if ctype:
+                    req.add_header("Content-Type", ctype)
+                try:
+                    with urllib.request.urlopen(req, timeout=60) as resp:
+                        data = resp.read()
+                        self.send_response(resp.status)
+                        self.send_header("Content-Type", resp.headers.get("Content-Type", "application/octet-stream"))
+                        self.send_header("Content-Length", str(len(data)))
+                        self.send_header("Cache-Control", "no-store")
+                        self.end_headers()
+                        self.wfile.write(data)
+                except urllib.error.HTTPError as exc:
+                    err_body = exc.read()
+                    self.send_response(exc.code)
+                    self.send_header("Content-Type", exc.headers.get("Content-Type", "application/json"))
+                    self.send_header("Content-Length", str(len(err_body)))
+                    self.end_headers()
+                    self.wfile.write(err_body)
+                except Exception as exc:
+                    msg = json.dumps({"ok": False, "error": str(exc)}).encode()
+                    self.send_response(502)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(msg)))
+                    self.end_headers()
+                    self.wfile.write(msg)
+                return True
+
+            def _json_response(self, code: int, payload: dict) -> None:
+                data = json.dumps(payload).encode("utf-8")
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(data)
+
+            def _handle_agent(self) -> bool:
+                """Local Nemotron agent endpoints (not proxied to UE)."""
+                path = self.path.split("?")[0]
+                if path == "/agent/health" and self.command == "GET":
+                    self._json_response(200, {
+                        "ok": True,
+                        "planner": "nvidia/nemotron-3-ultra",
+                        "ue": remote_api,
+                    })
+                    return True
+                if path in ("/agent/step", "/agent/loop") and self.command == "POST":
+                    length = int(self.headers.get("Content-Length", "0") or 0)
+                    raw = self.rfile.read(length) if length > 0 else b"{}"
+                    try:
+                        body = json.loads(raw.decode("utf-8") or "{}")
+                    except json.JSONDecodeError:
+                        self._json_response(400, {"ok": False, "error": "invalid_json"})
+                        return True
+                    try:
+                        sys.path.insert(0, str(Path(__file__).resolve().parent))
+                        from ue_agent_loop import ObserveActLoop, RemoteUeClient
+                        from ue_vision_planner import VisionLLMPlanner
+
+                        steps = 1 if path.endswith("/step") else int(body.get("steps", 3))
+                        goal = body.get("goal") or (
+                            "Seed a lit test scene with a few cubes, then idle."
+                        )
+                        client = RemoteUeClient(remote_api, timeout=60.0)
+                        llm = VisionLLMPlanner(goal=goal)
+                        use_llm = llm.available
+                        thoughts: list[dict] = []
+
+                        def on_thought(kind: str, content: str, metadata: dict) -> None:
+                            thoughts.append({"kind": kind, "content": content, "metadata": metadata})
+
+                        loop = ObserveActLoop(
+                            client=client,
+                            on_thought=on_thought,
+                            planner=(llm.decide if use_llm else None),
+                            goal=goal if use_llm else "",
+                        )
+                        results = loop.run(steps=steps)
+                        self._json_response(200, {
+                            "ok": all(r.ok for r in results),
+                            "planner": ("nemotron/" + llm.model) if use_llm else "heuristic",
+                            "llm_error": llm.last_error,
+                            "thoughts": thoughts[-40:],
+                            "steps": [
+                                {
+                                    "step": r.step,
+                                    "kind": r.action.kind,
+                                    "reason": r.action.reason,
+                                    "ok": r.ok,
+                                    "lights": r.reobservation.lights,
+                                    "meshes": r.reobservation.meshes,
+                                }
+                                for r in results
+                            ],
+                        })
+                    except Exception as exc:
+                        self._json_response(500, {"ok": False, "error": str(exc)})
+                    return True
+                return False
+
             def do_GET(self):
+                if self._handle_agent():
+                    return
+                if self._proxy("GET"):
+                    return
                 if not (dist_dir / self.path.lstrip("/").split("?")[0]).exists() and "." not in self.path.split("?")[0]:
                     self.path = "/index.html"
                 return super().do_GET()
 
+            def do_POST(self):
+                if self._handle_agent():
+                    return
+                if self._proxy("POST"):
+                    return
+                self.send_error(404)
+
             def log_message(self, format, *args):
                 pass
 
+        socketserver.TCPServer.allow_reuse_address = True
         with socketserver.TCPServer(("127.0.0.1", port), SPAHandler) as httpd:
             webbrowser.open(f"http://127.0.0.1:{port}")
             httpd.serve_forever()
@@ -1522,7 +1630,7 @@ def observe(
 
 
 def _write_mission_control_fallback(dist_dir: Path, api: str) -> None:
-    """Ship a self-contained Mission Control page (no npm)."""
+    """Ship a self-contained Mission Control page (no npm). api='' = same-origin /v1 proxy."""
     dist_dir.mkdir(parents=True, exist_ok=True)
     html = _MISSION_CONTROL_HTML.replace("__API_BASE__", api.rstrip("/"))
     (dist_dir / "index.html").write_text(html, encoding="utf-8")
@@ -1575,10 +1683,18 @@ _MISSION_CONTROL_HTML = r"""<!DOCTYPE html>
     padding: 0.9rem 1rem; min-height: 220px;
   }
   section h2 { margin: 0 0 0.75rem; font-size: 0.85rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
-  #viewport {
-    width: 100%; aspect-ratio: 16/9; background: #05070a; border-radius: 8px;
-    border: 1px solid var(--line); object-fit: contain; display: block;
+  .viewport-wrap {
+    position: relative; width: 100%; aspect-ratio: 16/9; background: #05070a;
+    border-radius: 8px; border: 1px solid var(--line); overflow: hidden;
   }
+  #viewport {
+    width: 100%; height: 100%; object-fit: contain; display: block; background: #05070a;
+  }
+  #viewportPlaceholder {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-size: 0.9rem; pointer-events: none; text-align: center; padding: 1rem;
+  }
+  #viewportPlaceholder.hidden { display: none; }
   .row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem; }
   button, input, select {
     background: #0f141c; color: var(--text); border: 1px solid var(--line);
@@ -1608,8 +1724,12 @@ _MISSION_CONTROL_HTML = r"""<!DOCTYPE html>
       <button class="primary" id="btnCapture">Capture frame</button>
       <button id="btnRefresh">Refresh image</button>
       <button id="btnHealth">Ping API</button>
+      <button id="btnAgentLoop" class="primary">Run agent loop</button>
     </div>
-    <img id="viewport" alt="No frame yet — capture while PIE is running"/>
+    <div class="viewport-wrap">
+      <img id="viewport" alt=""/>
+      <div id="viewportPlaceholder">No frame yet — click Capture frame while PIE is running</div>
+    </div>
     <p class="hint">Uses GET /v1/frame after vision.capture_frame. Start Play (PIE) in Unreal first.</p>
   </section>
   <section>
@@ -1637,22 +1757,56 @@ const statusEl = document.getElementById("status");
 const logEl = document.getElementById("log");
 const actorsEl = document.getElementById("actors");
 const viewport = document.getElementById("viewport");
-document.getElementById("apiLabel").textContent = API;
+const viewportPlaceholder = document.getElementById("viewportPlaceholder");
+document.getElementById("apiLabel").textContent = API || (location.origin + " → UE :8765");
 
 function log(msg, data) {
   const line = typeof data === "undefined" ? msg : msg + " " + JSON.stringify(data, null, 0);
   logEl.textContent = new Date().toLocaleTimeString() + "  " + line + "\n" + logEl.textContent;
 }
 
+let frameObjectUrl = null;
+async function showFrame() {
+  const url = API + "/v1/frame?t=" + Date.now();
+  try {
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) {
+      throw new Error("HTTP " + res.status);
+    }
+    const blob = await res.blob();
+    if (frameObjectUrl) URL.revokeObjectURL(frameObjectUrl);
+    frameObjectUrl = URL.createObjectURL(blob);
+    viewport.onload = () => {
+      viewportPlaceholder.classList.add("hidden");
+      log("frame loaded", { bytes: blob.size, type: blob.type });
+    };
+    viewport.onerror = () => {
+      viewportPlaceholder.classList.remove("hidden");
+      viewportPlaceholder.textContent = "Frame blob failed to display";
+      log("frame display failed");
+    };
+    viewport.src = frameObjectUrl;
+  } catch (e) {
+    viewportPlaceholder.classList.remove("hidden");
+    viewportPlaceholder.textContent = "No frame yet — click Capture frame while PIE is running";
+    log("frame load failed", String(e));
+  }
+}
+
 async function postCommand(body) {
-  const res = await fetch(API + "/v1/command", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const json = await res.json();
-  log(body.command, json);
-  return json;
+  try {
+    const res = await fetch(API + "/v1/command", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const json = await res.json();
+    log(body.command, json);
+    return json;
+  } catch (e) {
+    log(body.command + " failed", String(e));
+    return { success: false, error: String(e) };
+  }
 }
 
 async function ping() {
@@ -1684,14 +1838,16 @@ function spawnPayload(command, extra) {
 
 document.getElementById("btnHealth").onclick = ping;
 document.getElementById("btnCapture").onclick = async () => {
+  viewportPlaceholder.classList.remove("hidden");
+  viewportPlaceholder.textContent = "Capturing…";
   const r = await postCommand({ command: "vision.capture_frame", params: {} });
-  if (r.success) {
-    viewport.src = API + "/v1/frame?t=" + Date.now();
+  if (r && r.success) {
+    await showFrame();
+  } else {
+    viewportPlaceholder.textContent = "Capture failed — is PIE running?";
   }
 };
-document.getElementById("btnRefresh").onclick = () => {
-  viewport.src = API + "/v1/frame?t=" + Date.now();
-};
+document.getElementById("btnRefresh").onclick = () => showFrame();
 document.getElementById("btnSpawnLight").onclick = () =>
   postCommand(spawnPayload("world.spawn_actor", { class_path: "/Script/Engine.PointLight" }));
 document.getElementById("btnSpawnCube").onclick = () =>
@@ -1711,8 +1867,86 @@ document.getElementById("btnDestroy").onclick = () => {
   postCommand({ command: "world.destroy_actor", params: { actor_path: path } });
 };
 
+function countWorld(paths) {
+  let lights = 0, meshes = 0;
+  for (const p of paths) {
+    if (/PointLight|SpotLight|RectLight/.test(p)) lights++;
+    if (/StaticMeshActor/.test(p)) meshes++;
+  }
+  return { lights, meshes };
+}
+
+function decide(paths) {
+  const { lights, meshes } = countWorld(paths);
+  const x = Math.floor(Math.random() * 401) - 200;
+  const y = Math.floor(Math.random() * 401) - 200;
+  if (lights < 1) {
+    return {
+      kind: "spawn_light",
+      reason: `No lights yet (meshes=${meshes}). Seed a PointLight.`,
+      body: spawnPayload("world.spawn_actor", { class_path: "/Script/Engine.PointLight", transform: {
+        location: { x, y, z: 280 }, rotation: { pitch: 0, yaw: 0, roll: 0 }, scale: { x: 1, y: 1, z: 1 },
+      }}),
+    };
+  }
+  if (meshes < 3) {
+    return {
+      kind: "spawn_cube",
+      reason: `lights=${lights} meshes=${meshes}. Seed/add a cube.`,
+      body: spawnPayload("world.spawn_mesh", { mesh_path: "/Engine/BasicShapes/Cube.Cube", transform: {
+        location: { x, y, z: 100 }, rotation: { pitch: 0, yaw: 0, roll: 0 }, scale: { x: 1, y: 1, z: 1 },
+      }}),
+    };
+  }
+  return { kind: "noop", reason: `Seeded (lights=${lights}, meshes=${meshes}). Holding.`, body: null };
+}
+
+async function listPaths() {
+  const r = await postCommand({ command: "world.list_actors", params: {} });
+  let paths = r.actor_paths || [];
+  try {
+    const inner = JSON.parse(r.result_json || "{}");
+    if (inner.actors) paths = inner.actors;
+  } catch (_) {}
+  actorsEl.innerHTML = paths.map(p => `<div class="actor">${p}</div>`).join("") || "<div class='actor'>(empty)</div>";
+  return paths;
+}
+
+let agentBusy = false;
+document.getElementById("btnAgentLoop").onclick = async () => {
+  if (agentBusy) return;
+  agentBusy = true;
+  const btn = document.getElementById("btnAgentLoop");
+  btn.disabled = true;
+  try {
+    log("plan", "Starting Nemotron-3 agent loop via /agent/loop");
+    viewportPlaceholder.classList.remove("hidden");
+    viewportPlaceholder.textContent = "Agent running…";
+    const res = await fetch("/agent/loop", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        steps: 3,
+        goal: "Seed a lit test scene with a few cubes, tune a light if present, then idle.",
+      }),
+    });
+    const json = await res.json();
+    log("tool_result", json);
+    (json.thoughts || []).forEach(t => log(t.kind || "plan", t.content || ""));
+    await showFrame();
+    await listPaths();
+    log("reflection", json.planner ? ("Finished with planner " + json.planner) : "Finished");
+  } catch (e) {
+    log("error", String(e));
+  } finally {
+    agentBusy = false;
+    btn.disabled = false;
+  }
+};
+
 ping();
 setInterval(ping, 5000);
+showFrame();
 </script>
 </body>
 </html>
@@ -1787,6 +2021,112 @@ def command_cmd(
         console.print(f"[red]✗ Remote API unreachable: {exc}[/red]")
         console.print("[yellow]Start Play (PIE) in UE first. Look for: HephaestusRemoteApi: listening on http://127.0.0.1:8765[/yellow]")
         raise typer.Exit(1)
+
+
+@app.command("loop")
+def agent_loop_cmd(
+    steps: Annotated[int, typer.Option("--steps", "-n", help="Max observe->act cycles")] = 3,
+    host: Annotated[str, typer.Option("--host")] = "127.0.0.1",
+    port: Annotated[int, typer.Option("--port")] = 8765,
+    seed: Annotated[Optional[int], typer.Option("--seed", help="RNG seed for spawn positions")] = None,
+    timeout: Annotated[float, typer.Option("--timeout")] = 60.0,
+    planner: Annotated[str, typer.Option("--planner", help="heuristic | llm | auto")] = "auto",
+    goal: Annotated[str, typer.Option("--goal", help="Natural-language goal for the LLM planner")] = (
+        "Seed a lit test scene with a few cubes visible in frame, then idle."
+    ),
+    llm_model: Annotated[Optional[str], typer.Option("--llm-model", help="Chat model id")] = "nvidia/nemotron-3-ultra",
+    llm_url: Annotated[Optional[str], typer.Option("--llm-url", help="OpenAI-compatible base URL")] = (
+        "https://integrate.api.nvidia.com/v1"
+    ),
+):
+    """
+    Run an observe -> decide -> act -> recapture loop against a live PIE session.
+
+    Default planner LLM is Nemotron-3 Ultra via NVIDIA NIM (NVIDIA_API_KEY).
+    --planner auto uses Nemotron when a key is available, else heuristic.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from ue_agent_loop import ObserveActLoop, RemoteUeClient
+    from ue_vision_planner import VisionLLMPlanner, resolve_planner_mode
+
+    mode = resolve_planner_mode(planner)
+    base = f"http://{host}:{port}"
+
+    llm = VisionLLMPlanner(
+        base_url=llm_url,
+        model=llm_model,
+        goal=goal,
+        fallback_rng=__import__("random").Random(seed),
+        timeout=max(timeout, 120.0),
+    )
+    use_llm = mode == "llm" or (mode == "auto" and llm.available)
+    if mode == "llm" and not llm.available:
+        console.print(
+            "[red]✗ --planner llm requires NVIDIA_API_KEY or HEPHAESTUS_LLM_API_KEY "
+            "(Nemotron-3 via NIM), or a local --llm-url[/red]"
+        )
+        raise typer.Exit(1)
+
+    console.print(Panel.fit(
+        f"[bold]Observe -> Act loop[/bold]\n"
+        f"API: [cyan]{base}[/cyan]\n"
+        f"Steps: [cyan]{steps}[/cyan]\n"
+        f"Planner: [cyan]{'nemotron/' + llm.model if use_llm else 'heuristic'}[/cyan]",
+        border_style="green",
+    ))
+    if use_llm:
+        console.print(f"[dim]LLM: {llm.base_url}  model={llm.model}[/dim]")
+        console.print(f"[dim]Goal: {goal}[/dim]")
+        if "nvidia.com" in llm.base_url and not (
+            os.environ.get("NVIDIA_API_KEY") or os.environ.get("HEPHAESTUS_LLM_API_KEY")
+        ):
+            console.print(
+                "[yellow]Warning: NIM URL set but NVIDIA_API_KEY missing — "
+                "requests will fail over to heuristic unless a key is provided.[/yellow]"
+            )
+
+    def on_thought(kind: str, content: str, metadata: dict) -> None:
+        color = {
+            "observation": "cyan",
+            "plan": "yellow",
+            "action": "magenta",
+            "tool_result": "green",
+            "error": "red",
+            "reflection": "blue",
+        }.get(kind, "white")
+        # Avoid non-ASCII + Rich markup collisions from LLM text like [llm/...]
+        safe = content.replace("\u2192", "->").replace("[", "(").replace("]", ")")
+        console.print(f"[{color}]{kind}:[/{color}] {safe}")
+
+    client = RemoteUeClient(base, timeout=timeout)
+    try:
+        health = client.health()
+        console.print(f"[dim]health: {health}[/dim]")
+    except Exception as exc:
+        console.print(f"[red]✗ Remote API unreachable: {exc}[/red]")
+        console.print("[yellow]Start Play (PIE) in UE first.[/yellow]")
+        raise typer.Exit(1)
+
+    loop = ObserveActLoop(
+        client=client,
+        seed=seed,
+        on_thought=on_thought,
+        planner=(llm.decide if use_llm else None),
+        goal=goal if use_llm else "",
+    )
+    results = loop.run(steps=steps)
+    if use_llm and llm.last_error:
+        console.print(f"[yellow]Last LLM error (fallback may have been used): {llm.last_error}[/yellow]")
+    failed = [r for r in results if not r.ok]
+    console.print(
+        f"[bold]Done[/bold]: {len(results)} step(s), "
+        f"last lights={results[-1].reobservation.lights} "
+        f"meshes={results[-1].reobservation.meshes}"
+        if results
+        else "[yellow]No steps[/yellow]"
+    )
+    if failed:
+        raise typer.Exit(2)
 
 
 @app.command("smoke-spawn")

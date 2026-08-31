@@ -57,10 +57,19 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
 	TArray<FString> ListActors(const FString& ClassPathFilter = TEXT("")) const;
 
+	/** Set world transform on an existing actor (by path or short name) */
+	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
+	bool SetActorTransform(const FString& ActorPath, const FTransform& Transform);
+
+	/** Set PointLight intensity / color / radius (no-op if actor is not a point light) */
+	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
+	bool SetPointLightProperties(const FString& ActorPath, float Intensity, const FLinearColor& Color, float AttenuationRadius = 1000.f);
+
 	/** Native (non-UHT) asset registry access */
 	IAssetRegistry& GetAssetRegistry();
 
 private:
 	UClass* ResolveClass(const FString& ClassPath) const;
 	UWorld* ResolveWorld() const;
+	bool IsSpawnClassAllowed(const FString& ClassPath, UClass* Resolved) const;
 };

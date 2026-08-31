@@ -201,6 +201,8 @@ TArray<FString> UHephaestusCommandHandler::GetAvailableCommands() const
         TEXT("world.spawn_mesh"),
         TEXT("world.destroy_actor"),
         TEXT("world.list_actors"),
+        TEXT("world.set_transform"),
+        TEXT("world.set_light"),
         TEXT("world.batch_edit"),
         TEXT("world.query_spatial"),
         TEXT("asset.create_material"),
@@ -459,7 +461,53 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleWorldCommand(const FSt
         }
         FString ActorPath = Params->GetStringField(TEXT("actor_path"));
         bool bSuccess = WorldSubsystem->DestroyActor(ActorPath);
-        return bSuccess ? MakeSuccessResult(TEXT("")) : MakeErrorResult(TEXT(""), TEXT("Failed to destroy actor"));
+        return MakeErrorResult(TEXT(""), TEXT("Failed to destroy actor"));
+    }
+    else if (Action == TEXT("set_transform"))
+    {
+        if (!Params.IsValid())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Missing params for world.set_transform"));
+        }
+        FString ActorPath = Params->GetStringField(TEXT("actor_path"));
+        FTransform Transform = FTransform::Identity;
+        if (!Params->HasField(TEXT("transform")) ||
+            !ParseTransform(Params->GetObjectField(TEXT("transform")), Transform))
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Invalid transform"));
+        }
+        const bool bOk = WorldSubsystem->SetActorTransform(ActorPath, Transform);
+        return bOk
+            ? MakeSuccessResult(TEXT(""), FString::Printf(TEXT("{\"actor_path\":\"%s\"}"), *ActorPath), {}, { ActorPath })
+            : MakeErrorResult(TEXT(""), TEXT("Failed to set transform"));
+    }
+    else if (Action == TEXT("set_light"))
+    {
+        if (!Params.IsValid())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Missing params for world.set_light"));
+        }
+        FString ActorPath = Params->GetStringField(TEXT("actor_path"));
+        double Intensity = 5000.0;
+        Params->TryGetNumberField(TEXT("intensity"), Intensity);
+        double Radius = 1000.0;
+        Params->TryGetNumberField(TEXT("attenuation_radius"), Radius);
+        FLinearColor Color = FLinearColor::White;
+        const TSharedPtr<FJsonObject>* ColorObj = nullptr;
+        if (Params->TryGetObjectField(TEXT("color"), ColorObj) && ColorObj && ColorObj->IsValid())
+        {
+            double R = 1, G = 1, B = 1, A = 1;
+            (*ColorObj)->TryGetNumberField(TEXT("r"), R);
+            (*ColorObj)->TryGetNumberField(TEXT("g"), G);
+            (*ColorObj)->TryGetNumberField(TEXT("b"), B);
+            (*ColorObj)->TryGetNumberField(TEXT("a"), A);
+            Color = FLinearColor(static_cast<float>(R), static_cast<float>(G), static_cast<float>(B), static_cast<float>(A));
+        }
+        const bool bOk = WorldSubsystem->SetPointLightProperties(
+            ActorPath, static_cast<float>(Intensity), Color, static_cast<float>(Radius));
+        return bOk
+            ? MakeSuccessResult(TEXT(""), FString::Printf(TEXT("{\"actor_path\":\"%s\",\"intensity\":%.1f}"), *ActorPath, Intensity), {}, { ActorPath })
+            : MakeErrorResult(TEXT(""), TEXT("Failed to set light (actor not a PointLight?)"));
     }
     else if (Action == TEXT("list_actors"))
     {
@@ -897,4 +945,5 @@ FHephaestusCommandResult UHephaestusCommandHandler::MakeErrorResult(const FStrin
     return Result;
 }
 
+#undef LOCTEXT_NAMESPACE
 #undef LOCTEXT_NAMESPACE

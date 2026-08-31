@@ -102,20 +102,19 @@ bool UHephaestusVisionSubsystem::CaptureSingleFrame(FHephaestusFrameMetadata& Ou
 		return false;
 	}
 
-	// Flip vertically — ReadPixels is often bottom-up
-	TArray<FColor> Flipped;
-	Flipped.SetNumUninitialized(Bitmap.Num());
-	for (int32 Y = 0; Y < Size.Y; ++Y)
+	// Viewport ReadPixels often returns A=0; force opaque so PNG/browser display correctly
+	for (FColor& Color : Bitmap)
 	{
-		const int32 SrcRow = (Size.Y - 1 - Y) * Size.X;
-		const int32 DstRow = Y * Size.X;
-		FMemory::Memcpy(Flipped.GetData() + DstRow, Bitmap.GetData() + SrcRow, Size.X * sizeof(FColor));
+		Color.A = 255;
 	}
+
+	// UE GameViewport ReadPixels is already top-down in 5.8 — do not flip
+	const TArray<FColor>& Pixels = Bitmap;
 
 	IImageWrapperModule& ImageWrapperModule = FModuleManager::LoadModuleChecked<IImageWrapperModule>(FName("ImageWrapper"));
 	TSharedPtr<IImageWrapper> PngWrapper = ImageWrapperModule.CreateImageWrapper(EImageFormat::PNG);
 	if (!PngWrapper.IsValid() ||
-		!PngWrapper->SetRaw(Flipped.GetData(), Flipped.Num() * sizeof(FColor), Size.X, Size.Y, ERGBFormat::BGRA, 8))
+		!PngWrapper->SetRaw(Pixels.GetData(), Pixels.Num() * sizeof(FColor), Size.X, Size.Y, ERGBFormat::BGRA, 8))
 	{
 		UE_LOG(LogHephaestusBridge, Error, TEXT("CaptureSingleFrame: PNG encode failed"));
 		return false;
@@ -138,7 +137,7 @@ bool UHephaestusVisionSubsystem::CaptureSingleFrame(FHephaestusFrameMetadata& Ou
 		Texture->SRGB = true;
 		FTexture2DMipMap& Mip = Texture->GetPlatformData()->Mips[0];
 		void* Data = Mip.BulkData.Lock(LOCK_READ_WRITE);
-		FMemory::Memcpy(Data, Flipped.GetData(), Flipped.Num() * sizeof(FColor));
+		FMemory::Memcpy(Data, Pixels.GetData(), Pixels.Num() * sizeof(FColor));
 		Mip.BulkData.Unlock();
 		Texture->UpdateResource();
 	}

@@ -7,7 +7,9 @@
 #include "Engine/Blueprint.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
+#include "Engine/PointLight.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/PointLightComponent.h"
 #include "EngineUtils.h"
 #include "GameFramework/Actor.h"
 #include "UObject/Class.h"
@@ -59,6 +61,12 @@ AActor* UHephaestusWorldSubsystem::SpawnActor(const FString& ClassPath, const FT
     if (!ActorClass)
     {
         UE_LOG(LogHephaestusBridge, Error, TEXT("HephaestusWorldSubsystem: Failed to resolve class: %s"), *ClassPath);
+        return nullptr;
+    }
+
+    if (!IsSpawnClassAllowed(ClassPath, ActorClass))
+    {
+        UE_LOG(LogHephaestusBridge, Error, TEXT("HephaestusWorldSubsystem: Class not on spawn allowlist: %s"), *ClassPath);
         return nullptr;
     }
 
@@ -364,6 +372,74 @@ UClass* UHephaestusWorldSubsystem::ResolveClass(const FString& ClassPath) const
     }
 
     return nullptr;
+}
+
+
+bool UHephaestusWorldSubsystem::IsSpawnClassAllowed(const FString& ClassPath, UClass* Resolved) const
+{
+    static const TArray<FString> AllowedExact = {
+        TEXT("/Script/Engine.PointLight"),
+        TEXT("/Script/Engine.SpotLight"),
+        TEXT("/Script/Engine.DirectionalLight"),
+        TEXT("/Script/Engine.RectLight"),
+        TEXT("/Script/Engine.StaticMeshActor"),
+        TEXT("PointLight"),
+        TEXT("SpotLight"),
+        TEXT("DirectionalLight"),
+        TEXT("RectLight"),
+        TEXT("StaticMeshActor"),
+    };
+
+    for (const FString& Allowed : AllowedExact)
+    {
+        if (ClassPath.Equals(Allowed, ESearchCase::IgnoreCase))
+        {
+            return true;
+        }
+    }
+
+    if (!Resolved)
+    {
+        return false;
+    }
+
+    return Resolved->IsChildOf(APointLight::StaticClass()) ||
+        Resolved->IsChildOf(AStaticMeshActor::StaticClass()) ||
+        Resolved->GetName().Contains(TEXT("Light"));
+}
+
+bool UHephaestusWorldSubsystem::SetActorTransform(const FString& ActorPath, const FTransform& Transform)
+{
+    AActor* Actor = FindActorByPath(ActorPath);
+    if (!Actor)
+    {
+        return false;
+    }
+    Actor->SetActorTransform(Transform, false, nullptr, ETeleportType::TeleportPhysics);
+    return true;
+}
+
+bool UHephaestusWorldSubsystem::SetPointLightProperties(
+    const FString& ActorPath,
+    float Intensity,
+    const FLinearColor& Color,
+    float AttenuationRadius)
+{
+    AActor* Actor = FindActorByPath(ActorPath);
+    APointLight* Light = Cast<APointLight>(Actor);
+    if (!Light || !Light->PointLightComponent)
+    {
+        return false;
+    }
+
+    UPointLightComponent* Comp = Light->PointLightComponent;
+    Comp->SetIntensity(Intensity);
+    Comp->SetLightColor(Color);
+    if (AttenuationRadius > 0.f)
+    {
+        Comp->SetAttenuationRadius(AttenuationRadius);
+    }
+    return true;
 }
 
 #undef LOCTEXT_NAMESPACE
