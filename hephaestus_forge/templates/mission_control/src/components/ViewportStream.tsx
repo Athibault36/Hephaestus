@@ -53,7 +53,8 @@ export function ViewportStream() {
         />
       ) : latestFrame ? (
         <img
-          className="viewport-stream"
+          key={latestFrame}
+          className="viewport-stream viewport-frame"
           src={latestFrame}
           alt="Latest captured UE viewport frame"
           style={{ width: '100%', height: '100%', objectFit: 'contain' }}

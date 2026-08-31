@@ -47,6 +47,20 @@ export function PerformanceMonitor() {
   const textureMemoryStatus = getMetricStatus(metrics.textureMemory / (1024 ** 3), { warning: 8, critical: 12 });
   const latencyStatus = getMetricStatus(metrics.latency.total, { warning: 300, critical: 500 });
 
+  const networkMs =
+    metrics.latency.total - metrics.latency.stt - metrics.latency.llm - metrics.latency.tool - metrics.latency.tts;
+  // Scale bars by the largest component so the breakdown reads clearly.
+  const latencyDenom = Math.max(
+    metrics.latency.stt, metrics.latency.llm, metrics.latency.tool, metrics.latency.tts, networkMs, 1,
+  );
+  const latencyRows: { label: string; value: number }[] = [
+    { label: 'STT (Whisper)', value: metrics.latency.stt },
+    { label: 'LLM (Nemotron)', value: metrics.latency.llm },
+    { label: 'Tool Execution', value: metrics.latency.tool },
+    { label: 'TTS (Kokoro)', value: metrics.latency.tts },
+    { label: 'Network', value: networkMs },
+  ];
+
   return (
     <div className="perf-grid">
       {renderMetricCard(
@@ -83,26 +97,18 @@ export function PerformanceMonitor() {
       <div className="perf-card" style={{ gridColumn: '1 / -1' }}>
         <div className="perf-card-title">Latency Breakdown</div>
         <div className="latency-breakdown">
-          <div className="latency-item">
-            <span className="latency-label">STT (Whisper)</span>
-            <span className="latency-value">{metrics.latency.stt} ms</span>
-          </div>
-          <div className="latency-item">
-            <span className="latency-label">LLM (Nemotron)</span>
-            <span className="latency-value">{metrics.latency.llm} ms</span>
-          </div>
-          <div className="latency-item">
-            <span className="latency-label">Tool Execution</span>
-            <span className="latency-value">{metrics.latency.tool} ms</span>
-          </div>
-          <div className="latency-item">
-            <span className="latency-label">TTS (Kokoro)</span>
-            <span className="latency-value">{metrics.latency.tts} ms</span>
-          </div>
-          <div className="latency-item">
-            <span className="latency-label">Network</span>
-            <span className="latency-value">{metrics.latency.total - metrics.latency.stt - metrics.latency.llm - metrics.latency.tool - metrics.latency.tts} ms</span>
-          </div>
+          {latencyRows.map((row) => (
+            <div key={row.label} className="latency-item">
+              <span className="latency-label">{row.label}</span>
+              <div className="latency-bar">
+                <div
+                  className="latency-bar-fill"
+                  style={{ width: `${Math.min(100, (row.value / latencyDenom) * 100)}%` }}
+                />
+              </div>
+              <span className="latency-value">{row.value} ms</span>
+            </div>
+          ))}
         </div>
       </div>
     </div>
