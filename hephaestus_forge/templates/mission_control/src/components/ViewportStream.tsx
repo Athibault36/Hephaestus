@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useMissionControlStore } from '../store/missionControlStore';
 
 export function ViewportStream() {
-  const { isConnected, latestFrame } = useMissionControlStore();
+  const isConnected = useMissionControlStore((s) => s.isConnected);
+  const latestFrame = useMissionControlStore((s) => s.latestFrame);
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
   const [stats, setStats] = useState({ fps: 0, bitrate: 0, latency: 0 });
   const videoRef = useRef<HTMLVideoElement>(null);

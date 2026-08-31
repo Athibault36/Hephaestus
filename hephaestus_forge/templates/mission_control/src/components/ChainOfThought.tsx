@@ -3,7 +3,8 @@ import { useMissionControlStore } from '../store/missionControlStore';
 import { ThoughtEntry } from '../store/missionControlStore';
 
 export function ChainOfThought() {
-  const { thoughtLog, clearThoughts } = useMissionControlStore();
+  const thoughtLog = useMissionControlStore((s) => s.thoughtLog);
+  const clearThoughts = useMissionControlStore((s) => s.clearThoughts);
   const logEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {

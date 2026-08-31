@@ -2,7 +2,9 @@ import { useMissionControlStore } from '../store/missionControlStore';
 import { ActorInfo } from '../store/missionControlStore';
 
 export function WorldOutliner() {
-  const { actors, selectedActor, selectActor } = useMissionControlStore();
+  const actors = useMissionControlStore((s) => s.actors);
+  const selectedActor = useMissionControlStore((s) => s.selectedActor);
+  const selectActor = useMissionControlStore((s) => s.selectActor);
 
   const getActorIcon = (className: string) => {
     if (className.includes('StaticMesh')) return '📦';

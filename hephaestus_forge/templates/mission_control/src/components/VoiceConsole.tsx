@@ -10,8 +10,12 @@ import { useMissionControlStore } from '../store/missionControlStore';
  * the voice pipeline and is pushed here via the bridge.
  */
 export function VoiceConsole() {
-  const { isConnected, agentState, voiceActive, setVoiceActive, speakerRecognized, audioLevel } =
-    useMissionControlStore();
+  const isConnected = useMissionControlStore((s) => s.isConnected);
+  const agentState = useMissionControlStore((s) => s.agentState);
+  const voiceActive = useMissionControlStore((s) => s.voiceActive);
+  const setVoiceActive = useMissionControlStore((s) => s.setVoiceActive);
+  const speakerRecognized = useMissionControlStore((s) => s.speakerRecognized);
+  const audioLevel = useMissionControlStore((s) => s.audioLevel);
   const [level, setLevel] = useState(0);
 
   const listening = isConnected && voiceActive && agentState !== 'speaking';

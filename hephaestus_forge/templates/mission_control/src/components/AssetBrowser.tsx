@@ -2,7 +2,7 @@ import { useMissionControlStore } from '../store/missionControlStore';
 import { AssetInfo } from '../store/missionControlStore';
 
 export function AssetBrowser() {
-  const { assets } = useMissionControlStore();
+  const assets = useMissionControlStore((s) => s.assets);
 
   const getAssetIcon = (type: string) => {
     if (type.includes('StaticMesh')) return '📦';

@@ -1,7 +1,7 @@
 import { useMissionControlStore } from '../store/missionControlStore';
 
 export function PerformanceMonitor() {
-  const { metrics } = useMissionControlStore();
+  const metrics = useMissionControlStore((s) => s.metrics);
 
   const getMetricStatus = (value: number, thresholds: { warning: number; critical: number }, lowerIsBetter = true) => {
     if (lowerIsBetter) {

@@ -18,7 +18,9 @@ export function MissionControl() {
     performance: true,
   });
 
-  const { connect, disconnect, isConnected } = useMissionControlStore();
+  const connect = useMissionControlStore((s) => s.connect);
+  const disconnect = useMissionControlStore((s) => s.disconnect);
+  const isConnected = useMissionControlStore((s) => s.isConnected);
 
   useEffect(() => {
     connect();
@@ -97,7 +99,7 @@ function ConnectionStatus({ isConnected }: { isConnected: boolean }) {
 }
 
 function AgentStatus() {
-  const { agentState } = useMissionControlStore();
+  const agentState = useMissionControlStore((s) => s.agentState);
   return (
     <div className="agent-status">
       <span className={`status-indicator ${agentState}`} />
