@@ -82,13 +82,13 @@ to the enrolled operator's voice, ignoring everyone else.
 
 ## Phase 3 — Reliability & correctness
 
-- Integration tests against a live (or headless `-nullrhi`) editor covering the command surface.
-- Process lifecycle: robust startup/shutdown of llama/tts/vision/dcc/bridge in `deploy`; readiness checks; restart-safety.
-- Bridge resilience: reconnection, timeouts, backpressure (client retries exist; extend to the server/loop).
-- Config-driven everything: ports/hosts from `config.yaml` (bridge port, UE URL) rather than hard-coded defaults.
-- Error taxonomy: distinguish transport vs. command vs. tool errors end-to-end (partially done in the runtime).
+- Integration tests against FakeUE covering the command surface (**done** — contract + soak tests).
+- Process lifecycle: `ProcessSupervisor` in `deploy`, readiness checks, graceful shutdown (**done** for Python services).
+- Bridge resilience: client retries for transport/503; auth + validation on mutations (**done** Python + C++ scaffold).
+- Config-driven everything: ports/hosts/observability from `config.yaml` (**done**).
+- Error taxonomy: transport vs. command vs. tool vs. validation end-to-end (**done**).
 
-Exit: a soak run of repeated agent goals completes without leaks, hangs, or orphaned processes.
+Exit: a soak run of repeated agent goals completes without leaks, hangs, or orphaned processes — **`forge agent --repeat N`** + `tests/test_soak.py` on Linux; live editor soak after M2.
 
 ## Phase 4 — Security & safety
 

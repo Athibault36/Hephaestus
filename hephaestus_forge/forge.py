@@ -2341,6 +2341,7 @@ def agent(
         typer.Option("--trajectory-log", help="Append JSONL trajectory log to this file"),
     ] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Show tools/config and exit without calling the LLM")] = False,
+    repeat: Annotated[int, typer.Option("--repeat", min=1, help="Run the goal N times (soak test)")] = 1,
 ):
     """
     Run the MVP orchestrator: LLM -> tools -> UE loop toward a goal.
@@ -2354,6 +2355,7 @@ def agent(
     from hephaestus_forge.runtime.orchestrator import AgentRuntime, TrajectoryEvent
     from hephaestus_forge.runtime.config import load_observability_config, load_runtime_config
     from hephaestus_forge.runtime.observability import start_observability
+    from hephaestus_forge.runtime.soak import run_soak
 
     project_root = (project_path or Path.cwd()).resolve()
     runtime_cfg = load_runtime_config(project_root)
@@ -2377,7 +2379,8 @@ def agent(
         f"Goal: [cyan]{goal}[/cyan]\n"
         f"UE bridge: [cyan]{resolved_ue_url}[/cyan]\n"
         f"LLM: [cyan]{model} @ {resolved_llm_url}[/cyan]\n"
-        f"Tools: [cyan]{', '.join(registry.names())}[/cyan]",
+        f"Tools: [cyan]{', '.join(registry.names())}[/cyan]"
+        + (f"\nRepeat: [cyan]{repeat}[/cyan]" if repeat > 1 else ""),
         border_style="green",
     ))
 
@@ -2447,7 +2450,8 @@ def agent(
     )
 
     try:
-        result = runtime.run(goal)
+        soak_runs = run_soak(runtime, goal, repeat=repeat)
+        result = soak_runs[-1]
     finally:
         ue_client.close()
         llm.close()
@@ -2457,13 +2461,22 @@ def agent(
             jsonl_logger.close()
         obs_runtime.stop()
 
+    if repeat > 1:
+        ok_count = sum(1 for r in soak_runs if r.completed)
+        console.print(Panel.fit(
+            f"[bold]Soak summary[/bold]\n"
+            f"Runs: {repeat}  Completed: {ok_count}/{repeat}\n"
+            f"Tool calls (last run): {result.tool_calls}",
+            border_style="green" if ok_count == repeat else "yellow",
+        ))
+
     console.print(Panel.fit(
         f"[bold]{'Completed' if result.completed else 'Stopped'}[/bold]\n"
         f"Steps: {result.steps}  Tool calls: {result.tool_calls}\n"
         f"{result.final_message}",
         border_style="green" if result.completed else "yellow",
     ))
-    raise typer.Exit(0 if result.completed else 1)
+    raise typer.Exit(0 if all(r.completed for r in soak_runs) else 1)
 
 
 def _enable_plugin_in_uproject(uproject: Path, plugin_name: str) -> bool:

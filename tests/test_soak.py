@@ -5,6 +5,7 @@ from __future__ import annotations
 from hephaestus_forge.runtime.llm import LLMResponse, ToolCall
 from hephaestus_forge.runtime.metrics import MetricsRegistry
 from hephaestus_forge.runtime.orchestrator import AgentRuntime
+from hephaestus_forge.runtime.soak import run_soak
 from hephaestus_forge.runtime.tools import build_default_registry
 from hephaestus_forge.runtime.tracing import TraceRecorder
 from hephaestus_forge.runtime.ue_client import UEClient
@@ -41,9 +42,9 @@ def test_repeated_agent_loops_complete():
             metrics=metrics,
             tracer=tracer,
         )
-        result = runtime.run(f"goal-{i}")
-        assert result.completed is True
-        assert result.tool_calls >= 1
+        runs = run_soak(runtime, f"goal-{i}", repeat=1)
+        assert runs[0].completed is True
+        assert runs[0].tool_calls >= 1
 
     assert fake.command_counter >= 8
     assert "hephaestus_tool_calls_total" in metrics.render()

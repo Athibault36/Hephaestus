@@ -51,6 +51,19 @@ def test_auth_required_on_mutations_not_on_discovery():
     assert request("GET", "/frame/1", token="secret").status_code == 200
 
 
+def test_batch_endpoint_executes_in_order():
+    fake = FakeUE()
+    client = UEClient(base_url="http://ue.test", transport=make_transport(fake))
+    results = client.execute_batch([
+        {"command": "world.query_spatial", "params": {"action": "query_spatial"}},
+        {"command": "vision.capture_frame", "params": {"action": "capture_frame"}},
+    ])
+    assert len(results) == 2
+    assert all(r.success for r in results)
+    assert len(fake.received) == 2
+    client.close()
+
+
 def test_oversized_payload_returns_413():
     fake = FakeUE(require_auth=True, auth_token="secret")
     body = b"x" * (MAX_BODY_BYTES + 1)

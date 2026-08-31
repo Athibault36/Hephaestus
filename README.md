@@ -26,6 +26,12 @@ hephaestus_forge health
 
 # Run the agent against a live editor
 hephaestus_forge agent --goal "Spawn a cube at the origin" --stream
+
+# Linux: start services without UE (metrics + lifecycle testing)
+hephaestus_forge deploy --services-only
+
+# Soak test (repeat goal N times against live UE + LLM)
+hephaestus_forge agent --goal "Query the scene" --repeat 5
 ```
 
 See [docs/USER_GUIDE.md](docs/USER_GUIDE.md) for the full clone → attach → compile → agent walkthrough.
@@ -50,6 +56,8 @@ Project settings live in `.hephaestus_forge/config.yaml` after `init`. Key secti
 - `network.webrtc_port` — Mission Control Socket.IO bridge (default `8081`)
 - `models.inference` — LLM host/port
 - `security.bridge_token` — optional shared token for bridge auth (`HEPHAESTUS_BRIDGE_TOKEN` env)
+- `observability.metrics` — Prometheus endpoint (default port `9090`)
+- `observability.log_format: jsonl` — auto trajectory log under `logs/`
 
 Template defaults: `hephaestus_forge/forge_config/config.yaml`.
 
@@ -81,7 +89,9 @@ cd hephaestus_forge/templates/mission_control && npm run build
 
 ## Status
 
-Python runtime and dashboard are testable on Linux without the engine. Plugin compile and the first live observe→act loop require **Windows 11 + UE 5.8 + GPU** (see roadmap Phase 1).
+Python runtime and dashboard are testable on Linux without the engine (**148+ pytest**). Plugin compile and the first live observe→act loop require **Windows 11 + UE 5.8 + GPU** (see roadmap Phase 1).
+
+Linux-side deliverables in place: 27-tool registry, bridge auth/validation, Prometheus metrics, JSONL trajectories, tracing stub, Mission Control viewport polling, and soak tests via `pytest` or `forge agent --repeat N`.
 
 ## License
 
