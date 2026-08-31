@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
-from .llm import LLM, LLMResponse
+from .llm import LLM, LLMResponse, extract_tool_calls_from_text
 from .tools import ToolError, ToolRegistry, ToolResult
 from .ue_client import UEClient, UEConnectionError
 
@@ -99,6 +99,7 @@ class AgentRuntime:
         max_steps: int = 12,
         observe_first: bool = False,
         on_event: Optional[Callable[[TrajectoryEvent], None]] = None,
+        allow_text_tool_calls: bool = True,
     ):
         self.llm = llm
         self.ue = ue_client
@@ -107,6 +108,8 @@ class AgentRuntime:
         self.max_steps = max(1, int(max_steps))
         self.observe_first = observe_first
         self.on_event = on_event
+        # Recover tool calls from plain text for models without native tool-calling.
+        self.allow_text_tool_calls = allow_text_tool_calls
 
     def _emit(self, trajectory: List[TrajectoryEvent], event: TrajectoryEvent) -> None:
         trajectory.append(event)
@@ -148,7 +151,12 @@ class AgentRuntime:
         for step in range(1, self.max_steps + 1):
             response: LLMResponse = self.llm.chat(messages, tools=tools)
 
-            if not response.tool_calls:
+            native = bool(response.tool_calls)
+            calls = list(response.tool_calls)
+            if not calls and self.allow_text_tool_calls:
+                calls = extract_tool_calls_from_text(response.content)
+
+            if not calls:
                 final = response.content or "(no final message)"
                 self._emit(trajectory, TrajectoryEvent("final", final))
                 return RunResult(
@@ -163,23 +171,28 @@ class AgentRuntime:
             if response.content:
                 self._emit(trajectory, TrajectoryEvent("thought", response.content))
 
-            # Record the assistant turn (with its tool calls) for context.
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": response.content or "",
-                    "tool_calls": [
-                        {
-                            "id": tc.id or f"call_{step}_{i}",
-                            "type": "function",
-                            "function": {"name": tc.name, "arguments": json.dumps(tc.arguments)},
-                        }
-                        for i, tc in enumerate(response.tool_calls)
-                    ],
-                }
-            )
+            if native:
+                # OpenAI tool-calling protocol: assistant tool_calls + tool-role results.
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": response.content or "",
+                        "tool_calls": [
+                            {
+                                "id": tc.id or f"call_{step}_{i}",
+                                "type": "function",
+                                "function": {"name": tc.name, "arguments": json.dumps(tc.arguments)},
+                            }
+                            for i, tc in enumerate(calls)
+                        ],
+                    }
+                )
+            else:
+                # Text-parsed tool calls: keep the raw assistant turn as context.
+                messages.append({"role": "assistant", "content": response.content or ""})
 
-            for i, call in enumerate(response.tool_calls):
+            observations = []
+            for i, call in enumerate(calls):
                 tool_call_count += 1
                 self._emit(
                     trajectory,
@@ -195,13 +208,22 @@ class AgentRuntime:
                         summary,
                     ),
                 )
+                if native:
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call.id or f"call_{step}_{i}",
+                            "name": call.name,
+                            "content": json.dumps(summary),
+                        }
+                    )
+                else:
+                    observations.append({"tool": call.name, "result": summary})
+
+            if not native:
+                # Feed results back as a user turn for plain chat models.
                 messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call.id or f"call_{step}_{i}",
-                        "name": call.name,
-                        "content": json.dumps(summary),
-                    }
+                    {"role": "user", "content": f"Tool results: {json.dumps(observations)}"}
                 )
 
         # Ran out of steps without a final answer.

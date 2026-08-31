@@ -98,6 +98,28 @@ def test_tool_failure_is_fed_back_and_recovers():
     assert fake.spawn_counter == 1
 
 
+def test_text_tool_call_fallback_for_non_native_models():
+    fake = FakeUE()
+    ue = make_ue(fake)
+    registry = build_default_registry()
+
+    # Model emits a JSON tool directive in content (no native tool_calls).
+    script = [
+        LLMResponse(content='{"tool": "world.spawn_actor", "args": {"class_path": "/Script/Engine.StaticMeshActor"}}'),
+        LLMResponse(content="Spawned it."),
+    ]
+    llm = ScriptedLLM(script)
+    runtime = AgentRuntime(llm, ue, registry, max_steps=5)
+    result = runtime.run("spawn via text tool call")
+
+    assert result.completed is True
+    assert result.tool_calls == 1
+    assert fake.spawn_counter == 1
+    # Results were fed back as a user turn (plain-chat protocol).
+    assert any(m.get("role") == "user" and "Tool results" in m.get("content", "")
+               for m in llm.calls[1]["messages"])
+
+
 def test_max_steps_bound_when_model_never_finishes():
     fake = FakeUE()
     ue = make_ue(fake)

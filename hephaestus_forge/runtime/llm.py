@@ -51,6 +51,89 @@ def _parse_arguments(raw_args: Any) -> Dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def _iter_json_values(text: str):
+    """Yield JSON objects/arrays embedded anywhere in ``text``.
+
+    Scans for balanced ``{...}`` and ``[...]`` spans (respecting strings) and
+    attempts to decode each. Tolerates surrounding prose and code fences.
+    """
+    if not text:
+        return
+    openers = {"{": "}", "[": "]"}
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch in openers:
+            close = openers[ch]
+            depth = 0
+            in_str = False
+            escape = False
+            j = i
+            while j < n:
+                c = text[j]
+                if in_str:
+                    if escape:
+                        escape = False
+                    elif c == "\\":
+                        escape = True
+                    elif c == '"':
+                        in_str = False
+                elif c == '"':
+                    in_str = True
+                elif c == ch:
+                    depth += 1
+                elif c == close:
+                    depth -= 1
+                    if depth == 0:
+                        candidate = text[i : j + 1]
+                        try:
+                            yield json.loads(candidate)
+                        except json.JSONDecodeError:
+                            pass
+                        i = j
+                        break
+                j += 1
+        i += 1
+
+
+def _to_tool_call(obj: Dict[str, Any], index: int) -> Optional["ToolCall"]:
+    """Normalize a dict into a ToolCall across common conventions, or None."""
+    name = obj.get("tool") or obj.get("name") or obj.get("action") or obj.get("function")
+    if not name or not isinstance(name, str):
+        return None
+    raw_args = (
+        obj.get("args")
+        or obj.get("arguments")
+        or obj.get("action_input")
+        or obj.get("parameters")
+        or obj.get("input")
+        or {}
+    )
+    return ToolCall(id=obj.get("id", f"text_{index}"), name=name, arguments=_parse_arguments(raw_args))
+
+
+def extract_tool_calls_from_text(content: str) -> List[ToolCall]:
+    """Best-effort recovery of tool calls from a model's plain text.
+
+    Supports models that emit JSON tool directives in ``content`` instead of the
+    OpenAI ``tool_calls`` field, e.g. ``{"tool": "world.spawn_actor",
+    "args": {...}}``, ReAct ``{"action": ..., "action_input": {...}}``, or a JSON
+    array of such objects.
+    """
+    calls: List[ToolCall] = []
+    for value in _iter_json_values(content):
+        items = value if isinstance(value, list) else [value]
+        for item in items:
+            if isinstance(item, dict):
+                call = _to_tool_call(item, len(calls))
+                if call is not None:
+                    calls.append(call)
+        if calls:
+            break  # first JSON payload that yields tool calls wins
+    return calls
+
+
 class LLMClient:
     """A thin OpenAI-compatible ``/chat/completions`` client."""
 
