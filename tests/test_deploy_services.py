@@ -25,6 +25,11 @@ def test_bridge_env_from_config_includes_token_and_port():
     assert "HEPHAESTUS_LOCALHOST_ONLY" not in env
 
 
+def test_bridge_env_localhost_only_when_enabled():
+    env = bridge_env_from_config({"security": {"localhost_only": True}})
+    assert env["HEPHAESTUS_LOCALHOST_ONLY"] == "1"
+
+
 def test_wait_for_url_times_out_on_unreachable():
     assert wait_for_url("http://127.0.0.1:1/nope", timeout=0.2, interval=0.05) is False
 
