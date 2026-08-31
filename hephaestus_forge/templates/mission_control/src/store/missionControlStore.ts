@@ -78,11 +78,15 @@ interface MissionControlState {
   metrics: PerformanceMetrics | null;
   updateMetrics: (metrics: Partial<PerformanceMetrics>) => void;
 
-  // Voice
+  // Voice (always-on, speaker-verified — no push-to-talk)
   isRecording: boolean;
   setIsRecording: (recording: boolean) => void;
   audioLevel: number;
   setAudioLevel: (level: number) => void;
+  voiceActive: boolean;                       // continuous listening enabled
+  setVoiceActive: (active: boolean) => void;
+  speakerRecognized: boolean | null;          // true=you, false=other speaker, null=idle
+  setSpeakerRecognized: (recognized: boolean | null) => void;
 
   // Viewport frame (PNG data URL pushed by the agent bridge)
   latestFrame: string | null;
@@ -139,6 +143,14 @@ export const useMissionControlStore = create<MissionControlState>((set, get) => 
       if (frame && frame.dataUrl) set({ latestFrame: frame.dataUrl });
     });
 
+    socket.on('voiceActive', (active: boolean) => {
+      set({ voiceActive: !!active });
+    });
+
+    socket.on('speaker', (info: { recognized: boolean }) => {
+      set({ speakerRecognized: info ? info.recognized : null });
+    });
+
     set({ socket });
   },
 
@@ -185,6 +197,10 @@ export const useMissionControlStore = create<MissionControlState>((set, get) => 
   setIsRecording: (recording) => set({ isRecording: recording }),
   audioLevel: 0,
   setAudioLevel: (level) => set({ audioLevel: level }),
+  voiceActive: true,
+  setVoiceActive: (active) => set({ voiceActive: active }),
+  speakerRecognized: null,
+  setSpeakerRecognized: (recognized) => set({ speakerRecognized: recognized }),
 
   // Viewport frame
   latestFrame: null,

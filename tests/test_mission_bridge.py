@@ -64,6 +64,21 @@ def test_emit_frame_ignores_empty():
     assert not [e for e, _ in sio.emitted if e == "frame"]
 
 
+def test_emit_voice_active_and_speaker():
+    sio = FakeSio()
+    bridge = MissionBridge(server=sio)
+    bridge.emit_voice_active(True)
+    bridge.emit_speaker(True)
+    bridge.emit_speaker(False)
+    bridge.emit_speaker(None)
+    events = dict(sio.emitted)  # last value per event name
+    assert ("voiceActive", True) in sio.emitted
+    speaker_payloads = [d for e, d in sio.emitted if e == "speaker"]
+    assert speaker_payloads[0] == {"recognized": True}
+    assert speaker_payloads[1] == {"recognized": False}
+    assert speaker_payloads[2] is None
+
+
 def test_actors_accumulate_and_emit_full_list():
     sio = FakeSio()
     bridge = MissionBridge(server=sio)

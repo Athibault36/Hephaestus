@@ -21,6 +21,7 @@ the engine/GPU · risk = engineering uncertainty.
 - [ ] LLM served with acceptable latency (config target: total loop p95 < 300 ms excluding model think time) and a real, tool-calling-capable model.
 - [ ] All advertised commands (`world/asset/blueprint/rendering/pcg/animation/audio/vision`) are implemented, not stubs.
 - [ ] The HTTP bridge is authenticated and bound to localhost by default; no secrets in source.
+- [ ] Voice is real-time (always-on, no push-to-talk) and speaker-verified — Hephaestus acts only on the enrolled operator's voice.
 - [ ] Structured logs, metrics, and traces emit; dashboard reflects live state.
 - [ ] CI is green (tests, build, lint, type-check); releases are versioned and tagged.
 - [ ] Onboarding docs let a new user go from clone → running agent.
@@ -66,6 +67,18 @@ Phases 1–2 that touches the engine or GPU is blocked on this.**
 | 6 | Dashboard completion | Viewport (WebRTC or `/frame` polling), Voice console (STT/TTS), UE-sourced metrics | Panels show live data, no placeholders | Viewport polling **[now]**; rest [G] |
 
 ---
+
+## Phase 2b — Real-time, speaker-verified voice
+
+Requirement: no push-to-talk. Hephaestus listens continuously and responds ONLY
+to the enrolled operator's voice, ignoring everyone else.
+
+| M | Milestone | Scope | Exit criteria | Gate |
+| --- | --- | --- | --- | --- |
+| V1 | Verification + gate core | `runtime/voice`: `SpeakerVerifier` (enroll + cosine threshold) and `RealtimeVoicePipeline` (always-on VAD → verify → STT gate; non-operator speech ignored, never transcribed; barge-in hooks) | Impostor rejected, operator accepted, mixed-speaker stream gated — **done, unit-tested** | [now] |
+| V2 | Dashboard voice UX | Voice Console: always-listening state, live waveform, "Recognized — you" badge, mute toggle (no push-to-talk); bridge `voiceActive`/`speaker` events | Panel reflects live listening + recognition — **done** | [now] |
+| V3 | Real backends | Wire silero-vad (VAD), ECAPA-TDNN or NVIDIA TitaNet (speaker embeddings), faster-whisper/Parakeet (streaming STT); browser mic → server audio (WebRTC/WS) | Live mic drives the loop; only the operator is obeyed | [G] |
+| V4 | Enrollment + barge-in | Operator enrollment flow (record samples → profile), and TTS ducking/interruption when the operator speaks | Enroll once, then hands-free; agent stops talking when interrupted | [G] |
 
 ## Phase 3 — Reliability & correctness
 

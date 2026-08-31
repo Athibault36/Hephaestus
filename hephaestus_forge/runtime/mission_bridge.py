@@ -142,6 +142,14 @@ class MissionBridge:
         data_url = "data:image/png;base64," + base64.b64encode(png_bytes).decode("ascii")
         self._emit("frame", {"dataUrl": data_url, "width": width, "height": height, "timestamp": _now_ms()})
 
+    def emit_voice_active(self, active: bool) -> None:
+        """Tell the dashboard whether Hephaestus is actively listening."""
+        self._emit("voiceActive", bool(active))
+
+    def emit_speaker(self, recognized: Optional[bool]) -> None:
+        """Report the current speaker: True=operator, False=other, None=idle."""
+        self._emit("speaker", {"recognized": bool(recognized)} if recognized is not None else None)
+
     def reset(self) -> None:
         self._actors = []
         self._tool_calls = 0
