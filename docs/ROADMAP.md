@@ -92,30 +92,30 @@ Exit: a soak run of repeated agent goals completes without leaks, hangs, or orph
 
 ## Phase 4 — Security & safety
 
-- Authenticate the HTTP bridge (shared-token header), bind to `127.0.0.1` by default, gate remote exposure explicitly (`security.localhost_only` already in config).
-- Validate/limit command input server-side (size, allowed classes/paths) to prevent unsafe spawns/loads.
-- Secrets only via environment/secret store (`NVIDIA_API_KEY`, `MESHY_API_KEY`, Brev creds) — never in source; redact in logs.
-- Enforce cloud budget guardrails (existing `BudgetManager`) on any GPU/cloud path.
-- Security review of the command handler and bridge before any non-localhost use.
+- Authenticate the HTTP bridge (shared-token header), bind to `127.0.0.1` by default (**done** Python + C++ auth; `HEPHAESTUS_LOCALHOST_ONLY` env).
+- Validate/limit command input server-side (**done** Python validation + C++ `ValidateCommand` for spawn; 413 payload limit).
+- Secrets only via environment/secret store — never in source (**ongoing** — config placeholders only).
+- Enforce cloud budget guardrails on GPU/cloud path (**existing** `BudgetManager` for NIM).
+- Security review before non-localhost exposure (**pending** human review).
 
 Exit: no unauthenticated mutation path; no secret in repo/logs; a security-review pass is clean.
 
 ## Phase 5 — Observability
 
-- Structured JSONL logging (config: `observability.log_format=jsonl`) across runtime + plugin.
-- Prometheus metrics endpoint (config: port 9090) for loop/tool/LLM latency and error rates.
-- Tracing to the configured OTLP endpoint; correlate agent steps with `command_id`.
-- Dashboard: real FPS/GPU/latency from UE (extends the current latency-only metrics).
+- Structured JSONL logging (`observability.log_format=jsonl`) across runtime (**done** — auto path in `forge agent`).
+- Prometheus metrics endpoint (port 9090) for loop/tool/LLM latency (**done** — `MetricsRegistry` + deploy/agent bootstrap).
+- Tracing to OTLP endpoint (**stub done** — `TraceRecorder` spans; full export when `opentelemetry-sdk` installed).
+- Dashboard: real FPS/GPU from UE (**pending** — agent-measured latency only until M2).
 
-Exit: latency percentiles (p50/95/99) are measurable and meet the config targets.
+Exit: latency percentiles (p50/95/99) are measurable and meet the config targets — metrics histograms live; UE GPU fields pending.
 
 ## Phase 6 — Packaging, docs & release
 
-- UE plugin packaging: a distributable, versioned `.uplugin` (Marketplace-shaped) with an install path that isn't the manual `Plugins/` copy.
-- Python: versioning/changelog; publishable wheel; pinned lockfile for reproducibility.
-- Docs: a top-level README, a user guide (clone → attach → compile → agent), and a command/API reference (the Windows compile doc exists).
-- CI extensions: add `ruff`/`mypy` (Python) — `tsc` strict already runs; build artifacts; release tagging.
-- Merge sequencing: land the dev-environment PR into `main`, then rebase the feature PR onto `main`.
+- UE plugin packaging: distributable `.uplugin` (**pending** M1).
+- Python: versioning/changelog; publishable wheel (**partial** — `pyproject.toml` v0.1.0).
+- Docs: README, user guide, command/API reference (**done** for Linux path; M1 checklist for Windows).
+- CI extensions: `ruff`/`mypy` + `tsc` build (**done** in `.github/workflows/ci.yml`).
+- Merge sequencing: dev-environment PR → main, rebase feature PR (**PR #2** open).
 
 Exit: a tagged release; a new user reaches a running agent from the docs alone.
 
@@ -123,10 +123,11 @@ Exit: a tagged release; a new user reaches a running agent from the docs alone.
 
 ## Parallelizable now (no hardware) [now]
 
-- Viewport panel fallback: poll `/frame` and render as `<img>` (a Linux-testable slice of M6).
-- Python-side tools + tests for the M5 command families (wiring verifiable now; effective once C++ handlers land).
-- Config-driven ports/hosts (Phase 3) and bridge token auth scaffolding (Phase 4) — both testable without the engine.
-- README / user-guide draft and CI lint/type-check jobs (Phase 6).
+- ~~Viewport panel fallback: poll `/frame` and render as `<img>`~~ (**done** — ViewportStream + agent frame relay).
+- ~~Python-side tools + tests for the M5 command families~~ (**done** — 27 tools + contract tests).
+- ~~Config-driven ports/hosts and bridge token auth~~ (**done**).
+- ~~README / user-guide and CI lint/type-check jobs~~ (**done**).
+- Remaining: live C++ command handlers (M5), real voice backends (V3), plugin compile (M1).
 
 ## Risk register (top items)
 

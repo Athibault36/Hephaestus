@@ -93,6 +93,7 @@ hephaestus_forge deploy
 hephaestus_forge deploy --services-only
 ```
 
+When `observability.metrics.enabled` is true in config, Prometheus metrics are served at `http://127.0.0.1:9090/metrics`.
 With `observability.log_format: jsonl`, trajectories append to `logs/agent_trajectory.jsonl` automatically.
 
 Use `--repeat N` on `forge agent` for soak testing against a live UE + LLM stack.

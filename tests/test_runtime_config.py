@@ -2,7 +2,12 @@
 
 from pathlib import Path
 
-from hephaestus_forge.runtime.config import RuntimeConfig, find_project_config, load_runtime_config
+from hephaestus_forge.runtime.config import (
+    RuntimeConfig,
+    find_project_config,
+    load_observability_config,
+    load_runtime_config,
+)
 
 
 SAMPLE = Path(__file__).resolve().parents[1] / "hephaestus_forge" / "forge_config" / "config.yaml"
@@ -40,3 +45,12 @@ def test_find_project_config_falls_back_to_template():
 def test_load_runtime_config_without_project():
     cfg = load_runtime_config(Path("/tmp/no-hephaestus-project"))
     assert "8099" in cfg.ue_bridge_url
+
+
+def test_load_observability_config_from_template():
+    obs = load_observability_config(Path(__file__).resolve().parents[1] / "hephaestus_forge")
+    assert obs.log_format == "jsonl"
+    assert obs.metrics_enabled is True
+    assert obs.metrics_port == 9090
+    assert obs.tracing_enabled is True
+    assert "4318" in obs.tracing_endpoint
