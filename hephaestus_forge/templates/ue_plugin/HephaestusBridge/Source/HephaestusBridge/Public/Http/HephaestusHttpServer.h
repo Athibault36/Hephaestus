@@ -55,6 +55,9 @@ public:
     /** True when HEPHAESTUS_REQUIRE_AUTH=1 or a bridge token is configured. */
     static bool ShouldRequireAuth();
 
+    /** True unless HEPHAESTUS_LOCALHOST_ONLY=0 (default: localhost-only intent). */
+    static bool ShouldBindLocalhostOnly();
+
 private:
     /** Return false after sending 401/503 when auth fails. */
     bool AuthorizeMutation(const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete) const;

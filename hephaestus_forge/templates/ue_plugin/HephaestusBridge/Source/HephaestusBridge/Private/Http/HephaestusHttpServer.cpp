@@ -54,6 +54,17 @@ bool UHephaestusHttpServer::ShouldRequireAuth()
     return !ResolveAuthToken().IsEmpty();
 }
 
+bool UHephaestusHttpServer::ShouldBindLocalhostOnly()
+{
+    const FString Flag = FPlatformMisc::GetEnvironmentVariable(TEXT("HEPHAESTUS_LOCALHOST_ONLY"));
+    if (Flag.IsEmpty())
+    {
+        return true;
+    }
+    return Flag.Equals(TEXT("1"), ESearchCase::IgnoreCase) ||
+           Flag.Equals(TEXT("true"), ESearchCase::IgnoreCase);
+}
+
 FString UHephaestusHttpServer::HeaderValue(const FHttpServerRequest& Request, const FString& HeaderName)
 {
     if (const TArray<FString>* Values = Request.Headers.Find(HeaderName))
@@ -147,7 +158,16 @@ void UHephaestusHttpServer::StartServer(uint32 InPort)
 
     HttpServerModule.StartAllListeners();
     BoundPort = InPort;
-    UE_LOG(LogHephaestusBridge, Log, TEXT("HephaestusHttpServer: listening on http://127.0.0.1:%u"), InPort);
+    if (ShouldBindLocalhostOnly())
+    {
+        UE_LOG(LogHephaestusBridge, Log,
+            TEXT("HephaestusHttpServer: listening on http://127.0.0.1:%u (HEPHAESTUS_LOCALHOST_ONLY=1)"), InPort);
+    }
+    else
+    {
+        UE_LOG(LogHephaestusBridge, Warning,
+            TEXT("HephaestusHttpServer: listening on port %u with HEPHAESTUS_LOCALHOST_ONLY=0 — enable auth before remote exposure"), InPort);
+    }
 }
 
 void UHephaestusHttpServer::StopServer()

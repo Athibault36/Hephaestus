@@ -20,6 +20,7 @@ Environment variables passed to the UE editor at deploy time:
 | `HEPHAESTUS_UE_PORT` | Listen port (default 8099) |
 | `HEPHAESTUS_BRIDGE_TOKEN` | Shared secret for mutation endpoints |
 | `HEPHAESTUS_REQUIRE_AUTH` | `1` to require token on POST/GET frame |
+| `HEPHAESTUS_LOCALHOST_ONLY` | `1` (default) logs localhost-only intent; set `0` only with auth enabled |
 
 ## Authentication
 
@@ -65,6 +66,8 @@ Request:
   }
 }
 ```
+
+Envelope shape is also defined in `hephaestus_forge/schemas/command_envelope.json` and validated in Python before requests are sent.
 
 Response (`FHephaestusCommandResult`):
 

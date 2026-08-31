@@ -107,8 +107,11 @@ class FakeUE:
             return _err(cid, f"unknown command {command}", code="UNKNOWN_COMMAND")
 
         if command == "world.spawn_actor":
-            if not params.get("class_path"):
+            class_path = params.get("class_path")
+            if not class_path:
                 return _err(cid, "missing class_path", code="VALIDATION_MISSING_FIELD")
+            if not any(str(class_path).startswith(p) for p in ("/Script/", "/Game/", "/Engine/")):
+                return _err(cid, "class_path prefix denied", code="VALIDATION_SPAWN_CLASS_DENIED")
             self.spawn_counter += 1
             path = f"/Game/Maps/UEDPIE_0_Main.Main:PersistentLevel.SpawnedActor_{self.spawn_counter}"
             return _ok(cid, {"actor_path": path, "stub": False}, actors=[path])
