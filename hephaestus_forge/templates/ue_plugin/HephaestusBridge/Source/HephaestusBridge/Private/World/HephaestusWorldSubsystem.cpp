@@ -41,7 +41,8 @@ AActor* UHephaestusWorldSubsystem::SpawnActor(const FString& ClassPath, const FT
     FActorSpawnParameters Params = SpawnParams;
     Params.bNoFail = true;
 
-    AActor* Actor = World->SpawnActor(ActorClass, Transform, Params);
+    // UWorld::SpawnActor takes the transform by pointer.
+    AActor* Actor = World->SpawnActor(ActorClass, &Transform, Params);
     if (Actor)
     {
         UE_LOG(LogHephaestusBridge, Log, TEXT("HephaestusWorldSubsystem: Spawned actor %s at %s"), *Actor->GetName(), *Transform.GetLocation().ToString());

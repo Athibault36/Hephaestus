@@ -62,6 +62,7 @@ Installed=False
 +Dependencies=(Name="Json", Version="5.8")
 +Dependencies=(Name="JsonUtilities", Version="5.8")
 +Dependencies=(Name="HTTP", Version="5.8")
++Dependencies=(Name="HTTPServer", Version="5.8")
 +Dependencies=(Name="Sockets", Version="5.8")
 +Dependencies=(Name="Networking", Version="5.8")
 +Dependencies=(Name="PacketHandler", Version="5.8")
