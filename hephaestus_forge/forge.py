@@ -2337,5 +2337,87 @@ def agent(
     raise typer.Exit(0 if result.completed else 1)
 
 
+def _enable_plugin_in_uproject(uproject: Path, plugin_name: str) -> bool:
+    """Ensure ``plugin_name`` is present and enabled in a .uproject. Returns changed."""
+    try:
+        data = json.loads(uproject.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    plugins = data.get("Plugins")
+    if not isinstance(plugins, list):
+        plugins = []
+    for entry in plugins:
+        if isinstance(entry, dict) and entry.get("Name") == plugin_name:
+            if entry.get("Enabled") is True:
+                return False
+            entry["Enabled"] = True
+            uproject.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+            return True
+    plugins.append({"Name": plugin_name, "Enabled": True})
+    data["Plugins"] = plugins
+    data.setdefault("FileVersion", 3)
+    uproject.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return True
+
+
+@app.command()
+def attach(
+    project_path: Annotated[Path, typer.Argument(help="Existing UE project directory (contains a .uproject)")],
+):
+    """
+    Attach HephaestusForge to an EXISTING Unreal project.
+
+    Copies the HephaestusBridge plugin into <project>/Plugins, enables it in the
+    .uproject, writes .hephaestus_forge/config.yaml, and copies the Mission
+    Control dashboard and agent-runtime templates — without creating a new
+    project directory. Use 'init' instead to scaffold a brand-new project.
+    """
+    from hephaestus_forge.ue_build import find_uproject
+
+    project_root = project_path.resolve()
+    if not project_root.exists():
+        console.print(f"[red]✗ Directory does not exist: {project_root}[/red]")
+        raise typer.Exit(1)
+
+    uproject = find_uproject(project_root)
+    if not uproject:
+        console.print(f"[red]✗ No .uproject found in {project_root}. "
+                      f"Use 'hephaestus_forge init' to scaffold a new project.[/red]")
+        raise typer.Exit(1)
+
+    console.print(Panel.fit(
+        f"[bold]Attaching HephaestusForge[/bold]\n"
+        f"Project: [cyan]{uproject}[/cyan]\n"
+        f"Plugin dest: [cyan]{project_root / 'Plugins' / 'HephaestusBridge'}[/cyan]",
+        border_style="green",
+    ))
+
+    scan = scanner.scan()
+    config = ForgeConfig.from_scan(uproject.stem, project_root, scan)
+    # Place the plugin where UE auto-discovers it.
+    config.paths.ue_plugin_dir = "Plugins/HephaestusBridge"
+
+    # Reuse the scaffold writers/copiers; this won't overwrite the existing .uproject.
+    scaffold.create(project_root, config, scan)
+
+    changed = _enable_plugin_in_uproject(uproject, "HephaestusBridge")
+    if changed:
+        console.print(f"[green]✓ Enabled HephaestusBridge in {uproject.name}[/green]")
+    else:
+        console.print(f"[dim]HephaestusBridge already enabled in {uproject.name}[/dim]")
+
+    console.print(Panel.fit(
+        "[bold green]ATTACHED[/bold green]\n\n"
+        "Next steps:\n"
+        f"  1. [bold]hephaestus_forge compile \"{project_root}\"[/bold]   — build the editor target\n"
+        f"  2. [bold]hephaestus_forge health \"{project_root}\"[/bold]    — pre-deploy check\n"
+        "  3. Open the project in UE5.8, then:\n"
+        "     [bold]hephaestus_forge agent --goal \"Spawn a cube\" --stream[/bold]",
+        border_style="green",
+    ))
+
+
 if __name__ == "__main__":
     app()
