@@ -20,7 +20,10 @@
 #include "JsonObjectConverter.h"
 #include "Misc/ScopeLock.h"
 #include "HAL/PlatformTime.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Misc/Paths.h"
+#include "Sound/SoundWave.h"
 
 #define LOCTEXT_NAMESPACE "HephaestusCommand"
 
@@ -994,8 +997,47 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleAssetCommand(const FSt
     }
     else if (Action == TEXT("create_instance"))
     {
-        // Params: parent_material, parameters
-        return MakeSuccessResult(TEXT(""), TEXT("{\"instance_path\":\"\"}"));
+        FString ParentPath;
+        TMap<FString, FString> ParameterMap;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("parent_material"), ParentPath);
+            if (ParentPath.IsEmpty())
+            {
+                Params->TryGetStringField(TEXT("parent_material_path"), ParentPath);
+            }
+            const TSharedPtr<FJsonObject>* ParamsObj = nullptr;
+            if (Params->TryGetObjectField(TEXT("parameters"), ParamsObj) && ParamsObj && ParamsObj->IsValid())
+            {
+                for (const auto& Pair : (*ParamsObj)->Values)
+                {
+                    FString Val;
+                    if (Pair.Value->TryGetString(Val))
+                    {
+                        ParameterMap.Add(Pair.Key, Val);
+                    }
+                }
+            }
+        }
+        if (ParentPath.IsEmpty())
+        {
+            ParentPath = TEXT("/Engine/EngineMaterials/DefaultMaterial.DefaultMaterial");
+        }
+        UMaterial* Parent = LoadObject<UMaterial>(nullptr, *ParentPath);
+        if (!Parent)
+        {
+            return MakeErrorResult(
+                TEXT(""),
+                FString::Printf(TEXT("create_instance: parent material not found: %s"), *ParentPath));
+        }
+        UMaterialInstanceDynamic* Instance = AssetSubsystem->CreateMaterialInstance(Parent, ParameterMap);
+        return Instance
+            ? MakeSuccessResult(
+                  TEXT(""),
+                  FString::Printf(
+                      TEXT("{\"parent_material\":\"%s\",\"transient\":true,\"instance\":\"material_instance_dynamic\"}"),
+                      *ParentPath))
+            : MakeErrorResult(TEXT(""), TEXT("create_instance failed"));
     }
 
     return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Unknown asset action: %s"), *Action));
@@ -1673,7 +1715,32 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleAudioCommand(const FSt
 
     if (Action == TEXT("create_metasound"))
     {
-        return MakeSuccessResult(TEXT(""), TEXT("{}"));
+        FHephaestusMetaSoundDesc Desc;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("name"), Desc.Name);
+            FString SourcePath;
+            Params->TryGetStringField(TEXT("source_path"), SourcePath);
+            if (!SourcePath.IsEmpty())
+            {
+                Desc.Parameters.Add(TEXT("source_path"), SourcePath);
+            }
+        }
+        if (Desc.Name.IsEmpty())
+        {
+            Desc.Name = TEXT("HephaestusMetaSound");
+        }
+        UObject* MetaSound = AudioSubsystem->CreateMetaSound(Desc);
+        return MetaSound
+            ? MakeSuccessResult(
+                  TEXT(""),
+                  FString::Printf(
+                      TEXT("{\"source_path\":\"%s\",\"class\":\"%s\"}"),
+                      *MetaSound->GetPathName(),
+                      *MetaSound->GetClass()->GetName()))
+            : MakeErrorResult(
+                  TEXT(""),
+                  TEXT("create_metasound failed — provide source_path to an existing MetaSound asset"));
     }
     else if (Action == TEXT("play_quartz"))
     {
@@ -1689,7 +1756,23 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleAudioCommand(const FSt
     }
     else if (Action == TEXT("synthesize"))
     {
-        return MakeSuccessResult(TEXT(""), TEXT("{}"));
+        FString SynthDesc;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("sound_path"), SynthDesc);
+            if (SynthDesc.IsEmpty())
+            {
+                Params->TryGetStringField(TEXT("path"), SynthDesc);
+            }
+        }
+        USoundWave* Wave = AudioSubsystem->SynthesizeAudio(SynthDesc);
+        return Wave
+            ? MakeSuccessResult(
+                  TEXT(""),
+                  FString::Printf(TEXT("{\"sound_path\":\"%s\"}"), *Wave->GetPathName()))
+            : MakeErrorResult(
+                  TEXT(""),
+                  TEXT("synthesize failed — provide sound_path to an existing SoundWave asset"));
     }
 
     return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Unknown audio action: %s"), *Action));

@@ -144,5 +144,28 @@ def run_e2e_check(
         except Exception as exc:
             steps.append(E2EStep("sequence_create_shot", False, str(exc)))
 
+        try:
+            inst = _post_command(
+                remote_api,
+                {
+                    "command": "asset.create_instance",
+                    "params": {"parent_material": "/Engine/EngineMaterials/DefaultMaterial.DefaultMaterial"},
+                },
+            )
+            steps.append(E2EStep("asset_create_instance", bool(inst.get("success")), inst.get("error") or "ok"))
+        except Exception as exc:
+            steps.append(E2EStep("asset_create_instance", False, str(exc)))
+
+        try:
+            meta = _post_command(
+                remote_api,
+                {"command": "audio.create_metasound", "params": {"name": "HephaestusE2EProbe"}},
+            )
+            # Command registered when error mentions create_metasound (missing source_path is fine).
+            meta_ok = bool(meta.get("success")) or "create_metasound" in str(meta.get("error") or "").lower()
+            steps.append(E2EStep("audio_create_metasound", meta_ok, meta.get("error") or "registered"))
+        except Exception as exc:
+            steps.append(E2EStep("audio_create_metasound", False, str(exc)))
+
     ok = all(s.ok for s in steps if s.name not in ("preflight_nim_api_key", "preflight_planner"))
     return E2EReport(ok=ok, steps=steps)

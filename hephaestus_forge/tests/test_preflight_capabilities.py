@@ -25,6 +25,10 @@ def test_probe_bridge_capabilities_ok():
             payload = {"success": True, "result_json": "{\"material_path\":\"HephaestusProbe\"}"}
         elif cmd == "asset.search":
             payload = {"success": True, "result_json": "{\"assets\":[\"/Engine/BasicShapes/Cube.Cube\"],\"count\":1}"}
+        elif cmd == "asset.create_instance":
+            payload = {"success": True, "result_json": "{\"transient\":true}"}
+        elif cmd == "audio.create_metasound":
+            payload = {"success": False, "error": "create_metasound failed — provide source_path to an existing MetaSound asset"}
         else:
             payload = {"success": True, "result_json": "{}"}
         resp = MagicMock()

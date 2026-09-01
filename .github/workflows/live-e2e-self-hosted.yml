@@ -1,0 +1,64 @@
+name: Live E2E (self-hosted)
+
+# Requires a self-hosted runner with UE 5.8 PIE already online.
+# See docs/LIVE_E2E.md → "Self-hosted CI".
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_root:
+        description: Absolute path to adopted UE target on the runner
+        required: true
+        type: string
+      api:
+        description: Hephaestus Remote API base URL (PIE)
+        required: false
+        default: http://127.0.0.1:8765
+      sync:
+        description: Run forge sync-plugin before checks
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  live-e2e:
+    runs-on: self-hosted
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install factory
+        shell: pwsh
+        run: pip install -e .
+
+      - name: Preflight (doctor)
+        shell: pwsh
+        run: |
+          $args = @('doctor', '${{ inputs.project_root }}', '--api', '${{ inputs.api }}')
+          if ('${{ inputs.sync }}' -eq 'true') { $args += '--sync' }
+          forge @args
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Live E2E probes
+        shell: pwsh
+        run: |
+          $args = @('e2e', '${{ inputs.project_root }}', '--api', '${{ inputs.api }}')
+          if ('${{ inputs.sync }}' -eq 'true') { $args += '--sync' }
+          forge @args
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Write E2E JSON report
+        if: always()
+        shell: pwsh
+        run: |
+          python -c "import json; from pathlib import Path; from hephaestus_forge.e2e_check import run_e2e_check; report = run_e2e_check(Path(r'${{ inputs.project_root }}'), remote_api=r'${{ inputs.api }}', sync=${{ inputs.sync }}, live=True); Path('live-e2e-report.json').write_text(json.dumps(report.to_dict(), indent=2), encoding='utf-8')"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-e2e-report
+          path: live-e2e-report.json

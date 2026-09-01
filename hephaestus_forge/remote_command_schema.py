@@ -207,3 +207,36 @@ def validate_asset_import(command_obj: dict[str, Any]) -> list[str]:
         errors.append("missing destination_path")
     return errors
 
+
+def validate_asset_create_instance(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "asset.create_instance":
+        errors.append("command must be asset.create_instance")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+    return errors
+
+
+def validate_audio_create_metasound(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "audio.create_metasound":
+        errors.append("command must be audio.create_metasound")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+    return errors
+
+
+def validate_audio_synthesize(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "audio.synthesize":
+        errors.append("command must be audio.synthesize")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not (params.get("sound_path") or params.get("path")):
+        errors.append("missing sound_path")
+    return errors
+

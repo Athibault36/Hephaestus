@@ -30,9 +30,41 @@ forge e2e C:\path\to\YourGame
 | `capture_frame` | `vision.capture_frame` |
 | `asset_create_material` | `asset.create_material` |
 | `asset_search` | `asset.search` |
+| `asset_create_instance` | `asset.create_instance` (transient MID) |
 | `sequence_create_shot` | `sequence.create_shot` + `ease_in_out` |
+| `audio_create_metasound` | `audio.create_metasound` (registered; needs `source_path` to load) |
 
-Preflight also probes locomotion, montage, audio, and blueprint compile registration.
+Preflight also probes locomotion, montage, audio quartz, blueprint compile, and asset verbs.
+
+## Self-hosted CI
+
+Use when a Windows machine already has UE 5.8 + PIE running with HephaestusBridge.
+
+### Runner setup
+
+1. Install [GitHub Actions self-hosted runner](https://docs.github.com/en/actions/hosting-your-own-runners) on the UE workstation.
+2. Label the runner `self-hosted` (default).
+3. Ensure `pip`, Python 3.11+, and network access to `127.0.0.1:8765` from the runner process.
+4. Adopt the target once: `forge adopt C:\path\to\YourGame`
+
+### Manual workflow
+
+GitHub → **Actions** → **Live E2E (self-hosted)** → **Run workflow**
+
+| Input | Example |
+|-------|---------|
+| `project_root` | `C:\dev\MyAgentGame` |
+| `api` | `http://127.0.0.1:8765` |
+| `sync` | `true` to copy plugin template before probes |
+
+The job runs `forge doctor` then `forge e2e` (live probes). It uploads `live-e2e-report.json` as an artifact.
+
+### Local equivalent
+
+```powershell
+forge doctor C:\path\to\YourGame --api http://127.0.0.1:8765
+forge e2e C:\path\to\YourGame --api http://127.0.0.1:8765
+```
 
 ## 3. Mission Control
 
@@ -49,4 +81,6 @@ See [OPERATOR_V0_2.md](OPERATOR_V0_2.md) for spawn→walk grading, cinematic sho
 
 ## CI vs live
 
-GitHub Actions runs **pytest** and **Mission Control `npm run build`** only. Live PIE E2E requires a local UE editor session (self-hosted runner optional).
+GitHub Actions runs **pytest** and **Mission Control `npm run build`** on every PR.
+
+For live PIE validation, use the **Live E2E (self-hosted)** workflow (see [Self-hosted CI](#self-hosted-ci) above) or run `forge e2e` locally.

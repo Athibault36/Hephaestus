@@ -201,6 +201,11 @@ def _probe_bridge_capabilities(remote_api: str) -> HealthCheck:
         ("blueprint.compile", {"command": "blueprint.compile", "params": {"blueprint_path": "/Game/__HephaestusProbe"}}),
         ("asset.create_material", {"command": "asset.create_material", "params": {"name": "HephaestusProbe"}}),
         ("asset.search", {"command": "asset.search", "params": {"query": "cube", "limit": 1}}),
+        ("asset.create_instance", {
+            "command": "asset.create_instance",
+            "params": {"parent_material": "/Engine/EngineMaterials/DefaultMaterial.DefaultMaterial"},
+        }),
+        ("audio.create_metasound", {"command": "audio.create_metasound", "params": {"name": "HephaestusProbe"}}),
     ]
     missing: list[str] = []
     try:
@@ -213,6 +218,8 @@ def _probe_bridge_capabilities(remote_api: str) -> HealthCheck:
                 pass  # probe path missing is ok — command exists
             elif label == "blueprint.compile" and "subsystem" in err:
                 missing.append(label)
+            elif label == "audio.create_metasound" and "create_metasound" in err:
+                pass  # missing source_path is ok — command exists
         if missing:
             return HealthCheck(
                 "bridge_capabilities",
