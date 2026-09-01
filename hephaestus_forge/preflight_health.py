@@ -197,6 +197,15 @@ def _probe_bridge_capabilities(remote_api: str) -> HealthCheck:
         ("sequence.create_shot", {"command": "sequence.create_shot", "params": {"location": {"x": 0, "y": 0, "z": 1}}}),
         ("world.list_actors", {"command": "world.list_actors", "params": {"include_details": True, "detail_limit": 1}}),
         ("animation.play_montage", {"command": "animation.play_montage", "params": {}}),
+        ("audio.play_quartz", {"command": "audio.play_quartz", "params": {"clock": "test"}}),
+        ("blueprint.compile", {"command": "blueprint.compile", "params": {"blueprint_path": "/Game/__HephaestusProbe"}}),
+        ("asset.create_material", {"command": "asset.create_material", "params": {"name": "HephaestusProbe"}}),
+        ("asset.search", {"command": "asset.search", "params": {"query": "cube", "limit": 1}}),
+        ("asset.create_instance", {
+            "command": "asset.create_instance",
+            "params": {"parent_material": "/Engine/EngineMaterials/DefaultMaterial.DefaultMaterial"},
+        }),
+        ("audio.create_metasound", {"command": "audio.create_metasound", "params": {"name": "HephaestusProbe"}}),
     ]
     missing: list[str] = []
     try:
@@ -205,6 +214,12 @@ def _probe_bridge_capabilities(remote_api: str) -> HealthCheck:
             err = str(result.get("error") or "").lower()
             if "unknown" in err or "unrecognized" in err or "not supported" in err:
                 missing.append(label)
+            elif label == "blueprint.compile" and "compile failed" in err:
+                pass  # probe path missing is ok — command exists
+            elif label == "blueprint.compile" and "subsystem" in err:
+                missing.append(label)
+            elif label == "audio.create_metasound" and "create_metasound" in err:
+                pass  # missing source_path is ok — command exists
         if missing:
             return HealthCheck(
                 "bridge_capabilities",
@@ -215,7 +230,7 @@ def _probe_bridge_capabilities(remote_api: str) -> HealthCheck:
         return HealthCheck(
             "bridge_capabilities",
             True,
-            "Locomotion, sequencer, list_actors details, montage registered on PIE plugin",
+            "Locomotion, sequencer, assets, montage, audio, blueprint on PIE plugin",
             blocker=False,
         )
     except Exception as exc:
@@ -248,12 +263,11 @@ def run_preflight(
     ready = ue_ok and not blockers_failed
     if project_root and bridge_template and not bridge_template.ok:
         ready = False
-    if project_root:
-        ue_check = next((c for c in checks if c.name == "ue_pie"), None)
-        if ue_check and ue_check.ok and "rebuild recommended" in ue_check.detail.lower():
-            ready = False
+    ue_check = next((c for c in checks if c.name == "ue_pie"), None)
+    if ue_check and ue_check.ok and "rebuild required" in ue_check.detail.lower():
+        ready = False
     return PreflightReport(
-        ready=ue_ok and not blockers_failed,
+        ready=ready,
         checks=checks,
         ue_api=remote_api.rstrip("/"),
         project_root=str(project_root.resolve()) if project_root else "",

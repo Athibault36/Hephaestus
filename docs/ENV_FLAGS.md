@@ -8,6 +8,15 @@
 | `HEPHAESTUS_VISION_MODEL` | Nemotron vision default | Caption model when vision planner is on |
 | `HEPHAESTUS_HOME` | `~/.hephaestus` | Session store when no project root is bound |
 | `HEPHAESTUS_NIM_REPAIR` | off | `1` to run a short repair loop when grading fails |
+| `HEPHAESTUS_NIM_PARALLEL_REPAIR` | off | `1` to fetch a NIM parallel hint before repair loop |
+
+## Audio / MetaSound commands
+
+| Command | Params | Notes |
+|---------|--------|-------|
+| `audio.create_metasound` | `source_path`, `name` | Loads an existing MetaSound asset (`source_path` required) |
+| `audio.synthesize` | `sound_path` | Loads an existing `SoundWave` (procedural synth deferred) |
+| `audio.play_quartz` | `clock`, `timeline` | Plays test cue when Quartz graph not bound |
 
 ## NIM model IDs (planner)
 

@@ -155,3 +155,88 @@ def validate_sequence_create_shot(command_obj: dict[str, Any]) -> list[str]:
         errors.append("missing target location")
     return errors
 
+
+def validate_asset_search(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "asset.search":
+        errors.append("command must be asset.search")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    query = params.get("query")
+    if not query or not str(query).strip():
+        errors.append("missing query")
+    return errors
+
+
+def validate_asset_create_material(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "asset.create_material":
+        errors.append("command must be asset.create_material")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+    return errors
+
+
+def validate_asset_export(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "asset.export":
+        errors.append("command must be asset.export")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not params.get("asset_path"):
+        errors.append("missing asset_path")
+    return errors
+
+
+def validate_asset_import(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "asset.import":
+        errors.append("command must be asset.import")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not params.get("file_path"):
+        errors.append("missing file_path")
+    if not params.get("destination_path"):
+        errors.append("missing destination_path")
+    return errors
+
+
+def validate_asset_create_instance(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "asset.create_instance":
+        errors.append("command must be asset.create_instance")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+    return errors
+
+
+def validate_audio_create_metasound(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "audio.create_metasound":
+        errors.append("command must be audio.create_metasound")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+    return errors
+
+
+def validate_audio_synthesize(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "audio.synthesize":
+        errors.append("command must be audio.synthesize")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not (params.get("sound_path") or params.get("path")):
+        errors.append("missing sound_path")
+    return errors
+

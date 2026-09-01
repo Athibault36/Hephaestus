@@ -6,6 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from preflight_health import run_preflight  # noqa: E402
+from version import BRIDGE_VERSION  # noqa: E402
 from ue_agent_loop import WorldSnapshot  # noqa: E402
 from goal_grader import grade_goal  # noqa: E402
 
@@ -20,9 +21,12 @@ def test_preflight_offline_ue(tmp_path):
 def test_preflight_online_ue_with_key(tmp_path):
     forge = tmp_path / ".hephaestus_forge"
     forge.mkdir()
+    plugin_dir = tmp_path / "Plugins" / "HephaestusBridge"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "HEPHAESTUS_BRIDGE_VERSION").write_text(f"{BRIDGE_VERSION}\n", encoding="utf-8")
     fake_resp = MagicMock()
     fake_resp.status = 200
-    fake_resp.read.return_value = b'{"ok":true,"service":"hephaestus-remote","port":8765}'
+    fake_resp.read.return_value = b'{"ok":true,"service":"hephaestus-remote","port":8765,"plugin_version":"0.1.2"}'
     fake_resp.__enter__ = lambda s: s
     fake_resp.__exit__ = MagicMock(return_value=False)
     with patch.dict("os.environ", {"NVIDIA_API_KEY": "nvapi-test"}):
@@ -58,4 +62,4 @@ def test_preflight_bridge_version_mismatch(tmp_path):
     report = run_preflight("http://127.0.0.1:1", tmp_path)
     bridge = next(c for c in report.checks if c.name == "bridge_template")
     assert bridge.ok is False
-    assert "0.1.1" in bridge.detail or "sync-plugin" in bridge.detail
+    assert BRIDGE_VERSION in bridge.detail or "sync-plugin" in bridge.detail

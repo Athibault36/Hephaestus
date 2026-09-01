@@ -17,6 +17,13 @@ from remote_command_schema import (  # noqa: E402
     resolve_params,
     validate_animation_play_montage,
     validate_animation_play_locomotion,
+    validate_asset_create_instance,
+    validate_asset_create_material,
+    validate_asset_export,
+    validate_asset_import,
+    validate_asset_search,
+    validate_audio_create_metasound,
+    validate_audio_synthesize,
     validate_sequence_create_shot,
     validate_sequence_play,
     validate_world_apply_move_input,
@@ -113,6 +120,51 @@ def test_validate_sequence_play_and_create_shot():
         "command": "sequence.create_shot",
         "params": {"location": {"x": 1, "y": 2, "z": 3}},
     }) == []
+
+
+def test_validate_asset_commands():
+    assert validate_asset_search({"command": "asset.search", "params": {}}) == ["missing query"]
+    assert validate_asset_search({
+        "command": "asset.search",
+        "params": {"query": "dog", "limit": 5},
+    }) == []
+    assert validate_asset_create_material({
+        "command": "asset.create_material",
+        "params": {"name": "ProbeMat"},
+    }) == []
+    assert validate_asset_export({
+        "command": "asset.export",
+        "params": {"asset_path": "/Game/Mesh.Mesh"},
+    }) == []
+    assert "missing asset_path" in validate_asset_export({
+        "command": "asset.export",
+        "params": {},
+    })
+    assert validate_asset_import({
+        "command": "asset.import",
+        "params": {"file_path": "C:/tmp/mesh.fbx", "destination_path": "/Game/Imports"},
+    }) == []
+    missing = validate_asset_import({"command": "asset.import", "params": {"file_path": "x.fbx"}})
+    assert "missing destination_path" in missing
+
+
+def test_validate_audio_and_instance_commands():
+    assert validate_asset_create_instance({
+        "command": "asset.create_instance",
+        "params": {},
+    }) == []
+    assert validate_audio_create_metasound({
+        "command": "audio.create_metasound",
+        "params": {"name": "Probe"},
+    }) == []
+    assert validate_audio_synthesize({
+        "command": "audio.synthesize",
+        "params": {"sound_path": "/Engine/EditorSounds/Notifications/CompileSuccess.CompileSuccess"},
+    }) == []
+    assert "missing sound_path" in validate_audio_synthesize({
+        "command": "audio.synthesize",
+        "params": {},
+    })
 
 
 if __name__ == "__main__":

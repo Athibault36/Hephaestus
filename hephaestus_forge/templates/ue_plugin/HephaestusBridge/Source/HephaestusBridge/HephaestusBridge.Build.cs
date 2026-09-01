@@ -86,7 +86,10 @@ public class HephaestusBridge : ModuleRules
 			"WITH_HEPHAESTUS_AUDIO=1",
 			"WITH_HEPHAESTUS_SEQUENCE=1",
 			"WITH_HEPHAESTUS_REMOTE_API=1",
+			"WITH_HEPHAESTUS_METASOUND=1",
 		});
+
+		PrivateDependencyModuleNames.Add("MetasoundEngine");
 	}
 }
 
