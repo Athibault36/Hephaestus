@@ -9,6 +9,7 @@
 #include "Vision/HephaestusVisionSubsystem.h"
 
 #include "HephaestusBridge.h"
+#include "HephaestusVersion.h"
 
 
 
@@ -292,7 +293,9 @@ bool UHephaestusRemoteApiSubsystem::HandleHealth(const FHttpServerRequest& Reque
 
 	const FString Body = FString::Printf(
 
-		TEXT("{\"ok\":true,\"service\":\"hephaestus-remote\",\"port\":%d}"), ListenPort);
+		TEXT("{\"ok\":true,\"service\":\"hephaestus-remote\",\"port\":%d,\"plugin_version\":\"%s\"}"),
+		ListenPort,
+		HEPHAESTUS_BRIDGE_VERSION);
 
 	TUniquePtr<FHttpServerResponse> Response = FHttpServerResponse::Create(Body, TEXT("application/json"));
 

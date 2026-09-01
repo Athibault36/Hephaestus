@@ -69,6 +69,34 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
 	bool GetView(FVector& OutLocation, FRotator& OutRotation, FVector& OutForward) const;
 
+	/** Move the player pawn + control rotation (simple cinematic framing) */
+	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
+	bool SetView(const FVector& Location, const FRotator& Rotation) const;
+
+	/** Smoothly animate camera/pawn view to a target over DurationSeconds */
+	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
+	bool AnimateViewTo(
+		const FVector& TargetLocation,
+		const FRotator& TargetRotation,
+		float DurationSeconds = 4.f,
+		bool bEaseInOut = true);
+
+	/** Tint a StaticMeshActor with a readable MID color */
+	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
+	bool SetStaticMeshColor(const FString& ActorPath, const FLinearColor& Color);
+
+	/** Serialize actor state to JSON for planner verification */
+	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
+	bool DescribeActor(const FString& ActorPath, FString& OutJson) const;
+
+	/** Apply movement input to the possessed pawn for DurationSeconds (gameplay locomotion) */
+	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
+	bool ApplyMoveInput(float Forward, float Right, float DurationSeconds = 2.f);
+
+	/** JSON snapshot of possessed pawn velocity/location */
+	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
+	bool GetPawnStateJson(FString& OutJson) const;
+
 	/** Native (non-UHT) asset registry access */
 	IAssetRegistry& GetAssetRegistry();
 

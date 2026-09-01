@@ -19,9 +19,10 @@ def test_summarize_actors():
         "/Temp/...StaticMeshActor_2",
         "/Temp/...PlayerController_0",
     ]
-    lights, meshes = summarize_actors(paths)
+    lights, meshes, skeletal = summarize_actors(paths)
     assert lights == 1
     assert meshes == 2
+    assert skeletal == 0
 
 
 def test_decide_seeds_light_first():
@@ -41,6 +42,49 @@ def test_decide_noop_when_seeded():
     snap = WorldSnapshot(lights=2, meshes=3)
     action = decide_action(snap, random.Random(0))
     assert action.kind == "noop"
+
+
+def test_decide_jog_goal():
+    snap = WorldSnapshot(lights=2, meshes=3)
+    action = decide_action(snap, random.Random(0), goal="make the character jog forward")
+    assert action.kind == "apply_move"
+    assert action.command["command"] == "world.apply_move_input"
+
+
+def test_decide_frame_goal():
+    snap = WorldSnapshot(
+        lights=2,
+        meshes=3,
+        view={"location": {"x": 0, "y": 0, "z": 200}, "forward": {"x": 1, "y": 0, "z": 0}},
+    )
+    action = decide_action(snap, random.Random(0), goal="frame the character from the left")
+    assert action.kind == "create_shot"
+    assert action.command["command"] == "sequence.create_shot"
+
+
+def test_decide_play_anim_when_skeletal_and_hint():
+    skel = "/Temp/UEDPIE.PersistentLevel.SkeletalMeshActor_0"
+    snap = WorldSnapshot(lights=2, meshes=1, skeletal=1, actor_paths=[skel])
+    action = decide_action(
+        snap,
+        random.Random(0),
+        goal="play run cycle on the dog",
+        asset_hints=["/Game/Anims/Dog_Run.Dog_Run"],
+    )
+    assert action.kind == "play_anim"
+    assert action.command["params"]["anim_path"] == "/Game/Anims/Dog_Run.Dog_Run"
+
+
+def test_decide_play_locomotion_fallback_when_idle_no_hint():
+    skel = "/Temp/UEDPIE.PersistentLevel.SkeletalMeshActor_0"
+    snap = WorldSnapshot(lights=2, meshes=3, skeletal=1, actor_paths=[skel])
+    action = decide_action(
+        snap,
+        random.Random(0),
+        goal=f"play idle animation on {skel}",
+    )
+    assert action.kind == "play_locomotion"
+    assert action.command["params"]["mode"] == "idle"
 
 
 if __name__ == "__main__":

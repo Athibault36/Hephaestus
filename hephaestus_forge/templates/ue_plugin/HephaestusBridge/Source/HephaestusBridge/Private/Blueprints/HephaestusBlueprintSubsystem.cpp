@@ -4,10 +4,14 @@
 #include "HephaestusBridge.h"
 #include "Engine/Blueprint.h"
 
+#if WITH_EDITOR
+#include "Kismet2/KismetEditorUtilities.h"
+#endif
+
 void UHephaestusBlueprintSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
-	UE_LOG(LogHephaestusBridge, Log, TEXT("HephaestusBlueprintSubsystem: Initialized (stub)"));
+	UE_LOG(LogHephaestusBridge, Log, TEXT("HephaestusBlueprintSubsystem: Initialized"));
 }
 
 void UHephaestusBlueprintSubsystem::Deinitialize()
@@ -17,8 +21,17 @@ void UHephaestusBlueprintSubsystem::Deinitialize()
 
 bool UHephaestusBlueprintSubsystem::CompileBlueprint(UBlueprint* Blueprint)
 {
-	UE_LOG(LogHephaestusBridge, Warning, TEXT("CompileBlueprint stub"));
-	return Blueprint != nullptr;
+	if (!Blueprint)
+	{
+		return false;
+	}
+#if WITH_EDITOR
+	FKismetEditorUtilities::CompileBlueprint(Blueprint, EBlueprintCompileOptions::None);
+	return Blueprint->Status != BS_Error;
+#else
+	UE_LOG(LogHephaestusBridge, Warning, TEXT("CompileBlueprint requires editor build"));
+	return false;
+#endif
 }
 
 bool UHephaestusBlueprintSubsystem::AddFunctionToBlueprint(UBlueprint* Blueprint, const FHephaestusFunctionDesc& FunctionDesc)

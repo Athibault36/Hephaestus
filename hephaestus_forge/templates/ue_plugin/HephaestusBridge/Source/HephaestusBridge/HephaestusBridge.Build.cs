@@ -22,6 +22,7 @@ public class HephaestusBridge : ModuleRules
 			Path.Combine(ModuleDirectory, "Public", "PCG"),
 			Path.Combine(ModuleDirectory, "Public", "Animation"),
 			Path.Combine(ModuleDirectory, "Public", "Audio"),
+			Path.Combine(ModuleDirectory, "Public", "Sequence"),
 		});
 
 		PublicDependencyModuleNames.AddRange(new string[]
@@ -44,6 +45,8 @@ public class HephaestusBridge : ModuleRules
 			"AIModule",
 			"NavigationSystem",
 			"AudioMixer",
+			"LevelSequence",
+			"MovieScene",
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]
@@ -81,6 +84,7 @@ public class HephaestusBridge : ModuleRules
 			"WITH_HEPHAESTUS_PCG=1",
 			"WITH_HEPHAESTUS_ANIMATION=1",
 			"WITH_HEPHAESTUS_AUDIO=1",
+			"WITH_HEPHAESTUS_SEQUENCE=1",
 			"WITH_HEPHAESTUS_REMOTE_API=1",
 		});
 	}

@@ -2,6 +2,9 @@
 
 #include "Vision/HephaestusFrameEncoder.h"
 #include "HephaestusBridge.h"
+#include "IImageWrapper.h"
+#include "IImageWrapperModule.h"
+#include "Modules/ModuleManager.h"
 
 FHephaestusFrameEncoder::FHephaestusFrameEncoder() = default;
 FHephaestusFrameEncoder::~FHephaestusFrameEncoder() { Shutdown(); }
@@ -26,8 +29,24 @@ bool FHephaestusFrameEncoder::Configure(const FHephaestusEncoderConfig& InConfig
 bool FHephaestusFrameEncoder::EncodeFrame(const TArray64<uint8>& InData, int32 Width, int32 Height, TArray<uint8>& OutEncodedData)
 {
 	OutEncodedData.Reset();
-	UE_LOG(LogHephaestusBridge, Verbose, TEXT("EncodeFrame stub %dx%d (%lld bytes)"), Width, Height, InData.Num());
-	return false;
+	if (Width <= 0 || Height <= 0 || InData.Num() < static_cast<int64>(Width) * Height * 4)
+	{
+		return false;
+	}
+
+	IImageWrapperModule& ImageWrapperModule = FModuleManager::LoadModuleChecked<IImageWrapperModule>(FName("ImageWrapper"));
+	const EImageFormat Format = EImageFormat::PNG;
+	TSharedPtr<IImageWrapper> Wrapper = ImageWrapperModule.CreateImageWrapper(Format);
+	if (!Wrapper.IsValid())
+	{
+		return false;
+	}
+	if (!Wrapper->SetRaw(InData.GetData(), InData.Num(), ERGBFormat::BGRA, 8))
+	{
+		return false;
+	}
+	OutEncodedData = Wrapper->GetCompressed();
+	return OutEncodedData.Num() > 0;
 }
 
 void FHephaestusFrameEncoder::ForceKeyFrame()

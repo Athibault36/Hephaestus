@@ -1,0 +1,26 @@
+name: Mission Control build
+
+on:
+  push:
+    paths:
+      - "hephaestus_forge/templates/mission_control/**"
+      - ".github/workflows/mission-control-build.yml"
+  pull_request:
+    paths:
+      - "hephaestus_forge/templates/mission_control/**"
+
+jobs:
+  build-mc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Typecheck + build template
+        working-directory: hephaestus_forge/templates/mission_control
+        run: |
+          npm ci
+          npm run build
+      - name: Verify dist assets
+        run: test -d hephaestus_forge/templates/mission_control/dist/assets

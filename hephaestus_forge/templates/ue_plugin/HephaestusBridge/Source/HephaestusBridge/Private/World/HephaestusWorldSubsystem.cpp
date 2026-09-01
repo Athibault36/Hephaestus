@@ -6,22 +6,99 @@
 #include "Engine/Engine.h"
 #include "Engine/Blueprint.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/PointLight.h"
+#include "Engine/SkeletalMesh.h"
+#include "Animation/SkeletalMeshActor.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/PointLightComponent.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 #include "Camera/PlayerCameraManager.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/Character.h"
+#include "Animation/AnimInstance.h"
+#include "TimerManager.h"
 #include "GameFramework/Actor.h"
 #include "UObject/Class.h"
+#include "Misc/Paths.h"
 #include "UObject/Package.h"
 #include "UObject/SoftObjectPath.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Modules/ModuleManager.h"
 
 #define LOCTEXT_NAMESPACE "HephaestusWorld"
+
+namespace
+{
+struct FHephaestusInputJob
+{
+	TWeakObjectPtr<APawn> Pawn;
+	float Forward = 0.f;
+	float Right = 0.f;
+	float Duration = 1.f;
+	float Elapsed = 0.f;
+	FTimerHandle Timer;
+};
+
+struct FHephaestusViewJob
+{
+	FVector StartLocation = FVector::ZeroVector;
+	FVector EndLocation = FVector::ZeroVector;
+	FRotator StartRotation = FRotator::ZeroRotator;
+	FRotator EndRotation = FRotator::ZeroRotator;
+	float Duration = 1.f;
+	float Elapsed = 0.f;
+	bool bEaseInOut = true;
+	FTimerHandle Timer;
+	TWeakObjectPtr<UWorld> World;
+};
+
+static TArray<TSharedPtr<FHephaestusInputJob>> GActiveInputJobs;
+static TArray<TSharedPtr<FHephaestusViewJob>> GActiveViewJobs;
+}
+
+static FLinearColor PickReadableColor(int32 Index)
+{
+    static const FLinearColor Palette[] = {
+        FLinearColor(0.2f, 0.85f, 1.0f),
+        FLinearColor(1.0f, 0.45f, 0.35f),
+        FLinearColor(0.55f, 1.0f, 0.45f),
+        FLinearColor(1.0f, 0.9f, 0.25f),
+    };
+    return Palette[FMath::Abs(Index) % UE_ARRAY_COUNT(Palette)];
+}
+
+static void ApplyReadableMaterial(UStaticMeshComponent* Comp, const FLinearColor& Color)
+{
+    if (!Comp)
+    {
+        return;
+    }
+    UMaterialInterface* BaseMat = LoadObject<UMaterialInterface>(
+        nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+    if (!BaseMat)
+    {
+        BaseMat = LoadObject<UMaterialInterface>(
+            nullptr, TEXT("/Engine/EngineMaterials/DefaultMaterial.DefaultMaterial"));
+    }
+    if (!BaseMat)
+    {
+        return;
+    }
+    UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, Comp);
+    if (!MID)
+    {
+        return;
+    }
+    MID->SetVectorParameterValue(TEXT("Color"), Color);
+    MID->SetVectorParameterValue(TEXT("BaseColor"), Color);
+    Comp->SetMaterial(0, MID);
+}
 
 void UHephaestusWorldSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -105,12 +182,18 @@ AActor* UHephaestusWorldSubsystem::SpawnStaticMeshActor(const FString& MeshPath,
         return Actor;
     }
 
-    const TArray<FString> Candidates = {
-        MeshPath.IsEmpty() ? FString(TEXT("/Engine/BasicShapes/Cube.Cube")) : MeshPath,
-        TEXT("/Engine/BasicShapes/Cube.Cube"),
-        TEXT("/Engine/EngineMeshes/Cube.Cube"),
-        TEXT("/Engine/BasicShapes/Shape_Cube.Shape_Cube"),
-    };
+    TArray<FString> Candidates;
+    if (!MeshPath.IsEmpty())
+    {
+        Candidates.Add(MeshPath);
+        if (!MeshPath.Contains(TEXT(".")))
+        {
+            Candidates.Add(FString::Printf(TEXT("%s.%s"), *MeshPath, *FPaths::GetCleanFilename(MeshPath)));
+        }
+    }
+    Candidates.Add(TEXT("/Engine/BasicShapes/Cube.Cube"));
+    Candidates.Add(TEXT("/Engine/EngineMeshes/Cube.Cube"));
+    Candidates.Add(TEXT("/Engine/BasicShapes/Shape_Cube.Shape_Cube"));
 
     UStaticMeshComponent* Comp = MeshActor->GetStaticMeshComponent();
     if (!Comp)
@@ -153,6 +236,7 @@ AActor* UHephaestusWorldSubsystem::SpawnStaticMeshActor(const FString& MeshPath,
     }
 
     Comp->SetStaticMesh(Mesh);
+    ApplyReadableMaterial(Comp, PickReadableColor(UsedPath.Len() + static_cast<int32>(Transform.GetLocation().X)));
     Comp->MarkRenderStateDirty();
     MeshActor->MarkComponentsRenderStateDirty();
     UE_LOG(LogHephaestusBridge, Log, TEXT("SpawnStaticMeshActor: mesh=%s at %s scale=%s"),
@@ -511,6 +595,247 @@ bool UHephaestusWorldSubsystem::GetView(FVector& OutLocation, FRotator& OutRotat
     }
 
     return false;
+}
+
+bool UHephaestusWorldSubsystem::SetView(const FVector& Location, const FRotator& Rotation) const
+{
+    UWorld* World = ResolveWorld();
+    if (!World)
+    {
+        return false;
+    }
+
+    if (APlayerController* PC = World->GetFirstPlayerController())
+    {
+        if (APawn* Pawn = PC->GetPawn())
+        {
+            Pawn->SetActorLocationAndRotation(Location, Rotation, false, nullptr, ETeleportType::TeleportPhysics);
+        }
+        PC->SetControlRotation(Rotation);
+        return true;
+    }
+
+    return false;
+}
+
+bool UHephaestusWorldSubsystem::AnimateViewTo(
+	const FVector& TargetLocation,
+	const FRotator& TargetRotation,
+	float DurationSeconds,
+	bool bEaseInOut)
+{
+	UWorld* World = ResolveWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	FVector StartLocation = FVector::ZeroVector;
+	FRotator StartRotation = FRotator::ZeroRotator;
+	FVector Forward = FVector::ForwardVector;
+	if (!GetView(StartLocation, StartRotation, Forward))
+	{
+		return false;
+	}
+
+	const TSharedPtr<FHephaestusViewJob> Job = MakeShared<FHephaestusViewJob>();
+	Job->StartLocation = StartLocation;
+	Job->EndLocation = TargetLocation;
+	Job->StartRotation = StartRotation;
+	Job->EndRotation = TargetRotation;
+	Job->Duration = FMath::Max(DurationSeconds, 0.1f);
+	Job->bEaseInOut = bEaseInOut;
+	Job->World = World;
+	GActiveViewJobs.Add(Job);
+
+	World->GetTimerManager().SetTimer(
+		Job->Timer,
+		FTimerDelegate::CreateWeakLambda(this, [this, Job, World]()
+		{
+			if (!World || !Job.IsValid())
+			{
+				GActiveViewJobs.Remove(Job);
+				return;
+			}
+			Job->Elapsed += 0.016f;
+			const float Alpha = FMath::Clamp(Job->Elapsed / Job->Duration, 0.f, 1.f);
+			const float T = Job->bEaseInOut ? FMath::InterpEaseInOut(0.f, 1.f, Alpha) : Alpha;
+			const FVector Loc = FMath::Lerp(Job->StartLocation, Job->EndLocation, T);
+			const FRotator Rot = FMath::Lerp(Job->StartRotation, Job->EndRotation, T);
+			SetView(Loc, Rot);
+			if (Alpha >= 1.f)
+			{
+				World->GetTimerManager().ClearTimer(Job->Timer);
+				GActiveViewJobs.Remove(Job);
+			}
+		}),
+		0.016f,
+		true);
+
+	return true;
+}
+
+bool UHephaestusWorldSubsystem::SetStaticMeshColor(const FString& ActorPath, const FLinearColor& Color)
+{
+    AActor* Actor = FindActorByPath(ActorPath);
+    AStaticMeshActor* MeshActor = Cast<AStaticMeshActor>(Actor);
+    if (!MeshActor)
+    {
+        return false;
+    }
+    UStaticMeshComponent* Comp = MeshActor->GetStaticMeshComponent();
+    if (!Comp)
+    {
+        return false;
+    }
+    ApplyReadableMaterial(Comp, Color);
+    return true;
+}
+
+bool UHephaestusWorldSubsystem::ApplyMoveInput(float Forward, float Right, float DurationSeconds)
+{
+    UWorld* World = ResolveWorld();
+    if (!World)
+    {
+        return false;
+    }
+    APlayerController* PC = World->GetFirstPlayerController();
+    APawn* Pawn = PC ? PC->GetPawn() : nullptr;
+    if (!Pawn)
+    {
+        return false;
+    }
+
+    const TSharedPtr<FHephaestusInputJob> Job = MakeShared<FHephaestusInputJob>();
+    Job->Pawn = Pawn;
+    Job->Forward = Forward;
+    Job->Right = Right;
+    Job->Duration = FMath::Max(DurationSeconds, 0.1f);
+    GActiveInputJobs.Add(Job);
+
+    World->GetTimerManager().SetTimer(
+        Job->Timer,
+        FTimerDelegate::CreateWeakLambda(this, [Job, World]()
+        {
+            if (!Job->Pawn.IsValid())
+            {
+                GActiveInputJobs.Remove(Job);
+                return;
+            }
+            Job->Pawn->AddMovementInput(Job->Pawn->GetActorForwardVector(), Job->Forward);
+            Job->Pawn->AddMovementInput(Job->Pawn->GetActorRightVector(), Job->Right);
+            Job->Elapsed += 0.016f;
+            if (Job->Elapsed >= Job->Duration)
+            {
+                World->GetTimerManager().ClearTimer(Job->Timer);
+                GActiveInputJobs.Remove(Job);
+            }
+        }),
+        0.016f,
+        true);
+    return true;
+}
+
+bool UHephaestusWorldSubsystem::GetPawnStateJson(FString& OutJson) const
+{
+    OutJson.Reset();
+    UWorld* World = ResolveWorld();
+    if (!World)
+    {
+        return false;
+    }
+    APlayerController* PC = World->GetFirstPlayerController();
+    APawn* Pawn = PC ? PC->GetPawn() : nullptr;
+    if (!Pawn)
+    {
+        return false;
+    }
+    const FVector Vel = Pawn->GetVelocity();
+    const FVector Loc = Pawn->GetActorLocation();
+    const float Speed = Vel.Size();
+    OutJson = FString::Printf(
+        TEXT("{\"actor_path\":\"%s\",\"location\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},"
+             "\"velocity\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},\"speed\":%.3f,\"is_moving\":%s}"),
+        *Pawn->GetPathName(),
+        Loc.X, Loc.Y, Loc.Z,
+        Vel.X, Vel.Y, Vel.Z,
+        Speed,
+        Speed > 10.f ? TEXT("true") : TEXT("false"));
+    return true;
+}
+
+bool UHephaestusWorldSubsystem::DescribeActor(const FString& ActorPath, FString& OutJson) const
+{
+    OutJson.Reset();
+    AActor* Actor = FindActorByPath(ActorPath);
+    if (!Actor)
+    {
+        return false;
+    }
+
+    const FVector Loc = Actor->GetActorLocation();
+    const FRotator Rot = Actor->GetActorRotation();
+    const FVector Scale = Actor->GetActorScale3D();
+    const FBox Bounds = Actor->GetComponentsBoundingBox(true);
+    FString MeshPath;
+    bool bAnimPlaying = false;
+    if (AStaticMeshActor* MeshActor = Cast<AStaticMeshActor>(Actor))
+    {
+        if (UStaticMeshComponent* Comp = MeshActor->GetStaticMeshComponent())
+        {
+            if (UStaticMesh* Mesh = Comp->GetStaticMesh())
+            {
+                MeshPath = Mesh->GetPathName();
+            }
+        }
+    }
+    else if (ASkeletalMeshActor* SkelActor = Cast<ASkeletalMeshActor>(Actor))
+    {
+        if (USkeletalMeshComponent* Comp = SkelActor->GetSkeletalMeshComponent())
+        {
+            if (USkeletalMesh* Mesh = Comp->GetSkeletalMeshAsset())
+            {
+                MeshPath = Mesh->GetPathName();
+            }
+            bAnimPlaying = Comp->IsPlaying();
+        }
+    }
+    else if (ACharacter* Character = Cast<ACharacter>(Actor))
+    {
+        if (USkeletalMeshComponent* Comp = Character->GetMesh())
+        {
+            if (USkeletalMesh* Mesh = Comp->GetSkeletalMeshAsset())
+            {
+                MeshPath = Mesh->GetPathName();
+            }
+            bAnimPlaying = Comp->IsPlaying();
+            if (!bAnimPlaying)
+            {
+                if (UAnimInstance* AnimInst = Comp->GetAnimInstance())
+                {
+                    bAnimPlaying = AnimInst->IsAnyMontagePlaying();
+                }
+            }
+        }
+    }
+
+    OutJson = FString::Printf(
+        TEXT("{\"actor_path\":\"%s\",\"class\":\"%s\",\"location\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},"
+             "\"rotation\":{\"pitch\":%.3f,\"yaw\":%.3f,\"roll\":%.3f},\"scale\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},"
+             "\"visible\":%s,\"hidden_in_game\":%s,\"mesh_path\":\"%s\",\"anim_playing\":%s,"
+             "\"bounds\":{\"min\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},\"max\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f}}}"),
+        *Actor->GetPathName(),
+        *Actor->GetClass()->GetName(),
+        Loc.X, Loc.Y, Loc.Z,
+        Rot.Pitch, Rot.Yaw, Rot.Roll,
+        Scale.X, Scale.Y, Scale.Z,
+        Actor->IsHidden() ? TEXT("false") : TEXT("true"),
+        Actor->IsHidden() ? TEXT("true") : TEXT("false"),
+        *MeshPath,
+        bAnimPlaying ? TEXT("true") : TEXT("false"),
+        Bounds.Min.X, Bounds.Min.Y, Bounds.Min.Z,
+        Bounds.Max.X, Bounds.Max.Y, Bounds.Max.Z);
+    return true;
 }
 
 #undef LOCTEXT_NAMESPACE

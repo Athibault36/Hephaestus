@@ -19,13 +19,23 @@ from typing import Any, Optional
 import httpx
 
 try:
-    from hephaestus_forge.cloud.nim_client import DEFAULT_CHAT_MODEL, DEFAULT_FAST_MODEL
+    from hephaestus_forge.cloud.nim_client import (
+        DEFAULT_CHAT_MODEL,
+        DEFAULT_FAST_MODEL,
+        DEFAULT_PLANNER_MODEL,
+        chat_template_kwargs_for_model,
+    )
 except ImportError:  # script / package layout
-    from cloud.nim_client import DEFAULT_CHAT_MODEL, DEFAULT_FAST_MODEL  # type: ignore
+    from cloud.nim_client import (  # type: ignore
+        DEFAULT_CHAT_MODEL,
+        DEFAULT_FAST_MODEL,
+        DEFAULT_PLANNER_MODEL,
+        chat_template_kwargs_for_model,
+    )
 
 DEFAULT_NIM_URL = "https://integrate.api.nvidia.com/v1"
 
-ULTRA_SYSTEM = """You are HEPHAESTUS Ultra (Nemotron-3 Ultra).
+ULTRA_SYSTEM = """You are HEPHAESTUS Planner (DeepSeek V4 Pro on NIM).
 Produce a concise architecture / plan for the coding task.
 Output markdown with: Goal, Approach, Files to touch, Risks, Acceptance checks.
 Do not dump full file bodies unless a tiny stub is essential."""
@@ -62,7 +72,7 @@ class ParallelNemotronCoder:
         self,
         api_key: Optional[str] = None,
         base_url: str = DEFAULT_NIM_URL,
-        ultra_model: str = DEFAULT_CHAT_MODEL,
+        ultra_model: str = DEFAULT_PLANNER_MODEL,
         lightning_model: str = DEFAULT_FAST_MODEL,
         timeout: float = 180.0,
     ):
@@ -91,7 +101,9 @@ class ParallelNemotronCoder:
         (ultra_text, ultra_err), (light_text, light_err) = await asyncio.gather(
             ultra_task, lightning_task
         )
-        merged = self._merge(task, ultra_text, light_text, ultra_err, light_err)
+        merged = self._merge(
+            task, ultra_text, light_text, ultra_err, light_err, self.ultra_model
+        )
         return ParallelResult(
             ultra_model=self.ultra_model,
             lightning_model=self.lightning_model,
@@ -115,11 +127,10 @@ class ParallelNemotronCoder:
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            "chat_template_kwargs": {
-                "enable_thinking": False,
-                "force_nonempty_content": True,
-            },
         }
+        template_kwargs = chat_template_kwargs_for_model(model)
+        if template_kwargs:
+            payload["chat_template_kwargs"] = template_kwargs
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -149,13 +160,14 @@ class ParallelNemotronCoder:
         lightning: str,
         ultra_err: str,
         light_err: str,
+        planner_model: str = DEFAULT_PLANNER_MODEL,
     ) -> str:
         parts = [
-            f"# Parallel Nemotron coding result",
+            f"# Parallel NIM coding result",
             f"",
             f"**Task:** {task}",
             f"",
-            f"## Ultra ({DEFAULT_CHAT_MODEL})",
+            f"## Planner ({planner_model})",
         ]
         parts.append(ultra if ultra else f"_Error:_ {ultra_err or 'empty'}")
         parts.extend(["", f"## Lightning ({DEFAULT_FAST_MODEL})"])

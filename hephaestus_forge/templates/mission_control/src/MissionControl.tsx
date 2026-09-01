@@ -1,18 +1,25 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Canvas } from '@react-three/fiber';
-import { OrbitControls, Html, Stats } from '@react-three/drei';
-import * as THREE from 'three';
+import { useState, useEffect, type Dispatch, type SetStateAction } from 'react';
 import { ViewportStream } from './components/ViewportStream';
 import { ChainOfThought } from './components/ChainOfThought';
 import { WorldOutliner } from './components/WorldOutliner';
+import { ActorActions } from './components/ActorActions';
 import { AssetBrowser } from './components/AssetBrowser';
-import { VoiceConsole } from './components/VoiceConsole';
+import { AgentConsole } from './components/AgentConsole';
 import { PerformanceMonitor } from './components/PerformanceMonitor';
 import { useMissionControlStore } from './store/missionControlStore';
 import './MissionControl.css';
 
+type ActivePanels = {
+  viewport: boolean;
+  chainOfThought: boolean;
+  worldOutliner: boolean;
+  assetBrowser: boolean;
+  voiceConsole: boolean;
+  performance: boolean;
+};
+
 export function MissionControl() {
-  const [activePanels, setActivePanels] = useState({
+  const [activePanels, setActivePanels] = useState<ActivePanels>({
     viewport: true,
     chainOfThought: true,
     worldOutliner: true,
@@ -21,7 +28,7 @@ export function MissionControl() {
     performance: true,
   });
 
-  const { connect, disconnect, isConnected } = useMissionControlStore();
+  const { connect, disconnect, isConnected, preflightReady, preflightHint, bridgeCapabilitiesOk } = useMissionControlStore();
 
   useEffect(() => {
     connect();
@@ -43,6 +50,13 @@ export function MissionControl() {
         </div>
       </header>
 
+      {isConnected && (!preflightReady || !bridgeCapabilitiesOk) && (
+        <div className="preflight-banner" role="status">
+          PIE not ready for goals — run <code>forge sync-plugin &lt;target&gt;</code>, rebuild HephaestusBridge, then Play.
+          {preflightHint ? <span className="preflight-detail"> {preflightHint}</span> : null}
+        </div>
+      )}
+
       <main className="main-grid">
         {activePanels.viewport && (
           <section className="panel viewport-panel" data-panel="viewport">
@@ -62,6 +76,7 @@ export function MissionControl() {
           <section className="panel world-outliner-panel" data-panel="worldOutliner">
             <PanelHeader title="World Outliner" icon="🌍" />
             <WorldOutliner />
+            <ActorActions />
           </section>
         )}
 
@@ -74,8 +89,8 @@ export function MissionControl() {
 
         {activePanels.voiceConsole && (
           <section className="panel voice-console-panel" data-panel="voiceConsole">
-            <PanelHeader title="Voice Console" icon="🎤" />
-            <VoiceConsole />
+            <PanelHeader title="Agent" icon="🤖" />
+            <AgentConsole />
           </section>
         )}
 
@@ -114,15 +129,15 @@ function PanelToggles({
   activePanels,
   setActivePanels,
 }: {
-  activePanels: Record<string, boolean>;
-  setActivePanels: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+  activePanels: ActivePanels;
+  setActivePanels: Dispatch<SetStateAction<ActivePanels>>;
 }) {
   const panels = [
     { key: 'viewport', label: 'Viewport', icon: '📷' },
     { key: 'chainOfThought', label: 'Thought', icon: '🧠' },
     { key: 'worldOutliner', label: 'Outliner', icon: '🌍' },
     { key: 'assetBrowser', label: 'Assets', icon: '📦' },
-    { key: 'voiceConsole', label: 'Voice', icon: '🎤' },
+    { key: 'voiceConsole', label: 'Agent', icon: '🤖' },
     { key: 'performance', label: 'Perf', icon: '📊' },
   ];
 
@@ -131,8 +146,8 @@ function PanelToggles({
       {panels.map(({ key, label, icon }) => (
         <button
           key={key}
-          className={`panel-toggle ${activePanels[key] ? 'active' : ''}`}
-          onClick={() => setActivePanels(prev => ({ ...prev, [key]: !prev[key] }))}
+          className={`panel-toggle ${activePanels[key as keyof ActivePanels] ? 'active' : ''}`}
+          onClick={() => setActivePanels((prev) => ({ ...prev, [key]: !prev[key as keyof ActivePanels] }))}
           title={label}
         >
           {icon}

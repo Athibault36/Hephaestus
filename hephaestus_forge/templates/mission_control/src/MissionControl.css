@@ -363,6 +363,230 @@
   border: 1px solid #58a6ff;
 }
 
+.actor-actions {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.actor-actions-hint {
+  margin: 0.75rem 0 0;
+  font-size: 12px;
+  color: #8b949e;
+}
+
+.actor-path {
+  display: block;
+  font-size: 10px;
+  color: #8b949e;
+  margin-bottom: 0.5rem;
+  word-break: break-all;
+}
+
+.actor-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.actor-action-row button {
+  font-size: 11px;
+  padding: 0.25rem 0.5rem;
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  color: #c9d1d9;
+  cursor: pointer;
+}
+
+.actor-action-row button:hover {
+  border-color: #58a6ff;
+}
+
+.actor-action-row button.danger:hover {
+  border-color: #f85149;
+  color: #f85149;
+}
+
+.agent-console {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  height: 100%;
+}
+
+.agent-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.agent-status-row .pill {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid #30363d;
+}
+
+.agent-status-row .pill.ok { color: #3fb950; border-color: #2f5d3a; }
+.agent-status-row .pill.bad { color: #f85149; border-color: #6a2f22; }
+.agent-status-row .pill.busy { color: #58a6ff; }
+
+.agent-chat-log {
+  flex: 1;
+  overflow-y: auto;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 0.5rem;
+  font-size: 12px;
+  min-height: 120px;
+}
+
+.agent-chat-line { margin-bottom: 0.5rem; white-space: pre-wrap; }
+.agent-chat-line.user { color: #c9d1d9; }
+.agent-chat-line.assistant { color: #8b949e; }
+.agent-chat-empty { color: #8b949e; margin: 0; }
+
+.agent-grade {
+  font-size: 11px;
+  color: #8b949e;
+  margin: 0;
+}
+
+.agent-input-row textarea {
+  width: 100%;
+  min-height: 64px;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #c9d1d9;
+  padding: 0.5rem;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.agent-input-actions {
+  display: flex;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+  align-items: center;
+}
+
+.agent-input-actions button.primary {
+  background: #238636;
+  border-color: #2ea043;
+  color: #fff;
+}
+
+.preflight-banner {
+  background: #3d1f1f;
+  border-bottom: 1px solid #8b2e2e;
+  color: #f0c4c4;
+  padding: 0.5rem 1rem;
+  font-size: 12px;
+}
+
+.preflight-banner code {
+  background: #161b22;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.preflight-detail {
+  color: #c9d1d9;
+}
+
+.outliner-context-menu {
+  position: fixed;
+  z-index: 1000;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  min-width: 120px;
+}
+
+.outliner-context-menu button {
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: #c9d1d9;
+  padding: 0.35rem 0.6rem;
+  cursor: pointer;
+}
+
+.outliner-context-menu button:hover {
+  background: #21262d;
+}
+
+.outliner-context-menu button.danger {
+  color: #f85149;
+}
+
+.asset-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.35rem;
+}
+
+.asset-filter-chip {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid #30363d;
+  background: #0d1117;
+  color: #8b949e;
+  cursor: pointer;
+}
+
+.asset-filter-chip.active {
+  border-color: #2ea043;
+  color: #3fb950;
+}
+
+.asset-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.35rem;
+}
+
+.asset-chip {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid #30363d;
+  background: #161b22;
+  color: #8b949e;
+  cursor: pointer;
+}
+
+.asset-search-row {
+  display: flex;
+  gap: 0.35rem;
+  margin-bottom: 0.5rem;
+}
+
+.asset-search-row input {
+  flex: 1;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  color: #c9d1d9;
+  padding: 0.35rem 0.5rem;
+  font-size: 12px;
+}
+
+.viewport-stream {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #05070a;
+}
+
 .actor-icon {
   font-size: 14px;
   width: 20px;

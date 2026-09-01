@@ -1,6 +1,4 @@
-import React from 'react';
 import { useMissionControlStore } from '../store/missionControlStore';
-import { PerformanceMetrics } from '../store/missionControlStore';
 
 export function PerformanceMonitor() {
   const { metrics } = useMissionControlStore();
@@ -44,11 +42,8 @@ export function PerformanceMonitor() {
   }
 
   const fpsStatus = getMetricStatus(metrics.fps, { warning: 45, critical: 30 }, false);
-  const frameTimeStatus = getMetricStatus(metrics.frameTime, { warning: 16.67, critical: 33.33 });
   const gpuTimeStatus = getMetricStatus(metrics.gpuTime, { warning: 12, critical: 16 });
-  const cpuTimeStatus = getMetricStatus(metrics.cpuTime, { warning: 10, critical: 16 });
   const drawCallsStatus = getMetricStatus(metrics.drawCalls, { warning: 2000, critical: 4000 });
-  const trianglesStatus = getMetricStatus(metrics.triangles, { warning: 5_000_000, critical: 10_000_000 });
   const textureMemoryStatus = getMetricStatus(metrics.textureMemory / (1024 ** 3), { warning: 8, critical: 12 });
   const latencyStatus = getMetricStatus(metrics.latency.total, { warning: 300, critical: 500 });
 

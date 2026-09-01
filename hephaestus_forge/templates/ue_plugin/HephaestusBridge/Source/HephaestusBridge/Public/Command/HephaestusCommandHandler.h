@@ -13,6 +13,7 @@ class UHephaestusRenderingSubsystem;
 class UHephaestusPCGSubsystem;
 class UHephaestusAnimationSubsystem;
 class UHephaestusAudioSubsystem;
+class UHephaestusSequenceSubsystem;
 
 /** Command execution result */
 USTRUCT(BlueprintType)
@@ -125,12 +126,13 @@ protected:
 	FHephaestusCommandResult RouteCommand(const TSharedPtr<FJsonObject>& CommandObject);
 
 	FHephaestusCommandResult HandleWorldCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params);
-	FHephaestusCommandResult HandleAssetCommand(const TSharedPtr<FJsonObject>& Params);
-	FHephaestusCommandResult HandleBlueprintCommand(const TSharedPtr<FJsonObject>& Params);
+	FHephaestusCommandResult HandleAssetCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params);
+	FHephaestusCommandResult HandleBlueprintCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params);
 	FHephaestusCommandResult HandleRenderingCommand(const TSharedPtr<FJsonObject>& Params);
-	FHephaestusCommandResult HandlePCGCommand(const TSharedPtr<FJsonObject>& Params);
-	FHephaestusCommandResult HandleAnimationCommand(const TSharedPtr<FJsonObject>& Params);
-	FHephaestusCommandResult HandleAudioCommand(const TSharedPtr<FJsonObject>& Params);
+	FHephaestusCommandResult HandlePCGCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params);
+	FHephaestusCommandResult HandleAnimationCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params);
+	FHephaestusCommandResult HandleSequenceCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params);
+	FHephaestusCommandResult HandleAudioCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params);
 	FHephaestusCommandResult HandleVisionCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params);
 	FHephaestusCommandResult HandleCustomCommand(const TSharedPtr<FJsonObject>& Params);
 
@@ -154,6 +156,7 @@ private:
 	TObjectPtr<UHephaestusRenderingSubsystem> RenderingSubsystem;
 	TObjectPtr<UHephaestusPCGSubsystem> PCGSubsystem;
 	TObjectPtr<UHephaestusAnimationSubsystem> AnimationSubsystem;
+	TObjectPtr<UHephaestusSequenceSubsystem> SequenceSubsystem;
 	TObjectPtr<UHephaestusAudioSubsystem> AudioSubsystem;
 
 	TMap<FString, FHephaestusCustomCommandDelegate> CustomCommands;
