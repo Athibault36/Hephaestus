@@ -3,7 +3,7 @@ import { useMissionControlStore } from '../store/missionControlStore';
 import { AssetInfo } from '../store/missionControlStore';
 
 export function AssetBrowser() {
-  const { assets, searchAssets } = useMissionControlStore();
+  const { assets, searchAssets, spawnAsset } = useMissionControlStore();
   const [query, setQuery] = useState('');
 
   const getAssetIcon = (type: string) => {
@@ -39,7 +39,13 @@ export function AssetBrowser() {
           </div>
         ) : (
           assets.map((asset: AssetInfo) => (
-            <div key={asset.path} className="asset-item" role="gridcell" title={asset.path}>
+            <div
+              key={asset.path}
+              className="asset-item"
+              role="gridcell"
+              title={`${asset.path} — double-click to spawn`}
+              onDoubleClick={() => spawnAsset(asset.path)}
+            >
               <div className="asset-thumbnail">{getAssetIcon(asset.type)}</div>
               <span className="asset-name">{asset.name}</span>
               <span className="asset-type">{asset.type}</span>

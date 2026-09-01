@@ -71,6 +71,18 @@ async function postCommand(body: Record<string, unknown>) {
   return res.json();
 }
 
+async function pollAgentJob(jobId: string): Promise<Record<string, unknown>> {
+  const deadline = Date.now() + 30 * 60 * 1000;
+  while (Date.now() < deadline) {
+    const res = await fetch(`${API_BASE}/agent/job/${encodeURIComponent(jobId)}`);
+    const data = await res.json();
+    if (data.status === 'done' && data.result) return data.result as Record<string, unknown>;
+    if (data.status === 'error') throw new Error(String(data.error || 'Agent job failed'));
+    await new Promise((r) => setTimeout(r, 350));
+  }
+  throw new Error('Agent job timed out');
+}
+
 interface MissionControlState {
   isConnected: boolean;
   frameUrl: string | null;
@@ -80,6 +92,7 @@ interface MissionControlState {
   captureFrame: () => Promise<void>;
   sendCommand: (body: Record<string, unknown>) => Promise<Record<string, unknown>>;
   searchAssets: (query: string, assetClass?: string) => Promise<void>;
+  spawnAsset: (assetPath: string) => Promise<boolean>;
 
   agentState: AgentState;
   setAgentState: (state: AgentState) => void;
@@ -185,6 +198,20 @@ export const useMissionControlStore = create<MissionControlState>((set, get) => 
     });
   },
 
+  spawnAsset: async (assetPath) => {
+    const res = await fetch(`${API_BASE}/agent/spawn`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ asset_path: assetPath, with_light: true }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      await get().refreshActors();
+      await get().captureFrame();
+    }
+    return !!data.ok;
+  },
+
   refreshActors: async () => {
     const result = await get().sendCommand({ command: 'world.list_actors', params: {} });
     let paths: string[] = (result.actor_paths as string[]) ?? [];
@@ -270,7 +297,10 @@ export const useMissionControlStore = create<MissionControlState>((set, get) => 
           max_steps: 20,
         }),
       });
-      const data = await res.json();
+      let data = await res.json();
+      if (res.status === 202 && data.job_id) {
+        data = await pollAgentJob(String(data.job_id));
+      }
       if (data.session?.messages) {
         set({
           chatMessages: data.session.messages.map((m: { role: string; content: string }) => ({
