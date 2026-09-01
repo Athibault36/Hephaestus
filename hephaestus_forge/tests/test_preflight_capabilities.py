@@ -21,6 +21,10 @@ def test_probe_bridge_capabilities_ok():
             payload = {"success": False, "error": "Blueprint compile failed — check blueprint_path"}
         elif cmd == "audio.play_quartz":
             payload = {"success": True, "result_json": "{\"played\":true}"}
+        elif cmd == "asset.create_material":
+            payload = {"success": True, "result_json": "{\"material_path\":\"HephaestusProbe\"}"}
+        elif cmd == "asset.search":
+            payload = {"success": True, "result_json": "{\"assets\":[\"/Engine/BasicShapes/Cube.Cube\"],\"count\":1}"}
         else:
             payload = {"success": True, "result_json": "{}"}
         resp = MagicMock()
@@ -32,4 +36,4 @@ def test_probe_bridge_capabilities_ok():
     with patch("urllib.request.urlopen", side_effect=fake_urlopen):
         check = _probe_bridge_capabilities("http://127.0.0.1:8765")
     assert check.ok is True
-    assert "Locomotion" in check.detail
+    assert "assets" in check.detail.lower() or "Locomotion" in check.detail

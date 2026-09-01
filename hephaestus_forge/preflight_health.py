@@ -199,6 +199,8 @@ def _probe_bridge_capabilities(remote_api: str) -> HealthCheck:
         ("animation.play_montage", {"command": "animation.play_montage", "params": {}}),
         ("audio.play_quartz", {"command": "audio.play_quartz", "params": {"clock": "test"}}),
         ("blueprint.compile", {"command": "blueprint.compile", "params": {"blueprint_path": "/Game/__HephaestusProbe"}}),
+        ("asset.create_material", {"command": "asset.create_material", "params": {"name": "HephaestusProbe"}}),
+        ("asset.search", {"command": "asset.search", "params": {"query": "cube", "limit": 1}}),
     ]
     missing: list[str] = []
     try:
@@ -221,7 +223,7 @@ def _probe_bridge_capabilities(remote_api: str) -> HealthCheck:
         return HealthCheck(
             "bridge_capabilities",
             True,
-            "Locomotion, sequencer, list_actors details, montage registered on PIE plugin",
+            "Locomotion, sequencer, assets, montage, audio, blueprint on PIE plugin",
             blocker=False,
         )
     except Exception as exc:
@@ -254,12 +256,11 @@ def run_preflight(
     ready = ue_ok and not blockers_failed
     if project_root and bridge_template and not bridge_template.ok:
         ready = False
-    if project_root:
-        ue_check = next((c for c in checks if c.name == "ue_pie"), None)
-        if ue_check and ue_check.ok and "rebuild recommended" in ue_check.detail.lower():
-            ready = False
+    ue_check = next((c for c in checks if c.name == "ue_pie"), None)
+    if ue_check and ue_check.ok and "rebuild required" in ue_check.detail.lower():
+        ready = False
     return PreflightReport(
-        ready=ue_ok and not blockers_failed,
+        ready=ready,
         checks=checks,
         ue_api=remote_api.rstrip("/"),
         project_root=str(project_root.resolve()) if project_root else "",

@@ -114,5 +114,35 @@ def run_e2e_check(
         except Exception as exc:
             steps.append(E2EStep("capture_frame", False, str(exc)))
 
+        try:
+            mat = _post_command(
+                remote_api,
+                {"command": "asset.create_material", "params": {"name": "HephaestusE2EProbe"}},
+            )
+            steps.append(E2EStep("asset_create_material", bool(mat.get("success")), mat.get("error") or "ok"))
+        except Exception as exc:
+            steps.append(E2EStep("asset_create_material", False, str(exc)))
+
+        try:
+            search = _post_command(
+                remote_api,
+                {"command": "asset.search", "params": {"query": "cube", "limit": 3}},
+            )
+            steps.append(E2EStep("asset_search", bool(search.get("success")), search.get("error") or "ok"))
+        except Exception as exc:
+            steps.append(E2EStep("asset_search", False, str(exc)))
+
+        try:
+            shot = _post_command(
+                remote_api,
+                {
+                    "command": "sequence.create_shot",
+                    "params": {"location": {"x": 0, "y": 0, "z": 200}, "ease_in_out": True},
+                },
+            )
+            steps.append(E2EStep("sequence_create_shot", bool(shot.get("success")), shot.get("error") or "ok"))
+        except Exception as exc:
+            steps.append(E2EStep("sequence_create_shot", False, str(exc)))
+
     ok = all(s.ok for s in steps if s.name not in ("preflight_nim_api_key", "preflight_planner"))
     return E2EReport(ok=ok, steps=steps)

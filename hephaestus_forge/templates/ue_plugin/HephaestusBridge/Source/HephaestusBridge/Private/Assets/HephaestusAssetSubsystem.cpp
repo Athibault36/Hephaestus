@@ -12,6 +12,8 @@
 #include "Animation/AnimSequence.h"
 #include "Animation/AnimMontage.h"
 #include "Dom/JsonObject.h"
+#include "HAL/FileManager.h"
+#include "Misc/Paths.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 
@@ -56,7 +58,27 @@ UMaterial* UHephaestusAssetSubsystem::CreateMaterial(const FHephaestusMaterialDe
 
 UObject* UHephaestusAssetSubsystem::ImportAsset(const FString& FilePath, const FString& DestinationPath, const FHephaestusImportOptions& Options)
 {
-	UE_LOG(LogHephaestusBridge, Warning, TEXT("ImportAsset stub: %s -> %s"), *FilePath, *DestinationPath);
+	if (FilePath.IsEmpty())
+	{
+		UE_LOG(LogHephaestusBridge, Warning, TEXT("ImportAsset: file_path required"));
+		return nullptr;
+	}
+	if (!FPaths::FileExists(FilePath))
+	{
+		UE_LOG(LogHephaestusBridge, Warning, TEXT("ImportAsset: file not found: %s"), *FilePath);
+		return nullptr;
+	}
+	if (DestinationPath.IsEmpty())
+	{
+		UE_LOG(LogHephaestusBridge, Warning, TEXT("ImportAsset: destination_path required"));
+		return nullptr;
+	}
+	UE_LOG(
+		LogHephaestusBridge,
+		Warning,
+		TEXT("ImportAsset: validated %s -> %s (editor import pipeline deferred)"),
+		*FilePath,
+		*DestinationPath);
 	return nullptr;
 }
 

@@ -20,6 +20,7 @@
 #include "JsonObjectConverter.h"
 #include "Misc/ScopeLock.h"
 #include "HAL/PlatformTime.h"
+#include "Misc/Paths.h"
 
 #define LOCTEXT_NAMESPACE "HephaestusCommand"
 
@@ -935,8 +936,35 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleAssetCommand(const FSt
     }
     else if (Action == TEXT("import"))
     {
-        // Params: file_path, destination_path, import_options
-        return MakeSuccessResult(TEXT(""), TEXT("{\"asset_path\":\"\"}"));
+        FString FilePath;
+        FString DestinationPath;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("file_path"), FilePath);
+            Params->TryGetStringField(TEXT("destination_path"), DestinationPath);
+        }
+        if (FilePath.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("import requires file_path"));
+        }
+        if (DestinationPath.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("import requires destination_path"));
+        }
+        if (!FPaths::FileExists(FilePath))
+        {
+            return MakeErrorResult(TEXT(""), FString::Printf(TEXT("import: file not found: %s"), *FilePath));
+        }
+        UObject* Asset = AssetSubsystem->ImportAsset(FilePath, DestinationPath, FHephaestusImportOptions{});
+        if (Asset)
+        {
+            return MakeSuccessResult(
+                TEXT(""),
+                FString::Printf(TEXT("{\"asset_path\":\"%s\"}"), *DestinationPath));
+        }
+        return MakeErrorResult(
+            TEXT(""),
+            TEXT("import: file validated on disk — editor import pipeline not linked yet"));
     }
     else if (Action == TEXT("reimport"))
     {

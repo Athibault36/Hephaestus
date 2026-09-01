@@ -24,3 +24,5 @@
 1. `pip install -e .` from repo root
 2. `forge doctor <target>` prints checklist + e2e + preflight
 3. CI: pytest + Mission Control `npm run build`
+
+Live PIE checklist: [LIVE_E2E.md](LIVE_E2E.md)

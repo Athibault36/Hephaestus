@@ -155,3 +155,55 @@ def validate_sequence_create_shot(command_obj: dict[str, Any]) -> list[str]:
         errors.append("missing target location")
     return errors
 
+
+def validate_asset_search(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "asset.search":
+        errors.append("command must be asset.search")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    query = params.get("query")
+    if not query or not str(query).strip():
+        errors.append("missing query")
+    return errors
+
+
+def validate_asset_create_material(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "asset.create_material":
+        errors.append("command must be asset.create_material")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+    return errors
+
+
+def validate_asset_export(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "asset.export":
+        errors.append("command must be asset.export")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not params.get("asset_path"):
+        errors.append("missing asset_path")
+    return errors
+
+
+def validate_asset_import(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "asset.import":
+        errors.append("command must be asset.import")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not params.get("file_path"):
+        errors.append("missing file_path")
+    if not params.get("destination_path"):
+        errors.append("missing destination_path")
+    return errors
+

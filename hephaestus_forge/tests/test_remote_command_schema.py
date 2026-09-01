@@ -17,6 +17,10 @@ from remote_command_schema import (  # noqa: E402
     resolve_params,
     validate_animation_play_montage,
     validate_animation_play_locomotion,
+    validate_asset_create_material,
+    validate_asset_export,
+    validate_asset_import,
+    validate_asset_search,
     validate_sequence_create_shot,
     validate_sequence_play,
     validate_world_apply_move_input,
@@ -113,6 +117,32 @@ def test_validate_sequence_play_and_create_shot():
         "command": "sequence.create_shot",
         "params": {"location": {"x": 1, "y": 2, "z": 3}},
     }) == []
+
+
+def test_validate_asset_commands():
+    assert validate_asset_search({"command": "asset.search", "params": {}}) == ["missing query"]
+    assert validate_asset_search({
+        "command": "asset.search",
+        "params": {"query": "dog", "limit": 5},
+    }) == []
+    assert validate_asset_create_material({
+        "command": "asset.create_material",
+        "params": {"name": "ProbeMat"},
+    }) == []
+    assert validate_asset_export({
+        "command": "asset.export",
+        "params": {"asset_path": "/Game/Mesh.Mesh"},
+    }) == []
+    assert "missing asset_path" in validate_asset_export({
+        "command": "asset.export",
+        "params": {},
+    })
+    assert validate_asset_import({
+        "command": "asset.import",
+        "params": {"file_path": "C:/tmp/mesh.fbx", "destination_path": "/Game/Imports"},
+    }) == []
+    missing = validate_asset_import({"command": "asset.import", "params": {"file_path": "x.fbx"}})
+    assert "missing destination_path" in missing
 
 
 if __name__ == "__main__":
