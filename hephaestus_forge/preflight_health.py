@@ -197,6 +197,8 @@ def _probe_bridge_capabilities(remote_api: str) -> HealthCheck:
         ("sequence.create_shot", {"command": "sequence.create_shot", "params": {"location": {"x": 0, "y": 0, "z": 1}}}),
         ("world.list_actors", {"command": "world.list_actors", "params": {"include_details": True, "detail_limit": 1}}),
         ("animation.play_montage", {"command": "animation.play_montage", "params": {}}),
+        ("audio.play_quartz", {"command": "audio.play_quartz", "params": {"clock": "test"}}),
+        ("blueprint.compile", {"command": "blueprint.compile", "params": {"blueprint_path": "/Game/__HephaestusProbe"}}),
     ]
     missing: list[str] = []
     try:
@@ -204,6 +206,10 @@ def _probe_bridge_capabilities(remote_api: str) -> HealthCheck:
             result = _post_command(remote_api, payload)
             err = str(result.get("error") or "").lower()
             if "unknown" in err or "unrecognized" in err or "not supported" in err:
+                missing.append(label)
+            elif label == "blueprint.compile" and "compile failed" in err:
+                pass  # probe path missing is ok — command exists
+            elif label == "blueprint.compile" and "subsystem" in err:
                 missing.append(label)
         if missing:
             return HealthCheck(

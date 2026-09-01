@@ -17,6 +17,10 @@ def test_probe_bridge_capabilities_ok():
             payload = {"success": False, "error": "actor_path required"}
         elif cmd == "animation.play_montage":
             payload = {"success": False, "error": "actor_path required"}
+        elif cmd == "blueprint.compile":
+            payload = {"success": False, "error": "Blueprint compile failed — check blueprint_path"}
+        elif cmd == "audio.play_quartz":
+            payload = {"success": True, "result_json": "{\"played\":true}"}
         else:
             payload = {"success": True, "result_json": "{}"}
         resp = MagicMock()

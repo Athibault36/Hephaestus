@@ -174,7 +174,7 @@ def run_chat(
     try:
         from agent_repair import maybe_repair_after_grade
 
-        extra_results, grade = maybe_repair_after_grade(loop, grade, goal)
+        extra_results, grade = maybe_repair_after_grade(loop, grade, goal, on_thought=_thought)
         if extra_results:
             results.extend(extra_results)
     except ImportError:

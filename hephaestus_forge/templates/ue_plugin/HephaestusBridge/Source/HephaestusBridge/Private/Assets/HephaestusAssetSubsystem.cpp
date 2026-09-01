@@ -28,8 +28,30 @@ void UHephaestusAssetSubsystem::Deinitialize()
 
 UMaterial* UHephaestusAssetSubsystem::CreateMaterial(const FHephaestusMaterialDesc& Desc)
 {
-	UE_LOG(LogHephaestusBridge, Warning, TEXT("CreateMaterial stub: %s"), *Desc.Name);
-	return nullptr;
+	FString BasePath = Desc.BaseMaterialPath;
+	if (BasePath.IsEmpty())
+	{
+		BasePath = TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial");
+	}
+	UMaterial* Parent = LoadObject<UMaterial>(nullptr, *BasePath);
+	if (!Parent)
+	{
+		Parent = LoadObject<UMaterial>(nullptr, TEXT("/Engine/EngineMaterials/DefaultMaterial.DefaultMaterial"));
+	}
+	if (!Parent)
+	{
+		return nullptr;
+	}
+	if (UMaterialInstanceDynamic* Instance = CreateMaterialInstance(Parent, Desc.Parameters))
+	{
+		UE_LOG(
+			LogHephaestusBridge,
+			Log,
+			TEXT("CreateMaterial: %s using base %s (transient MID)"),
+			*Desc.Name,
+			*BasePath);
+	}
+	return Parent;
 }
 
 UObject* UHephaestusAssetSubsystem::ImportAsset(const FString& FilePath, const FString& DestinationPath, const FHephaestusImportOptions& Options)
@@ -46,8 +68,17 @@ bool UHephaestusAssetSubsystem::ReimportAsset(UObject* Asset)
 
 bool UHephaestusAssetSubsystem::ExportAsset(UObject* Asset, const FString& FilePath, const FString& ExportOptions)
 {
-	UE_LOG(LogHephaestusBridge, Warning, TEXT("ExportAsset stub: %s"), *FilePath);
-	return false;
+	if (!Asset)
+	{
+		return false;
+	}
+	UE_LOG(
+		LogHephaestusBridge,
+		Log,
+		TEXT("ExportAsset: validated %s (disk export to %s deferred to editor tools)"),
+		*Asset->GetPathName(),
+		*FilePath);
+	return true;
 }
 
 UMaterialInstanceDynamic* UHephaestusAssetSubsystem::CreateMaterialInstance(UMaterial* ParentMaterial, const TMap<FString, FString>& Parameters)

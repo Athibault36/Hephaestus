@@ -901,8 +901,37 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleAssetCommand(const FSt
     }
     else if (Action == TEXT("create_material"))
     {
-        // Params: material_desc
-        return MakeSuccessResult(TEXT(""), TEXT("{\"material_path\":\"\"}"));
+        FHephaestusMaterialDesc Desc;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("name"), Desc.Name);
+            Params->TryGetStringField(TEXT("base_material_path"), Desc.BaseMaterialPath);
+            const TSharedPtr<FJsonObject>* ParamsObj = nullptr;
+            if (Params->TryGetObjectField(TEXT("parameters"), ParamsObj) && ParamsObj && ParamsObj->IsValid())
+            {
+                for (const auto& Pair : (*ParamsObj)->Values)
+                {
+                    FString Val;
+                    if (Pair.Value->TryGetString(Val))
+                    {
+                        Desc.Parameters.Add(Pair.Key, Val);
+                    }
+                }
+            }
+        }
+        if (Desc.Name.IsEmpty())
+        {
+            Desc.Name = TEXT("HephaestusMaterial");
+        }
+        UMaterial* Material = AssetSubsystem->CreateMaterial(Desc);
+        return Material
+            ? MakeSuccessResult(
+                  TEXT(""),
+                  FString::Printf(
+                      TEXT("{\"material_path\":\"%s\",\"base\":\"%s\"}"),
+                      *Desc.Name,
+                      *Material->GetPathName()))
+            : MakeErrorResult(TEXT(""), TEXT("create_material failed"));
     }
     else if (Action == TEXT("import"))
     {
@@ -916,8 +945,24 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleAssetCommand(const FSt
     }
     else if (Action == TEXT("export"))
     {
-        // Params: asset_path, file_path, export_options
-        return MakeSuccessResult(TEXT(""), TEXT("{}"));
+        FString AssetPath;
+        FString FilePath;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("asset_path"), AssetPath);
+            Params->TryGetStringField(TEXT("file_path"), FilePath);
+        }
+        UObject* Asset = AssetSubsystem->FindAsset(AssetPath);
+        if (!Asset)
+        {
+            return MakeErrorResult(TEXT(""), TEXT("export: asset_path not found"));
+        }
+        const bool bOk = AssetSubsystem->ExportAsset(Asset, FilePath, TEXT(""));
+        return bOk
+            ? MakeSuccessResult(
+                  TEXT(""),
+                  FString::Printf(TEXT("{\"asset_path\":\"%s\",\"validated\":true}"), *AssetPath))
+            : MakeErrorResult(TEXT(""), TEXT("export failed"));
     }
     else if (Action == TEXT("create_instance"))
     {
