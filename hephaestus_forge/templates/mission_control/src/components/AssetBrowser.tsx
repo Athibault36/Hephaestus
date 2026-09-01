@@ -2,9 +2,18 @@ import React, { useState } from 'react';
 import { useMissionControlStore } from '../store/missionControlStore';
 import { AssetInfo } from '../store/missionControlStore';
 
+const CLASS_FILTERS = [
+  { id: '', label: 'All' },
+  { id: 'SkeletalMesh', label: 'Skeletal' },
+  { id: 'AnimMontage', label: 'Montage' },
+  { id: 'AnimSequence', label: 'Anim' },
+  { id: 'StaticMesh', label: 'Static' },
+];
+
 export function AssetBrowser() {
   const { assets, searchAssets, spawnAsset } = useMissionControlStore();
   const [query, setQuery] = useState('');
+  const [assetClass, setAssetClass] = useState('');
 
   const getAssetIcon = (type: string) => {
     if (type.includes('StaticMesh')) return '📦';
@@ -15,11 +24,23 @@ export function AssetBrowser() {
   };
 
   const onSearch = () => {
-    searchAssets(query);
+    searchAssets(query, assetClass || undefined);
   };
 
   return (
     <div className="asset-browser">
+      <div className="asset-filter-row">
+        {CLASS_FILTERS.map((f) => (
+          <button
+            key={f.id || 'all'}
+            type="button"
+            className={`asset-filter-chip ${assetClass === f.id ? 'active' : ''}`}
+            onClick={() => setAssetClass(f.id)}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
       <div className="asset-search-row">
         <input
           type="search"

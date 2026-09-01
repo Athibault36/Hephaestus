@@ -53,15 +53,27 @@ class AgentSession:
             "project_path": self.project_path,
         }
 
-    def export_bundle(self) -> dict[str, Any]:
-        """Full session export for observability / replay."""
+    def export_bundle(
+        self,
+        *,
+        thoughts: Optional[list[dict[str, Any]]] = None,
+        grade_history: Optional[list[dict[str, Any]]] = None,
+    ) -> dict[str, Any]:
+        """Full session export for observability / replay (schema v2)."""
         from version import BRIDGE_VERSION, FORGE_VERSION
 
+        grades = list(grade_history or [])
+        if self.last_grade and self.last_grade not in grades:
+            grades.append(self.last_grade)
         return {
+            "schema_version": 2,
             "forge_version": FORGE_VERSION,
             "bridge_version": BRIDGE_VERSION,
             "exported_at": datetime.now(timezone.utc).isoformat(),
             "session": self.to_dict(),
+            "thoughts": thoughts or [],
+            "grade_history": grades,
+            "command_transcript": self.memory,
         }
 
 

@@ -23,6 +23,8 @@ def test_session_reset_and_save(tmp_path):
 def test_session_export_bundle(tmp_path):
     store = SessionStore(project_root=tmp_path)
     s = store.reset(goal="frame shot", mode="cinematic")
-    bundle = s.export_bundle()
+    bundle = s.export_bundle(thoughts=[{"kind": "plan", "content": "test"}])
     assert bundle["session"]["goal"] == "frame shot"
-    assert "forge_version" in bundle
+    assert bundle["schema_version"] == 2
+    assert bundle["thoughts"][0]["content"] == "test"
+    assert "command_transcript" in bundle

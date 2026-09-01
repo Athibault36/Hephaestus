@@ -19,6 +19,7 @@ class ThoughtHub:
         self._lock = threading.Lock()
         self._busy = False
         self._last: dict[str, Any] = {}
+        self._recent: list[dict[str, Any]] = []
 
     @property
     def busy(self) -> bool:
@@ -39,6 +40,9 @@ class ThoughtHub:
         }
         with self._lock:
             self._last = payload
+            self._recent.append(payload)
+            if len(self._recent) > 200:
+                self._recent = self._recent[-200:]
             data = json.dumps(payload).encode("utf-8")
             dead: list[queue.Queue[bytes]] = []
             for q in self._listeners:
@@ -51,6 +55,10 @@ class ThoughtHub:
 
     def callback(self, kind: str, content: str, metadata: Optional[dict[str, Any]] = None) -> None:
         self.publish(kind, content, metadata)
+
+    def recent(self, limit: int = 120) -> list[dict[str, Any]]:
+        with self._lock:
+            return list(self._recent[-limit:])
 
     def handle_get(self, handler: BaseHTTPRequestHandler) -> bool:
         path = handler.path.split("?")[0]

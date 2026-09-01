@@ -22,7 +22,7 @@ export function MissionControl() {
     performance: true,
   });
 
-  const { connect, disconnect, isConnected } = useMissionControlStore();
+  const { connect, disconnect, isConnected, preflightReady, preflightHint, bridgeCapabilitiesOk } = useMissionControlStore();
 
   useEffect(() => {
     connect();
@@ -43,6 +43,13 @@ export function MissionControl() {
           <PanelToggles activePanels={activePanels} setActivePanels={setActivePanels} />
         </div>
       </header>
+
+      {isConnected && (!preflightReady || !bridgeCapabilitiesOk) && (
+        <div className="preflight-banner" role="status">
+          PIE not ready for goals — run <code>forge sync-plugin &lt;target&gt;</code>, rebuild HephaestusBridge, then Play.
+          {preflightHint ? <span className="preflight-detail"> {preflightHint}</span> : null}
+        </div>
+      )}
 
       <main className="main-grid">
         {activePanels.viewport && (

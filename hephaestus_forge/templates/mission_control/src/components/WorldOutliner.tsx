@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useMissionControlStore } from '../store/missionControlStore';
 import { ActorInfo } from '../store/missionControlStore';
 
 export function WorldOutliner() {
-  const { actors, selectedActor, selectActor } = useMissionControlStore();
+  const { actors, selectedActor, selectActor, playLocomotion, frameActor, destroyActor } = useMissionControlStore();
+  const [menu, setMenu] = useState<{ x: number; y: number; path: string } | null>(null);
 
   const getActorIcon = (className: string) => {
     if (className.includes('StaticMesh')) return '📦';
@@ -18,8 +19,19 @@ export function WorldOutliner() {
     return '🎭';
   };
 
-  const formatVector = (v: [number, number, number]) => {
-    return `[${v[0].toFixed(1)}, ${v[1].toFixed(1)}, ${v[2].toFixed(1)}]`;
+  const onContextMenu = (e: React.MouseEvent, path: string) => {
+    e.preventDefault();
+    selectActor(path);
+    setMenu({ x: e.clientX, y: e.clientY, path });
+  };
+
+  const runAction = async (action: 'idle' | 'walk' | 'run' | 'frame' | 'destroy') => {
+    if (!menu) return;
+    selectActor(menu.path);
+    setMenu(null);
+    if (action === 'frame') await frameActor();
+    else if (action === 'destroy') await destroyActor();
+    else await playLocomotion(action);
   };
 
   return (
@@ -37,6 +49,7 @@ export function WorldOutliner() {
               key={actor.path}
               className={`actor-item ${actor.path === selectedActor ? 'selected' : ''}`}
               onClick={() => selectActor(actor.path)}
+              onContextMenu={(e) => onContextMenu(e, actor.path)}
               role="treeitem"
               aria-selected={actor.path === selectedActor}
             >
@@ -48,6 +61,15 @@ export function WorldOutliner() {
             </li>
           ))}
         </ul>
+      )}
+      {menu && (
+        <div className="outliner-context-menu" style={{ top: menu.y, left: menu.x }}>
+          <button type="button" onClick={() => runAction('idle')}>Play idle</button>
+          <button type="button" onClick={() => runAction('walk')}>Play walk</button>
+          <button type="button" onClick={() => runAction('run')}>Play run</button>
+          <button type="button" onClick={() => runAction('frame')}>Frame</button>
+          <button type="button" className="danger" onClick={() => runAction('destroy')}>Destroy</button>
+        </div>
       )}
     </div>
   );

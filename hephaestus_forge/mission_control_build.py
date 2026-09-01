@@ -47,7 +47,23 @@ def build_mission_control(
     dist = mc_dir / "dist"
     if not is_vite_build(dist):
         raise RuntimeError(f"Vite build did not produce assets in {dist}")
+    publish_mission_control_dist(project_root, dist, mission_control_dir=mission_control_dir)
     return dist
+
+
+def publish_mission_control_dist(
+    project_root: Path,
+    dist: Path,
+    *,
+    mission_control_dir: str = "MissionControl",
+) -> Path:
+    """Copy built dist into .hephaestus_forge/MissionControl/dist for observe."""
+    target = project_root / ".hephaestus_forge" / "MissionControl" / "dist"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        shutil.rmtree(target)
+    shutil.copytree(dist, target)
+    return target
 
 
 def prepare_mission_control_dist(
@@ -60,8 +76,11 @@ def prepare_mission_control_dist(
     """
     Return dist directory for observe/desktop.
 
-    Keeps an existing Vite build unless force_static=True, then writes inline HTML fallback.
+    Prefers .hephaestus_forge/MissionControl/dist, then project MissionControl/dist.
     """
+    forge_dist = project_root / ".hephaestus_forge" / "MissionControl" / "dist"
+    if not force_static and is_vite_build(forge_dist):
+        return forge_dist
     dist_dir = project_root / mission_control_dir / "dist"
     if not force_static and is_vite_build(dist_dir):
         return dist_dir

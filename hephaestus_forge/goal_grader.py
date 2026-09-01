@@ -56,6 +56,34 @@ def _anim_playing_for_actor(details: list[Any], actor_path: str) -> bool:
     return False
 
 
+def _montage_command_succeeded(memory: Optional[list[dict[str, Any]]], actor_path: str = "") -> bool:
+    for step in memory or []:
+        if not step.get("ok"):
+            continue
+        if step.get("kind") != "play_montage" and step.get("command") != "animation.play_montage":
+            continue
+        if actor_path:
+            step_actor = str(step.get("actor_path") or "")
+            if step_actor and actor_path not in step_actor and step_actor not in actor_path:
+                continue
+        return True
+    return False
+
+
+def _locomotion_command_succeeded(memory: Optional[list[dict[str, Any]]], actor_path: str = "") -> bool:
+    for step in memory or []:
+        if not step.get("ok"):
+            continue
+        if step.get("kind") not in ("play_locomotion",) and step.get("command") != "animation.play_locomotion":
+            continue
+        if actor_path:
+            step_actor = str(step.get("actor_path") or "")
+            if step_actor and actor_path not in step_actor and step_actor not in actor_path:
+                continue
+        return True
+    return False
+
+
 def _animation_command_succeeded(
     memory: Optional[list[dict[str, Any]]],
     actor_path: str = "",
@@ -229,13 +257,17 @@ def grade_goal(goal: str, snapshot: Any, memory: Optional[list[dict[str, Any]]] 
     if skeletal < min_skeletal:
         missing.append(f"skeletal {skeletal}/{min_skeletal}")
     if ("playing" in goal_l or "walk" in goal_l or "anim" in goal_l or "idle" in goal_l or "run" in goal_l) and min_skeletal > 0 and not anim_playing:
-        if "idle" in goal_l:
+        wants_montage = "montage" in goal_l
+        target_actor = _actor_path_from_goal(goal) or ""
+        if wants_montage and not _montage_command_succeeded(memory, target_actor):
+            missing.append("montage not playing")
+        elif "idle" in goal_l and not _locomotion_command_succeeded(memory, target_actor) and not anim_playing:
             missing.append("idle animation not playing")
-        elif "run" in goal_l:
+        elif "run" in goal_l and not _locomotion_command_succeeded(memory, target_actor) and not anim_playing:
             missing.append("run animation not playing")
-        elif "walk" in goal_l:
+        elif "walk" in goal_l and not _locomotion_command_succeeded(memory, target_actor) and not anim_playing:
             missing.append("walk animation not playing")
-        else:
+        elif not wants_montage:
             missing.append("animation not playing")
 
     if ("level sequence" in goal_l or ("sequence" in goal_l and "/game/" in goal_l)):
@@ -245,7 +277,14 @@ def grade_goal(goal: str, snapshot: Any, memory: Optional[list[dict[str, Any]]] 
             for step in (memory or [])
         )
         if not played:
-            missing.append("level sequence not played")
+            missing.append("level sequence not playing")
+    elif "sequence.play" in goal_l or "play level sequence" in goal_l:
+        played = any(
+            step.get("command") == "sequence.play" and step.get("ok")
+            for step in (memory or [])
+        )
+        if not played:
+            missing.append("level sequence not playing")
 
     pawn_state = getattr(snapshot, "pawn_state", None) or {}
     pawn_speed = float(pawn_state.get("speed") or 0.0) if isinstance(pawn_state, dict) else 0.0

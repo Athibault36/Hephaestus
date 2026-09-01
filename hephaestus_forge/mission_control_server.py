@@ -121,6 +121,7 @@ def make_handler(
                     llm_check = next((c for c in report.checks if c.name == "planner"), None)
                     nim_check = next((c for c in report.checks if c.name == "nim_api_key"), None)
                     vision_check = next((c for c in report.checks if c.name == "vision_planner"), None)
+                    cap_check = next((c for c in report.checks if c.name == "bridge_capabilities"), None)
                     payload.update({
                         "ok": True,
                         "planner": report.planner_model,
@@ -128,6 +129,8 @@ def make_handler(
                         "llm_error": "" if (llm_check and llm_check.ok) else (llm_check.detail if llm_check else ""),
                         "nim_key_set": bool(nim_check and nim_check.ok),
                         "vision_mode": vision_check.detail if vision_check else "",
+                        "bridge_capabilities": cap_check.detail if cap_check else "",
+                        "bridge_capabilities_ok": bool(cap_check and cap_check.ok),
                         "ue": remote_api,
                         "project": str(project_root) if project_root else "",
                         "ready_for_goals": report.ready,
@@ -158,7 +161,8 @@ def make_handler(
                     sys.path.insert(0, str(FORGE_ROOT))
                     from agent_chat import get_store
 
-                    bundle = get_store(project_root).active().export_bundle()
+                    thoughts = thought_hub.recent() if thought_hub else []
+                    bundle = get_store(project_root).active().export_bundle(thoughts=thoughts)
                     self._json_response(200, {"ok": True, **bundle})
                 except Exception as exc:
                     self._json_response(500, {"ok": False, "error": str(exc)})

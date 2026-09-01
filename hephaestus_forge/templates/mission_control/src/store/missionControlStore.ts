@@ -101,6 +101,8 @@ interface MissionControlState {
   lastGrade: GradeSummary | null;
   preflightReady: boolean;
   plannerAvailable: boolean;
+  preflightHint: string;
+  bridgeCapabilitiesOk: boolean;
   assetMatches: string[];
   connectThoughtStream: () => void;
   exportSession: () => Promise<void>;
@@ -254,25 +256,40 @@ export const useMissionControlStore = create<MissionControlState>((set, get) => 
   lastGrade: null,
   preflightReady: false,
   plannerAvailable: false,
+  preflightHint: '',
+  bridgeCapabilitiesOk: true,
 
   assetMatches: [],
   connectThoughtStream: () => {
-    if (thoughtSource) return;
-    thoughtSource = new EventSource(`${API_BASE}/agent/thoughts/stream`);
-    thoughtSource.onmessage = (ev) => {
-      try {
-        const t = JSON.parse(ev.data);
-        if (t.content) {
-          get().addThought({
-            type: t.kind === 'error' ? 'error' : 'reflection',
-            content: String(t.content),
-            metadata: t.metadata,
-          });
-        }
-      } catch {
-        /* ignore */
+    const connect = () => {
+      if (thoughtSource) {
+        thoughtSource.close();
+        thoughtSource = null;
       }
+      thoughtSource = new EventSource(`${API_BASE}/agent/thoughts/stream`);
+      thoughtSource.onmessage = (ev) => {
+        try {
+          const t = JSON.parse(ev.data);
+          if (t.content) {
+            get().addThought({
+              type: t.kind === 'error' ? 'error' : 'reflection',
+              content: String(t.content),
+              metadata: t.metadata,
+            });
+          }
+        } catch {
+          /* ignore */
+        }
+      };
+      thoughtSource.onerror = () => {
+        if (thoughtSource) {
+          thoughtSource.close();
+          thoughtSource = null;
+        }
+        window.setTimeout(connect, 5000);
+      };
     };
+    connect();
   },
 
   exportSession: async () => {
@@ -291,9 +308,13 @@ export const useMissionControlStore = create<MissionControlState>((set, get) => 
     try {
       const res = await fetch(`${API_BASE}/agent/health`);
       const data = await res.json();
+      const checks = Array.isArray(data.checks) ? data.checks : [];
+      const bridgeTemplate = checks.find((c: { name?: string }) => c.name === 'bridge_template');
       set({
         preflightReady: !!data.ready_for_goals,
         plannerAvailable: !!data.llm_available,
+        preflightHint: String(bridgeTemplate?.detail || data.bridge_capabilities || ''),
+        bridgeCapabilitiesOk: data.bridge_capabilities_ok !== false,
       });
     } catch {
       set({ preflightReady: false, plannerAvailable: false });

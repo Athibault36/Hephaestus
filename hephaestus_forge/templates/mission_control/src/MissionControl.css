@@ -479,6 +479,74 @@
   color: #fff;
 }
 
+.preflight-banner {
+  background: #3d1f1f;
+  border-bottom: 1px solid #8b2e2e;
+  color: #f0c4c4;
+  padding: 0.5rem 1rem;
+  font-size: 12px;
+}
+
+.preflight-banner code {
+  background: #161b22;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.preflight-detail {
+  color: #c9d1d9;
+}
+
+.outliner-context-menu {
+  position: fixed;
+  z-index: 1000;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  min-width: 120px;
+}
+
+.outliner-context-menu button {
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: #c9d1d9;
+  padding: 0.35rem 0.6rem;
+  cursor: pointer;
+}
+
+.outliner-context-menu button:hover {
+  background: #21262d;
+}
+
+.outliner-context-menu button.danger {
+  color: #f85149;
+}
+
+.asset-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.35rem;
+}
+
+.asset-filter-chip {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid #30363d;
+  background: #0d1117;
+  color: #8b949e;
+  cursor: pointer;
+}
+
+.asset-filter-chip.active {
+  border-color: #2ea043;
+  color: #3fb950;
+}
+
 .asset-chips {
   display: flex;
   flex-wrap: wrap;

@@ -1469,7 +1469,10 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleSequenceCommand(
         return bOk
             ? MakeSuccessResult(
                   TEXT(""),
-                  FString::Printf(TEXT("{\"duration\":%.2f,\"camera_shot\":true}"), Duration))
+                  FString::Printf(
+                      TEXT("{\"duration\":%.2f,\"camera_shot\":true,\"look_at_actor\":\"%s\"}"),
+                      Duration,
+                      *LookAtActor))
             : MakeErrorResult(TEXT(""), TEXT("Failed to create camera shot"));
     }
 

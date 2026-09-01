@@ -77,8 +77,8 @@ def _probe_ue(remote_api: str, timeout: float = 2.0) -> HealthCheck:
                     return HealthCheck(
                         "ue_pie",
                         True,
-                        detail + f" — rebuild recommended (factory template v{BRIDGE_VERSION})",
-                        blocker=False,
+                        detail + f" — rebuild required (factory template v{BRIDGE_VERSION})",
+                        blocker=True,
                     )
             detail += ")"
             return HealthCheck("ue_pie", True, detail, blocker=True)
@@ -192,35 +192,30 @@ def _post_command(remote_api: str, payload: dict, timeout: float = 3.0) -> dict:
 
 def _probe_bridge_capabilities(remote_api: str) -> HealthCheck:
     """Verify v0.1.1+ verbs exist on the live PIE plugin (not just health version string)."""
+    probes = [
+        ("animation.play_locomotion", {"command": "animation.play_locomotion", "params": {}}),
+        ("sequence.create_shot", {"command": "sequence.create_shot", "params": {"location": {"x": 0, "y": 0, "z": 1}}}),
+        ("world.list_actors", {"command": "world.list_actors", "params": {"include_details": True, "detail_limit": 1}}),
+        ("animation.play_montage", {"command": "animation.play_montage", "params": {}}),
+    ]
+    missing: list[str] = []
     try:
-        loco = _post_command(
-            remote_api,
-            {"command": "animation.play_locomotion", "params": {}},
-        )
-        err = str(loco.get("error") or "").lower()
-        if "unknown" in err or "unrecognized" in err or "not supported" in err:
+        for label, payload in probes:
+            result = _post_command(remote_api, payload)
+            err = str(result.get("error") or "").lower()
+            if "unknown" in err or "unrecognized" in err or "not supported" in err:
+                missing.append(label)
+        if missing:
             return HealthCheck(
                 "bridge_capabilities",
                 False,
-                "PIE plugin missing animation.play_locomotion — forge sync-plugin <target> and rebuild",
-                blocker=False,
-            )
-        seq = _post_command(
-            remote_api,
-            {"command": "sequence.create_shot", "params": {"location": {"x": 0, "y": 0, "z": 1}}},
-        )
-        err2 = str(seq.get("error") or "").lower()
-        if "unknown" in err2 or "unrecognized" in err2:
-            return HealthCheck(
-                "bridge_capabilities",
-                False,
-                "PIE plugin missing sequence.create_shot — rebuild HephaestusBridge",
+                f"PIE plugin missing: {', '.join(missing)} — forge sync-plugin <target> and rebuild",
                 blocker=False,
             )
         return HealthCheck(
             "bridge_capabilities",
             True,
-            "Locomotion + sequencer commands registered on PIE plugin",
+            "Locomotion, sequencer, list_actors details, montage registered on PIE plugin",
             blocker=False,
         )
     except Exception as exc:
@@ -249,6 +244,14 @@ def run_preflight(
     ]
     ue_ok = next((c.ok for c in checks if c.name == "ue_pie"), False)
     blockers_failed = any(c.blocker and not c.ok for c in checks)
+    bridge_template = next((c for c in checks if c.name == "bridge_template"), None)
+    ready = ue_ok and not blockers_failed
+    if project_root and bridge_template and not bridge_template.ok:
+        ready = False
+    if project_root:
+        ue_check = next((c for c in checks if c.name == "ue_pie"), None)
+        if ue_check and ue_check.ok and "rebuild recommended" in ue_check.detail.lower():
+            ready = False
     return PreflightReport(
         ready=ue_ok and not blockers_failed,
         checks=checks,

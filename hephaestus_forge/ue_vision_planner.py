@@ -74,6 +74,8 @@ Rules:
 - spawn_character spawns a skeletal mesh in view (cinematic/gameplay characters).
 - play_anim plays anim_path on a listed SkeletalMeshActor path.
 - play_locomotion plays idle|walk|run fallback on actor_path when anim_path is unknown.
+- Example play_locomotion: {"action":"play_locomotion","actor_path":"/Temp/...","mode":"walk","reason":"walk in place"}
+- Example create_shot: {"action":"create_shot","x":400,"y":0,"z":200,"duration":3,"look_at_actor":"/Temp/...","reason":"frame character"}
 - move_actor animates an actor toward x/y/z over duration seconds (walk into frame).
 - apply_move applies forward/right input to the possessed pawn (gameplay jog/walk).
 - play_montage plays montage_path on a listed character/skeletal actor.

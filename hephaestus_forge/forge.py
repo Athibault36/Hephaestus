@@ -1582,6 +1582,7 @@ def adopt(
     name: Annotated[Optional[str], typer.Option("--name", "-n", help="Display name in desktop app")] = None,
     skip_plugin: Annotated[bool, typer.Option("--skip-plugin", help="Do not copy plugin template")] = False,
     build_mc: Annotated[bool, typer.Option("--build-mc", help="npm build React Mission Control after adopt")] = False,
+    e2e_sync: Annotated[bool, typer.Option("--e2e-sync", help="Run sync-plugin + offline e2e after adopt")] = False,
 ):
     """
     Adopt an existing UE project as a Hephaestus target (factory stays in the git repo).
@@ -1661,6 +1662,16 @@ def adopt(
             console.print(f"[green]OK[/green] Mission Control built -> {dist}")
         except Exception as exc:
             console.print(f"[yellow]WARN[/yellow] build-mc skipped: {exc}")
+
+    if e2e_sync:
+        try:
+            from e2e_check import run_e2e_check
+        except ImportError:
+            from hephaestus_forge.e2e_check import run_e2e_check
+        report = run_e2e_check(project_root, sync=True, live=False)
+        for step in report.steps:
+            style = "green" if step.ok else "red"
+            console.print(f"[{style}]{'OK' if step.ok else 'FAIL'}[/] {step.name}: {step.detail}")
 
 
 @app.command()
@@ -3807,6 +3818,44 @@ def e2e_check_cmd(
         style = "green" if step.ok else "red"
         console.print(f"[{style}]{'OK' if step.ok else 'FAIL'}[/] {step.name}: {step.detail}")
     raise typer.Exit(0 if report.ok else 2)
+
+
+@app.command()
+def doctor(
+    project_path: Annotated[Optional[Path], typer.Argument(help="Adopted UE project root")] = None,
+    api: Annotated[str, typer.Option("--api", help="UE Remote API base URL")] = "http://127.0.0.1:8765",
+    sync: Annotated[bool, typer.Option("--sync", help="Run forge sync-plugin before checks")] = False,
+    offline: Annotated[bool, typer.Option("--offline", help="Skip live PIE command probes")] = False,
+):
+    """Operator doctor: rebuild checklist + offline e2e + preflight."""
+    try:
+        from doctor import run_doctor
+    except ImportError:
+        from hephaestus_forge.doctor import run_doctor
+
+    project_root = project_path
+    if project_root is None:
+        try:
+            from project_registry import ProjectRegistry
+
+            reg = ProjectRegistry()
+            if reg.active_path:
+                project_root = Path(reg.active_path)
+        except Exception:
+            project_root = None
+    report = run_doctor(project_root, remote_api=api, sync=sync, live=not offline)
+    console.print("[bold]Rebuild checklist[/bold]")
+    for line in report.checklist:
+        console.print(f"  • {line}")
+    console.print("\n[bold]E2E[/bold]")
+    for step in report.e2e.get("steps", []):
+        style = "green" if step.get("ok") else "red"
+        console.print(f"[{style}]{'OK' if step.get('ok') else 'FAIL'}[/] {step.get('name')}: {step.get('detail')}")
+    console.print("\n[bold]Preflight[/bold]")
+    for check in report.preflight.get("checks", []):
+        style = "green" if check.get("ok") else "yellow"
+        console.print(f"[{style}]{check.get('name')}[/]: {check.get('detail')}")
+    raise typer.Exit(0 if report.ok else 1)
 
 
 def app_entry() -> None:

@@ -14,6 +14,7 @@ export function ActorActions() {
       <div className="actor-action-row">
         <button type="button" onClick={() => playLocomotion('idle')}>Play idle</button>
         <button type="button" onClick={() => playLocomotion('walk')}>Play walk</button>
+        <button type="button" onClick={() => playLocomotion('run')}>Play run</button>
         <button type="button" onClick={() => frameActor()}>Frame</button>
         <button type="button" className="danger" onClick={() => destroyActor()}>Destroy</button>
       </div>

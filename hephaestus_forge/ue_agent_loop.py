@@ -475,6 +475,30 @@ def decide_action(
     )
 
 
+def _maybe_repair_command(
+    command: dict[str, Any],
+    snapshot: WorldSnapshot,
+    goal: str,
+    error: str,
+) -> Optional[dict[str, Any]]:
+    err = (error or "").lower()
+    params = dict(command.get("params") or {})
+    repaired = dict(command)
+    if "actor_path" in err and not params.get("actor_path"):
+        skel = _pick_skeletal_path(snapshot, goal)
+        if skel:
+            params["actor_path"] = skel
+            repaired["params"] = params
+            return repaired
+    if command.get("command") == "animation.play_locomotion" and not params.get("mode"):
+        mode = infer_locomotion_mode(goal)
+        if mode:
+            params["mode"] = mode
+            repaired["params"] = params
+            return repaired
+    return None
+
+
 class ObserveActLoop:
     def __init__(
         self,
@@ -633,6 +657,17 @@ class ObserveActLoop:
         else:
             self._avatar("working", None, f"executing_{action.kind}")
             act_result = self.client.command(action.command)
+            if not act_result.get("success"):
+                repaired = _maybe_repair_command(
+                    action.command,
+                    before,
+                    self.goal,
+                    str(act_result.get("error") or ""),
+                )
+                if repaired:
+                    self._thought("plan", "Repairing command params and retrying once", repaired)
+                    act_result = self.client.command(repaired)
+                    action.command = repaired
 
         ok = bool(act_result.get("success", False))
         self._thought(
@@ -641,8 +676,7 @@ class ObserveActLoop:
             act_result,
         )
 
-        self.memory.append(
-            {
+        mem_entry: dict[str, Any] = {
                 "step": step_index,
                 "kind": action.kind,
                 "reason": action.reason,
@@ -653,7 +687,11 @@ class ObserveActLoop:
                 "meshes_before": before.meshes,
                 "mesh_path": (action.command.get("params") or {}).get("mesh_path"),
             }
-        )
+        if ok and action.command.get("command") == "sequence.create_shot":
+            inner = _parse_result_json(act_result)
+            if inner.get("shot_path") or inner.get("sequence_path"):
+                mem_entry["shot_path"] = inner.get("shot_path") or inner.get("sequence_path")
+        self.memory.append(mem_entry)
 
         time.sleep(
             min(

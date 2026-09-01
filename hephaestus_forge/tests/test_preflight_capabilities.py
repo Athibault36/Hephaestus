@@ -15,6 +15,8 @@ def test_probe_bridge_capabilities_ok():
         cmd = body.get("command")
         if cmd == "animation.play_locomotion":
             payload = {"success": False, "error": "actor_path required"}
+        elif cmd == "animation.play_montage":
+            payload = {"success": False, "error": "actor_path required"}
         else:
             payload = {"success": True, "result_json": "{}"}
         resp = MagicMock()

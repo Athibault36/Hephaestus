@@ -17,7 +17,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - name: npm ci + build template
+      - name: Typecheck + build template
         working-directory: hephaestus_forge/templates/mission_control
         run: |
           npm ci
