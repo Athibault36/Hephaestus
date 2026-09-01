@@ -53,6 +53,7 @@ struct FHephaestusViewJob
 	FRotator EndRotation = FRotator::ZeroRotator;
 	float Duration = 1.f;
 	float Elapsed = 0.f;
+	bool bEaseInOut = true;
 	FTimerHandle Timer;
 	TWeakObjectPtr<UWorld> World;
 };
@@ -620,7 +621,8 @@ bool UHephaestusWorldSubsystem::SetView(const FVector& Location, const FRotator&
 bool UHephaestusWorldSubsystem::AnimateViewTo(
 	const FVector& TargetLocation,
 	const FRotator& TargetRotation,
-	float DurationSeconds)
+	float DurationSeconds,
+	bool bEaseInOut)
 {
 	UWorld* World = ResolveWorld();
 	if (!World)
@@ -642,6 +644,7 @@ bool UHephaestusWorldSubsystem::AnimateViewTo(
 	Job->StartRotation = StartRotation;
 	Job->EndRotation = TargetRotation;
 	Job->Duration = FMath::Max(DurationSeconds, 0.1f);
+	Job->bEaseInOut = bEaseInOut;
 	Job->World = World;
 	GActiveViewJobs.Add(Job);
 
@@ -656,8 +659,9 @@ bool UHephaestusWorldSubsystem::AnimateViewTo(
 			}
 			Job->Elapsed += 0.016f;
 			const float Alpha = FMath::Clamp(Job->Elapsed / Job->Duration, 0.f, 1.f);
-			const FVector Loc = FMath::Lerp(Job->StartLocation, Job->EndLocation, Alpha);
-			const FRotator Rot = FMath::Lerp(Job->StartRotation, Job->EndRotation, Alpha);
+			const float T = Job->bEaseInOut ? FMath::InterpEaseInOut(0.f, 1.f, Alpha) : Alpha;
+			const FVector Loc = FMath::Lerp(Job->StartLocation, Job->EndLocation, T);
+			const FRotator Rot = FMath::Lerp(Job->StartRotation, Job->EndRotation, T);
 			SetView(Loc, Rot);
 			if (Alpha >= 1.f)
 			{

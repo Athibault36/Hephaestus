@@ -10,7 +10,7 @@
 ## Scenario B — cinematic shot
 
 1. Goal: `Frame the character in a cinematic shot from the left`
-2. `sequence.create_shot` with `look_at_actor` succeeds
+2. `sequence.create_shot` with `look_at_actor` and `ease_in_out: true` succeeds
 3. Grade: camera repositioned / shot created
 
 ## Scenario C — Mission Control

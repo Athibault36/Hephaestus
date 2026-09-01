@@ -119,6 +119,7 @@ interface MissionControlState {
   setActors: (actors: ActorInfo[]) => void;
   selectActor: (path: string | null) => void;
   playLocomotion: (mode: 'idle' | 'walk' | 'run') => Promise<void>;
+  playMontage: () => Promise<void>;
   frameActor: () => Promise<void>;
   destroyActor: () => Promise<void>;
 
@@ -406,6 +407,22 @@ export const useMissionControlStore = create<MissionControlState>((set, get) => 
     await get().sendCommand({
       command: 'animation.play_locomotion',
       params: { actor_path: path, mode, loop: true },
+    });
+    await get().refreshActors();
+  },
+
+  playMontage: async () => {
+    const path = get().selectedActor;
+    if (!path) return;
+    await get().searchAssets('idle', 'AnimMontage');
+    const montage = get().assets.find((a) => a.type.includes('Anim'))?.path;
+    if (!montage) {
+      get().addThought({ type: 'error', content: 'No montage found — search assets first' });
+      return;
+    }
+    await get().sendCommand({
+      command: 'animation.play_montage',
+      params: { actor_path: path, montage_path: montage, loop: true },
     });
     await get().refreshActors();
   },

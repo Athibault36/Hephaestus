@@ -456,6 +456,7 @@ def decide_action(
             "location": {"x": cam_x, "y": cam_y, "z": cam_z},
             "rotation": {"pitch": -10.0, "yaw": yaw, "roll": 0.0},
             "duration": 3.0,
+            "ease_in_out": True,
         }
         if skel_frame:
             shot_params["look_at_actor"] = skel_frame

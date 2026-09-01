@@ -37,7 +37,8 @@ public:
 		float DurationSeconds = 4.f,
 		const FString& ActorPath = TEXT(""),
 		const FVector& ActorTargetLocation = FVector::ZeroVector,
-		const FString& LookAtActorPath = TEXT(""));
+		const FString& LookAtActorPath = TEXT(""),
+		bool bEaseInOut = true);
 
 private:
 	UWorld* ResolveWorld() const;

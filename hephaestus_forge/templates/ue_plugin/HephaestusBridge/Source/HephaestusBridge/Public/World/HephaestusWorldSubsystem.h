@@ -75,7 +75,11 @@ public:
 
 	/** Smoothly animate camera/pawn view to a target over DurationSeconds */
 	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
-	bool AnimateViewTo(const FVector& TargetLocation, const FRotator& TargetRotation, float DurationSeconds = 4.f);
+	bool AnimateViewTo(
+		const FVector& TargetLocation,
+		const FRotator& TargetRotation,
+		float DurationSeconds = 4.f,
+		bool bEaseInOut = true);
 
 	/** Tint a StaticMeshActor with a readable MID color */
 	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")

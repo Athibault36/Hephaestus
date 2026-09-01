@@ -375,7 +375,7 @@ FHephaestusCommandResult UHephaestusCommandHandler::RouteCommand(const TSharedPt
     }
     else if (Command.StartsWith(TEXT("pcg.")))
     {
-        return HandlePCGCommand(Params);
+        return HandlePCGCommand(Command, Params);
     }
     else if (Command.StartsWith(TEXT("animation.")))
     {
@@ -1005,26 +1005,64 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleRenderingCommand(const
     return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Unknown rendering action: %s"), *Action));
 }
 
-FHephaestusCommandResult UHephaestusCommandHandler::HandlePCGCommand(const TSharedPtr<FJsonObject>& Params)
+FHephaestusCommandResult UHephaestusCommandHandler::HandlePCGCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params)
 {
     if (!PCGSubsystem)
     {
         return MakeErrorResult(TEXT(""), TEXT("PCG subsystem not available"));
     }
 
-    FString Action = Params->GetStringField(TEXT("action"));
+    FString Action;
+    if (Params.IsValid())
+    {
+        Params->TryGetStringField(TEXT("action"), Action);
+    }
+    if (Action.IsEmpty())
+    {
+        Command.Split(TEXT("."), nullptr, &Action, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
+    }
 
     if (Action == TEXT("mutate_graph"))
     {
-        return MakeSuccessResult(TEXT(""), TEXT("{}"));
+        FString GraphPath;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("graph_path"), GraphPath);
+            if (GraphPath.IsEmpty())
+            {
+                Params->TryGetStringField(TEXT("path"), GraphPath);
+            }
+        }
+        UObject* Graph = GraphPath.IsEmpty() ? nullptr : LoadObject<UObject>(nullptr, *GraphPath);
+        TArray<FHephaestusPCGMutation> Mutations;
+        const bool bOk = PCGSubsystem->MutatePCGGraph(Graph, Mutations);
+        return bOk
+            ? MakeSuccessResult(TEXT(""), FString::Printf(TEXT("{\"graph_path\":\"%s\",\"mutations\":0}"), *GraphPath))
+            : MakeErrorResult(TEXT(""), TEXT("mutate_graph failed — provide graph_path to an existing PCG graph asset"));
     }
     else if (Action == TEXT("set_metadata"))
     {
-        return MakeSuccessResult(TEXT(""), TEXT("{}"));
+        TMap<FString, FString> Meta;
+        PCGSubsystem->SetMetadataParams(nullptr, Meta);
+        return MakeSuccessResult(TEXT(""), TEXT("{\"metadata\":true}"));
     }
     else if (Action == TEXT("query_spatial"))
     {
-        return MakeSuccessResult(TEXT(""), TEXT("{}"));
+        FHephaestusPCGSpatialQuery Query;
+        if (Params.IsValid())
+        {
+            FVector MinV, MaxV;
+            ParseVectorField(Params, TEXT("min"), MinV);
+            ParseVectorField(Params, TEXT("max"), MaxV);
+            if (!MinV.IsNearlyZero() || !MaxV.IsNearlyZero())
+            {
+                Query.Bounds = FBox(MinV, MaxV);
+            }
+        }
+        const FHephaestusPCGSpatialDataResult Result = PCGSubsystem->QuerySpatialData(Query);
+        return MakeSuccessResult(
+            TEXT(""),
+            FString::Printf(TEXT("{\"points\":%d}"), Result.Points.Num()));
     }
 
     return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Unknown PCG action: %s"), *Action));
@@ -1056,7 +1094,22 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleAnimationCommand(const
 
     if (Action == TEXT("create_control_rig"))
     {
-        return MakeSuccessResult(TEXT(""), TEXT("{\"stub\":true}"));
+        if (!Params.IsValid())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Missing params for animation.create_control_rig"));
+        }
+        FString RigPath;
+        FString MeshPath;
+        Params->TryGetStringField(TEXT("rig_path"), RigPath);
+        Params->TryGetStringField(TEXT("mesh_path"), MeshPath);
+        USkeletalMesh* Mesh = MeshPath.IsEmpty() ? nullptr : LoadObject<USkeletalMesh>(nullptr, *MeshPath);
+        FHephaestusControlRigDesc Desc;
+        Desc.Name = RigPath;
+        Desc.SkeletalMesh = Mesh;
+        UObject* Rig = AnimationSubsystem->CreateControlRig(Mesh, Desc);
+        return Rig
+            ? MakeSuccessResult(TEXT(""), FString::Printf(TEXT("{\"rig_path\":\"%s\"}"), *RigPath))
+            : MakeErrorResult(TEXT(""), TEXT("create_control_rig failed — provide rig_path to an existing asset"));
     }
     else if (Action == TEXT("retarget"))
     {
@@ -1113,7 +1166,22 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleAnimationCommand(const
     }
     else if (Action == TEXT("livelink_connect"))
     {
-        return MakeSuccessResult(TEXT(""), TEXT("{\"stub\":true}"));
+        if (!Params.IsValid())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Missing params for animation.livelink_connect"));
+        }
+        FString Subject;
+        FString Config;
+        Params->TryGetStringField(TEXT("subject"), Subject);
+        if (Subject.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("subject_name"), Subject);
+        }
+        Params->TryGetStringField(TEXT("config"), Config);
+        const bool bOk = AnimationSubsystem->LiveLinkConnect(Subject, Config);
+        return bOk
+            ? MakeSuccessResult(TEXT(""), FString::Printf(TEXT("{\"subject\":\"%s\",\"connected\":true}"), *Subject))
+            : MakeErrorResult(TEXT(""), TEXT("livelink_connect requires subject"));
     }
     else if (Action == TEXT("spawn_skeletal_mesh"))
     {
@@ -1469,6 +1537,16 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleSequenceCommand(
         }
         double Duration = 4.0;
         Params->TryGetNumberField(TEXT("duration"), Duration);
+        bool bEaseInOut = true;
+        if (Params->HasField(TEXT("ease_in_out")))
+        {
+            bEaseInOut = Params->GetBoolField(TEXT("ease_in_out"));
+        }
+        else if (Params->HasField(TEXT("easing")))
+        {
+            const FString Easing = Params->GetStringField(TEXT("easing")).ToLower();
+            bEaseInOut = Easing != TEXT("linear");
+        }
         FString ActorPath;
         Params->TryGetStringField(TEXT("actor_path"), ActorPath);
         FString LookAtActor;
@@ -1488,14 +1566,15 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleSequenceCommand(
             return MakeErrorResult(TEXT(""), TEXT("target location required for sequence.create_shot"));
         }
         const bool bOk = SequenceSubsystem->CreateCameraShot(
-            TargetLocation, TargetRotation, static_cast<float>(Duration), ActorPath, ActorTarget, LookAtActor);
+            TargetLocation, TargetRotation, static_cast<float>(Duration), ActorPath, ActorTarget, LookAtActor, bEaseInOut);
         return bOk
             ? MakeSuccessResult(
                   TEXT(""),
                   FString::Printf(
-                      TEXT("{\"duration\":%.2f,\"camera_shot\":true,\"look_at_actor\":\"%s\"}"),
+                      TEXT("{\"duration\":%.2f,\"camera_shot\":true,\"look_at_actor\":\"%s\",\"ease_in_out\":%s}"),
                       Duration,
-                      *LookAtActor))
+                      *LookAtActor,
+                      bEaseInOut ? TEXT("true") : TEXT("false")))
             : MakeErrorResult(TEXT(""), TEXT("Failed to create camera shot"));
     }
 

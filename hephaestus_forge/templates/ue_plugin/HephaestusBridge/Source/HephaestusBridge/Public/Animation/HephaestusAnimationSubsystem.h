@@ -83,4 +83,7 @@ public:
 
 private:
 	UWorld* ResolveWorld() const;
+
+	UPROPERTY()
+	TArray<FString> ConnectedLiveLinkSubjects;
 };

@@ -104,7 +104,8 @@ bool UHephaestusSequenceSubsystem::CreateCameraShot(
 	float DurationSeconds,
 	const FString& ActorPath,
 	const FVector& ActorTargetLocation,
-	const FString& LookAtActorPath)
+	const FString& LookAtActorPath,
+	bool bEaseInOut)
 {
 	UGameInstance* GI = GetGameInstance();
 	if (!GI)
@@ -132,7 +133,7 @@ bool UHephaestusSequenceSubsystem::CreateCameraShot(
 		}
 	}
 
-	const bool bCameraOk = WorldSubsystem->AnimateViewTo(TargetLocation, FinalRotation, DurationSeconds);
+	const bool bCameraOk = WorldSubsystem->AnimateViewTo(TargetLocation, FinalRotation, DurationSeconds, bEaseInOut);
 	bool bActorOk = true;
 	if (!ActorPath.IsEmpty() && !ActorTargetLocation.IsNearlyZero())
 	{

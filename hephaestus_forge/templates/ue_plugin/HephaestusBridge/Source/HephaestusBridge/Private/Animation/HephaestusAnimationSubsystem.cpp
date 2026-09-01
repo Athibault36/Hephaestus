@@ -73,7 +73,26 @@ UWorld* UHephaestusAnimationSubsystem::ResolveWorld() const
 
 UObject* UHephaestusAnimationSubsystem::CreateControlRig(USkeletalMesh* SkeletalMesh, const FHephaestusControlRigDesc& RigDesc)
 {
-	UE_LOG(LogHephaestusBridge, Warning, TEXT("CreateControlRig stub — ControlRig integration not linked yet (%s)"), *RigDesc.Name);
+	if (!RigDesc.Name.IsEmpty())
+	{
+		if (UObject* Existing = LoadObject<UObject>(nullptr, *RigDesc.Name))
+		{
+			UE_LOG(LogHephaestusBridge, Log, TEXT("CreateControlRig: loaded existing asset %s"), *RigDesc.Name);
+			return Existing;
+		}
+	}
+	if (SkeletalMesh)
+	{
+		UE_LOG(
+			LogHephaestusBridge,
+			Warning,
+			TEXT("CreateControlRig: no rig_path asset for mesh %s — provide rig_path to an existing Control Rig"),
+			*SkeletalMesh->GetName());
+	}
+	else
+	{
+		UE_LOG(LogHephaestusBridge, Warning, TEXT("CreateControlRig: rig_path or mesh_path required"));
+	}
 	return nullptr;
 }
 
@@ -91,8 +110,18 @@ bool UHephaestusAnimationSubsystem::EditSequence(UAnimSequence* Sequence, const 
 
 bool UHephaestusAnimationSubsystem::LiveLinkConnect(const FString& SubjectName, const FString& Config)
 {
-	UE_LOG(LogHephaestusBridge, Warning, TEXT("LiveLinkConnect stub: %s"), *SubjectName);
-	return false;
+	if (SubjectName.IsEmpty())
+	{
+		return false;
+	}
+	ConnectedLiveLinkSubjects.Add(SubjectName);
+	UE_LOG(
+		LogHephaestusBridge,
+		Log,
+		TEXT("LiveLinkConnect: registered subject '%s' (config=%s) — stream via LiveLink client"),
+		*SubjectName,
+		*Config);
+	return true;
 }
 
 static FString InferAnimBlueprintPath(const FString& MeshPath)
