@@ -44,7 +44,7 @@ You receive a viewport census (and optional prior step memory). Choose exactly O
 
 Allowed JSON (no markdown):
 {
-  "action": "spawn_light" | "spawn_cube" | "spawn_mesh" | "spawn_character" | "play_anim" | "play_montage" | "stop_anim" | "move_actor" | "apply_move" | "set_transform" | "set_light" | "set_view" | "create_shot" | "play_level_sequence" | "set_mesh_color" | "destroy" | "noop",
+  "action": "spawn_light" | "spawn_cube" | "spawn_mesh" | "spawn_character" | "play_anim" | "play_locomotion" | "play_montage" | "stop_anim" | "move_actor" | "apply_move" | "set_transform" | "set_light" | "set_view" | "create_shot" | "play_level_sequence" | "set_mesh_color" | "destroy" | "noop",
   "reason": "short why",
   "x": number, "y": number, "z": number,
   "yaw": number,
@@ -73,6 +73,7 @@ Rules:
 - set_mesh_color tints a listed StaticMeshActor (color r/g/b 0-1).
 - spawn_character spawns a skeletal mesh in view (cinematic/gameplay characters).
 - play_anim plays anim_path on a listed SkeletalMeshActor path.
+- play_locomotion plays idle|walk|run fallback on actor_path when anim_path is unknown.
 - move_actor animates an actor toward x/y/z over duration seconds (walk into frame).
 - apply_move applies forward/right input to the possessed pawn (gameplay jog/walk).
 - play_montage plays montage_path on a listed character/skeletal actor.
@@ -209,6 +210,28 @@ def plan_dict_to_action(plan: dict[str, Any], snapshot: WorldSnapshot) -> AgentA
                     "actor_path": path,
                     "anim_path": anim_path,
                     "loop": bool(plan.get("loop", False)),
+                },
+            },
+        )
+
+    if action in ("play_locomotion", "locomotion", "idle", "walk_in_place", "run_in_place"):
+        path = str(plan.get("actor_path") or "")
+        mode = str(plan.get("mode") or plan.get("locomotion") or action)
+        if path not in snapshot.actor_paths:
+            return AgentAction(
+                kind="noop",
+                reason=f"Rejected play_locomotion — unknown path: {path}",
+                command={"command": "world.list_actors", "params": {}},
+            )
+        return AgentAction(
+            kind="play_locomotion",
+            reason=reason,
+            command={
+                "command": "animation.play_locomotion",
+                "params": {
+                    "actor_path": path,
+                    "mode": mode,
+                    "loop": bool(plan.get("loop", True)),
                 },
             },
         )
