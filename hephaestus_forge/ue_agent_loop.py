@@ -1,6 +1,6 @@
 # Copyright (c) 2024 HephaestusForge. All Rights Reserved.
 """
-Observe → decide → act → recapture loop against the Hephaestus Remote API.
+Observe -> decide -> act -> recapture loop against the Hephaestus Remote API.
 
 v1 uses a deterministic heuristic (no LLM required) so the loop works offline
 whenever PIE is listening on :8765.

@@ -216,7 +216,7 @@ class SystemScanner:
         self.console = console
 
     def scan(self) -> SystemScanResult:
-        self.console.print("[bold cyan]🔍 Scanning system...[/bold cyan]")
+        self.console.print("[bold cyan]Scanning system...[/bold cyan]")
 
         result = SystemScanResult(
             platform=platform.platform(),
@@ -269,7 +269,7 @@ class SystemScanner:
                     cuda_version=self._get_cuda_version(),
                 ))
         except (subprocess.CalledProcessError, FileNotFoundError):
-            self.console.print("[yellow]⚠ nvidia-smi not found. GPU acceleration unavailable.[/yellow]")
+            self.console.print("[yellow](!) nvidia-smi not found. GPU acceleration unavailable.[/yellow]")
 
         return gpus
 
@@ -379,18 +379,18 @@ class SystemScanner:
         table.add_column("Status", style="green")
         table.add_column("Details", style="white")
 
-        table.add_row("Platform", "✓", result.platform)
-        table.add_row("Python", "✓", f"{result.python_version} ({result.python_executable})")
+        table.add_row("Platform", "OK", result.platform)
+        table.add_row("Python", "OK", f"{result.python_version} ({result.python_executable})")
 
-        ue_status = "✓" if result.ue_path else "✗"
+        ue_status = "OK" if result.ue_path else "X"
         ue_detail = f"{result.ue_version} at {result.ue_path}" if result.ue_path else "NOT FOUND"
         table.add_row("Unreal Engine 5.8", ue_status, ue_detail)
 
-        blender_status = "✓" if result.blender_path else "✗"
+        blender_status = "OK" if result.blender_path else "X"
         blender_detail = f"{result.blender_version} at {result.blender_path}" if result.blender_path else "NOT FOUND"
         table.add_row("Blender", blender_status, blender_detail)
 
-        cc5_status = "✓" if result.cc5_path else "✗"
+        cc5_status = "OK" if result.cc5_path else "X"
         cc5_detail = result.cc5_path if result.cc5_path else "NOT FOUND (optional)"
         table.add_row("Character Creator 5", cc5_status, cc5_detail)
 
@@ -398,21 +398,21 @@ class SystemScanner:
             for gpu in result.gpus:
                 table.add_row(
                     f"GPU {gpu.index}",
-                    "✓",
+                    "OK",
                     f"{gpu.name} | VRAM: {gpu.vram_total_mb}MB total / {gpu.vram_free_mb}MB free | Driver: {gpu.driver_version} | CUDA: {gpu.cuda_version}",
                 )
         else:
-            table.add_row("GPU", "✗", "No NVIDIA GPU detected")
+            table.add_row("GPU", "X", "No NVIDIA GPU detected")
 
-        table.add_row("Total VRAM", "✓" if result.total_vram_mb > 0 else "✗", f"{result.total_vram_mb} MB")
-        table.add_row("Recommended Quant", "✓", result.recommended_quant)
-        table.add_row("Vision Resolution", "✓", f"{result.vision_resolution}px")
-        table.add_row("TTS Model Size", "✓", result.tts_model_size)
+        table.add_row("Total VRAM", "OK" if result.total_vram_mb > 0 else "X", f"{result.total_vram_mb} MB")
+        table.add_row("Recommended Quant", "OK", result.recommended_quant)
+        table.add_row("Vision Resolution", "OK", f"{result.vision_resolution}px")
+        table.add_row("TTS Model Size", "OK", result.tts_model_size)
 
         self.console.print(table)
 
         if result.warnings:
-            self.console.print("\n[bold yellow]⚠ Warnings:[/bold yellow]")
+            self.console.print("\n[bold yellow](!) Warnings:[/bold yellow]")
             for w in result.warnings:
                 self.console.print(f"  • {w}")
 
@@ -426,7 +426,7 @@ class ProjectScaffold:
         self.console = console
 
     def create(self, project_root: Path, config: ForgeConfig, scan: SystemScanResult) -> None:
-        self.console.print("\n[bold cyan]🏗️  Scaffolding project structure...[/bold cyan]")
+        self.console.print("\n[bold cyan]Scaffolding project structure...[/bold cyan]")
 
         # Create directory tree
         dirs = [
@@ -478,7 +478,7 @@ class ProjectScaffold:
         # Copy templates (UE plugin, mission control, runtime services)
         self._copy_templates(project_root, config)
 
-        self.console.print("[green]✓ Project scaffold complete[/green]")
+        self.console.print("[green]OK Project scaffold complete[/green]")
 
     def _copy_templates(self, project_root: Path, config: ForgeConfig) -> None:
         templates_dir = Path(__file__).resolve().parent / "templates"
@@ -510,7 +510,7 @@ class ProjectScaffold:
             else:
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(src, dest)
-            self.console.print(f"  ✓ Copied: {dest.relative_to(project_root)}")
+            self.console.print(f"  OK Copied: {dest.relative_to(project_root)}")
 
         # Minimal .uproject so deploy/compile can find a project file
         uproject = project_root / f"{config.project_name}.uproject"
@@ -523,7 +523,7 @@ class ProjectScaffold:
                 "Modules": [{"Name": config.project_name, "Type": "Runtime", "LoadingPhase": "Default"}],
                 "Plugins": [{"Name": "HephaestusBridge", "Enabled": True}],
             }, indent=2) + "\n", encoding="utf-8")
-            self.console.print(f"  ✓ Written: {uproject.relative_to(project_root)}")
+            self.console.print(f"  OK Written: {uproject.relative_to(project_root)}")
 
     def _write_config(self, project_root: Path, config: ForgeConfig) -> None:
         forge_dir = project_root / config.paths.forge_dir
@@ -539,7 +539,7 @@ class ProjectScaffold:
             if "cloud" in cloud_tpl:
                 config_dict["cloud"] = cloud_tpl["cloud"]
         config_path.write_text(yaml.dump(config_dict, sort_keys=False, default_flow_style=False))
-        self.console.print(f"  ✓ Written: {config_path.relative_to(project_root)}")
+        self.console.print(f"  OK Written: {config_path.relative_to(project_root)}")
 
     def _write_cloud_config(self, project_root: Path) -> None:
         forge_dir = project_root / ".hephaestus_forge"
@@ -547,13 +547,13 @@ class ProjectScaffold:
         template = Path(__file__).resolve().parent / "forge_config" / "cloud.yaml"
         if template.exists():
             dest.write_text(template.read_text(encoding="utf-8"), encoding="utf-8")
-            self.console.print(f"  ✓ Written: {dest.relative_to(project_root)} (hard ceiling $15)")
+            self.console.print(f"  OK Written: {dest.relative_to(project_root)} (hard ceiling $15)")
         else:
             dest.write_text(
                 yaml.dump({"cloud": {"budget": {"hard_ceiling_usd": 15, "monthly_limit_usd": 15, "per_session_limit_usd": 15}}}),
                 encoding="utf-8",
             )
-            self.console.print(f"  ✓ Written: {dest.relative_to(project_root)}")
+            self.console.print(f"  OK Written: {dest.relative_to(project_root)}")
 
     def _write_persona(self, project_root: Path) -> None:
         forge_dir = project_root / ".hephaestus_forge"
@@ -655,7 +655,7 @@ class ProjectScaffold:
         """)
 
         persona_path.write_text(persona_content)
-        self.console.print(f"  ✓ Written: {persona_path.relative_to(project_root)}")
+        self.console.print(f"  OK Written: {persona_path.relative_to(project_root)}")
 
     def _write_skill_manifest(self, project_root: Path) -> None:
         forge_dir = project_root / ".hephaestus_forge"
@@ -828,7 +828,7 @@ class ProjectScaffold:
         }
 
         manifest_path.write_text(json.dumps(manifest, indent=2))
-        self.console.print(f"  ✓ Written: {manifest_path.relative_to(project_root)}")
+        self.console.print(f"  OK Written: {manifest_path.relative_to(project_root)}")
 
     def _write_constitution(self, project_root: Path) -> None:
         memory_dir = project_root / "ProjectMemory"
@@ -954,7 +954,7 @@ class ProjectScaffold:
         """)
 
         constitution_path.write_text(constitution)
-        self.console.print(f"  ✓ Written: {constitution_path.relative_to(project_root)}")
+        self.console.print(f"  OK Written: {constitution_path.relative_to(project_root)}")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -966,7 +966,7 @@ class ModelDownloader:
         self.console = console
 
     def verify_models(self, config: ForgeConfig, project_root: Path) -> bool:
-        self.console.print("\n[bold cyan]📦 Verifying models...[/bold cyan]")
+        self.console.print("\n[bold cyan]Verifying models...[/bold cyan]")
 
         models_dir = project_root / config.paths.agent_runtime_dir / "models"
         models_dir.mkdir(parents=True, exist_ok=True)
@@ -988,10 +988,10 @@ class ModelDownloader:
         for name, filename, source in required_models:
             model_path = models_dir / filename
             if model_path.exists():
-                self.console.print(f"  ✓ {name}: Found at {model_path.relative_to(project_root)}")
+                self.console.print(f"  OK {name}: Found at {model_path.relative_to(project_root)}")
             else:
                 missing.append((name, filename, source))
-                self.console.print(f"  ✗ {name}: MISSING ({filename})")
+                self.console.print(f"  X {name}: MISSING ({filename})")
 
         if missing:
             self.console.print("\n[bold yellow]Missing models detected.[/bold yellow]")
@@ -1000,7 +1000,7 @@ class ModelDownloader:
                 self.console.print(f"  • {name}: {source} -> {filename}")
             return False
 
-        self.console.print("[green]✓ All models verified[/green]")
+        self.console.print("[green]OK All models verified[/green]")
         return True
 
 
@@ -1017,7 +1017,7 @@ def _start_uvicorn_service(
 ) -> Optional[subprocess.Popen]:
     """Start a FastAPI service via uvicorn."""
     if not module_dir.exists():
-        console.print(f"[yellow]⚠ {name}: directory not found at {module_dir}[/yellow]")
+        console.print(f"[yellow](!) {name}: directory not found at {module_dir}[/yellow]")
         return None
 
     cmd = [
@@ -1028,7 +1028,7 @@ def _start_uvicorn_service(
     ]
     console.print(f"[dim]Starting {name}: {' '.join(cmd)}[/dim]")
     proc = subprocess.Popen(cmd, cwd=str(module_dir))
-    console.print(f"[green]✓ {name} started on {host}:{port}[/green]")
+    console.print(f"[green]OK {name} started on {host}:{port}[/green]")
     return proc
 
 
@@ -1067,10 +1067,10 @@ def _start_llama_server(
 
         console.print(f"[dim]Starting llama-server: {' '.join(cmd)}[/dim]")
         proc = subprocess.Popen(cmd, cwd=str(runtime_dir))
-        console.print(f"[green]✓ llama-server started on {host}:{port}[/green]")
+        console.print(f"[green]OK llama-server started on {host}:{port}[/green]")
         return proc
 
-    console.print(f"[yellow]⚠ LLM model not found: {model_path}[/yellow]")
+    console.print(f"[yellow](!) LLM model not found: {model_path}[/yellow]")
     console.print("[dim]Run: forge gpu-dev --download to fetch Qwen2.5-Coder-7B[/dim]")
     return None
 
@@ -1106,7 +1106,7 @@ def init(
 
     if project_root.exists():
         if not force:
-            console.print(f"[red]✗ Project directory exists: {project_root}[/red]")
+            console.print(f"[red]X Project directory exists: {project_root}[/red]")
             console.print("Use --force to overwrite")
             raise typer.Exit(1)
         shutil.rmtree(project_root)
@@ -1178,7 +1178,7 @@ def compile(
     forge_dir = project_root / ".hephaestus_forge"
     
     if not forge_dir.exists():
-        console.print(f"[red]✗ Not a Hephaestus project: {project_root}[/red]")
+        console.print(f"[red]X Not a Hephaestus project: {project_root}[/red]")
         raise typer.Exit(1)
     
     # Load config
@@ -1187,12 +1187,12 @@ def compile(
     
     ue_path = Path(config.system.ue_path) if config.system.ue_path else None
     if not ue_path or not ue_path.exists():
-        console.print("[red]✗ UE5.8 not found. Set UE_PATH in config.yaml[/red]")
+        console.print("[red]X UE5.8 not found. Set UE_PATH in config.yaml[/red]")
         raise typer.Exit(1)
     
     plugin_dir = project_root / config.paths.ue_plugin_dir
     if not plugin_dir.exists():
-        console.print(f"[red]✗ Plugin source not found: {plugin_dir}[/red]")
+        console.print(f"[red]X Plugin source not found: {plugin_dir}[/red]")
         raise typer.Exit(1)
     
     console.print(Panel.fit(
@@ -1208,13 +1208,13 @@ def compile(
         ubt_path = ue_path / "Engine" / "Binaries" / "DotNET" / "UnrealBuildTool" / "UnrealBuildTool.exe"
     
     if not ubt_path.exists():
-        console.print("[red]✗ UnrealBuildTool not found[/red]")
+        console.print("[red]X UnrealBuildTool not found[/red]")
         raise typer.Exit(1)
     
     # Build command — compile plugin against the project's .uproject
     uproject_files = list(project_root.glob("*.uproject"))
     if not uproject_files:
-        console.print(f"[red]✗ No .uproject found in {project_root}[/red]")
+        console.print(f"[red]X No .uproject found in {project_root}[/red]")
         raise typer.Exit(1)
     uproject = uproject_files[0]
     project_name = uproject.stem
@@ -1253,13 +1253,13 @@ def compile(
         elapsed = time.time() - start_time
     
     if result.returncode == 0:
-        console.print(f"[green]✓ Compilation successful ({elapsed:.1f}s)[/green]")
+        console.print(f"[green]OK Compilation successful ({elapsed:.1f}s)[/green]")
         
         # Check for hot reload
         if hot_reload:
             console.print("[yellow]Hot reload not yet implemented[/yellow]")
     else:
-        console.print(f"[red]✗ Compilation failed ({elapsed:.1f}s)[/red]")
+        console.print(f"[red]X Compilation failed ({elapsed:.1f}s)[/red]")
         console.print(result.stdout)
         console.print(result.stderr)
         raise typer.Exit(1)
@@ -1284,7 +1284,7 @@ def deploy(
     forge_dir = project_root / ".hephaestus_forge"
     
     if not forge_dir.exists():
-        console.print(f"[red]✗ Not a Hephaestus project: {project_root}[/red]")
+        console.print(f"[red]X Not a Hephaestus project: {project_root}[/red]")
         raise typer.Exit(1)
     
     # Load config
@@ -1293,7 +1293,7 @@ def deploy(
     
     ue_path = Path(config.system.ue_path) if config.system.ue_path else None
     if not ue_path or not ue_path.exists():
-        console.print("[red]✗ UE5.8 not found. Set UE_PATH in config.yaml[/red]")
+        console.print("[red]X UE5.8 not found. Set UE_PATH in config.yaml[/red]")
         raise typer.Exit(1)
     
     nim_msg = f"\nLLM Backend: [cyan]NVIDIA NIM ({nim_model})[/cyan]" if use_nim else ""
@@ -1310,10 +1310,10 @@ def deploy(
     # Validate NIM requirements
     if use_nim:
         if not CLOUD_AVAILABLE:
-            console.print("[red]✗ Cloud modules not available. Install dependencies.[/red]")
+            console.print("[red]X Cloud modules not available. Install dependencies.[/red]")
             raise typer.Exit(1)
         if not os.getenv("NVIDIA_API_KEY"):
-            console.print("[red]✗ NVIDIA_API_KEY environment variable required for NIM.[/red]")
+            console.print("[red]X NVIDIA_API_KEY environment variable required for NIM.[/red]")
             raise typer.Exit(1)
     
     # Start agent runtime services if not disabled
@@ -1328,7 +1328,7 @@ def deploy(
             # Initialize NIM client with budget tracking
             budget_mgr = BudgetManager(config_path)
             nim_client = NIMClient(budget_mgr)
-            console.print(f"[green]✓ NIM client initialized: {nim_model}[/green]")
+            console.print(f"[green]OK NIM client initialized: {nim_model}[/green]")
         else:
             llama_config = config.agent_runtime.get("llama_server", {})
             if llama_config.get("enabled", True):
@@ -1350,7 +1350,7 @@ def deploy(
                 if proc:
                     processes.append(("tts-server", proc))
             else:
-                console.print(f"[yellow]⚠ TTS server not found in {tts_dir}[/yellow]")
+                console.print(f"[yellow](!) TTS server not found in {tts_dir}[/yellow]")
         
         vision_config = config.agent_runtime.get("vision_stack", {})
         if vision_config.get("enabled", True):
@@ -1366,7 +1366,7 @@ def deploy(
                 if proc:
                     processes.append(("vision-stack", proc))
             else:
-                console.print(f"[yellow]⚠ vision_processor.py not found in {vision_dir}[/yellow]")
+                console.print(f"[yellow](!) vision_processor.py not found in {vision_dir}[/yellow]")
         
         dcc_config = config.agent_runtime.get("dcc_bridge", {})
         if dcc_config.get("enabled", True):
@@ -1379,20 +1379,20 @@ def deploy(
                 console.print(f"[dim]Starting dcc-bridge: {' '.join(cmd)}[/dim]")
                 proc = subprocess.Popen(cmd, cwd=str(dcc_dir), env=env)
                 processes.append(("dcc-bridge", proc))
-                console.print(f"[green]✓ dcc-bridge started on {env['DCC_BRIDGE_HOST']}:{env['DCC_BRIDGE_PORT']}[/green]")
+                console.print(f"[green]OK dcc-bridge started on {env['DCC_BRIDGE_HOST']}:{env['DCC_BRIDGE_PORT']}[/green]")
             else:
-                console.print(f"[yellow]⚠ DCC bridge not found in {dcc_dir}[/yellow]")
+                console.print(f"[yellow](!) DCC bridge not found in {dcc_dir}[/yellow]")
     
     # Launch UE
     ue_editor = ue_path / "Engine" / "Binaries" / "Win64" / "UnrealEditor.exe"
     if not ue_editor.exists():
-        console.print("[red]✗ UnrealEditor.exe not found[/red]")
+        console.print("[red]X UnrealEditor.exe not found[/red]")
         raise typer.Exit(1)
     
     # Find project file
     project_files = list(project_root.glob("*.uproject"))
     if not project_files:
-        console.print("[red]✗ No .uproject file found in project root[/red]")
+        console.print("[red]X No .uproject file found in project root[/red]")
         raise typer.Exit(1)
     
     project_file = project_files[0]
@@ -1414,7 +1414,7 @@ def deploy(
         ue_proc = subprocess.Popen(ue_cmd, cwd=str(project_root))
         processes.append(("UnrealEditor", ue_proc))
         
-        console.print("[green]✓ UE launched successfully[/green]")
+        console.print("[green]OK UE launched successfully[/green]")
         console.print("[dim]Press Ctrl+C to stop all processes[/dim]")
         
         # Wait for UE process
@@ -1454,7 +1454,7 @@ def observe(
     forge_dir = project_root / ".hephaestus_forge"
 
     if not forge_dir.exists():
-        console.print(f"[red]✗ Not a Hephaestus project: {project_root}[/red]")
+        console.print(f"[red]X Not a Hephaestus project: {project_root}[/red]")
         raise typer.Exit(1)
 
     config_path = forge_dir / "config.yaml"
@@ -1634,7 +1634,7 @@ def _write_mission_control_fallback(dist_dir: Path, api: str) -> None:
     dist_dir.mkdir(parents=True, exist_ok=True)
     html = _MISSION_CONTROL_HTML.replace("__API_BASE__", api.rstrip("/"))
     (dist_dir / "index.html").write_text(html, encoding="utf-8")
-    console.print(f"[green]✓ Wrote static Mission Control → {dist_dir / 'index.html'}[/green]")
+    console.print(f"[green]OK Wrote static Mission Control -> {dist_dir / 'index.html'}[/green]")
 
 
 _MISSION_CONTROL_HTML = r"""<!DOCTYPE html>
@@ -1758,7 +1758,7 @@ const logEl = document.getElementById("log");
 const actorsEl = document.getElementById("actors");
 const viewport = document.getElementById("viewport");
 const viewportPlaceholder = document.getElementById("viewportPlaceholder");
-document.getElementById("apiLabel").textContent = API || (location.origin + " → UE :8765");
+document.getElementById("apiLabel").textContent = API || (location.origin + " -> UE :8765");
 
 function log(msg, data) {
   const line = typeof data === "undefined" ? msg : msg + " " + JSON.stringify(data, null, 0);
@@ -1987,7 +1987,7 @@ def command_cmd(
         payload = hcmd.spawn_mesh_json(mesh_path=mesh_path, location=(x, y, z))
     elif command == "world.destroy_actor":
         if not actor_path:
-            console.print("[red]✗ --actor required for world.destroy_actor[/red]")
+            console.print("[red]X --actor required for world.destroy_actor[/red]")
             raise typer.Exit(1)
         payload = hcmd.destroy_actor_json(actor_path)
     elif command == "world.list_actors":
@@ -2018,7 +2018,7 @@ def command_cmd(
             except json.JSONDecodeError:
                 pass
     except urllib.error.URLError as exc:
-        console.print(f"[red]✗ Remote API unreachable: {exc}[/red]")
+        console.print(f"[red]X Remote API unreachable: {exc}[/red]")
         console.print("[yellow]Start Play (PIE) in UE first. Look for: HephaestusRemoteApi: listening on http://127.0.0.1:8765[/yellow]")
         raise typer.Exit(1)
 
@@ -2064,7 +2064,7 @@ def agent_loop_cmd(
     use_llm = mode == "llm" or (mode == "auto" and llm.available)
     if mode == "llm" and not llm.available:
         console.print(
-            "[red]✗ --planner llm requires NVIDIA_API_KEY or HEPHAESTUS_LLM_API_KEY "
+            "[red]X --planner llm requires NVIDIA_API_KEY or HEPHAESTUS_LLM_API_KEY "
             "(Nemotron-3 via NIM), or a local --llm-url[/red]"
         )
         raise typer.Exit(1)
@@ -2105,7 +2105,7 @@ def agent_loop_cmd(
         health = client.health()
         console.print(f"[dim]health: {health}[/dim]")
     except Exception as exc:
-        console.print(f"[red]✗ Remote API unreachable: {exc}[/red]")
+        console.print(f"[red]X Remote API unreachable: {exc}[/red]")
         console.print("[yellow]Start Play (PIE) in UE first.[/yellow]")
         raise typer.Exit(1)
 
@@ -2151,7 +2151,7 @@ def smoke_spawn(
     try:
         from hephaestus.commands import build_spawn_actor_command, spawn_actor_json
     except Exception as exc:
-        console.print(f"[red]✗ Could not import command builder: {exc}[/red]")
+        console.print(f"[red]X Could not import command builder: {exc}[/red]")
         raise typer.Exit(1)
 
     payload = build_spawn_actor_command(class_path=class_path, location=(x, y, z))
@@ -2184,11 +2184,11 @@ def evolve(
     forge_dir = project_root / ".hephaestus_forge"
     
     if not forge_dir.exists():
-        console.print(f"[red]✗ Not a Hephaestus project: {project_root}[/red]")
+        console.print(f"[red]X Not a Hephaestus project: {project_root}[/red]")
         raise typer.Exit(1)
     
     if not skill and not file:
-        console.print("[red]✗ Must specify --skill or --file[/red]")
+        console.print("[red]X Must specify --skill or --file[/red]")
         raise typer.Exit(1)
     
     console.print(Panel.fit(
@@ -2201,7 +2201,7 @@ def evolve(
     # Load skill manifest
     manifest_path = forge_dir / "skill_manifest.json"
     if not manifest_path.exists():
-        console.print("[red]✗ skill_manifest.json not found[/red]")
+        console.print("[red]X skill_manifest.json not found[/red]")
         raise typer.Exit(1)
     
     with open(manifest_path) as f:
@@ -2229,7 +2229,7 @@ def evolve(
     console.print("[dim]Triggering recompile...[/dim]")
     # Would call compile with hot_reload=True
     
-    console.print("[green]✓ Evolution complete (stub)[/green]")
+    console.print("[green]OK Evolution complete (stub)[/green]")
 
 
 @app.command("nim-parallel")
@@ -2251,7 +2251,7 @@ def nim_parallel(
     Requires NVIDIA_API_KEY.
     """
     if not (os.environ.get("NVIDIA_API_KEY") or os.environ.get("HEPHAESTUS_LLM_API_KEY")):
-        console.print("[red]✗ Set NVIDIA_API_KEY (or HEPHAESTUS_LLM_API_KEY)[/red]")
+        console.print("[red]X Set NVIDIA_API_KEY (or HEPHAESTUS_LLM_API_KEY)[/red]")
         raise typer.Exit(1)
 
     try:
@@ -2286,14 +2286,14 @@ def nim_parallel(
     if result.lightning_error:
         console.print(f"[yellow]Lightning error:[/yellow] {result.lightning_error}")
     if not result.ok:
-        console.print("[red]✗ Both models failed[/red]")
+        console.print("[red]X Both models failed[/red]")
         raise typer.Exit(1)
 
     console.print(result.merged_markdown)
     if out:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(result.merged_markdown, encoding="utf-8")
-        console.print(f"[green]✓ Wrote[/green] {out}")
+        console.print(f"[green]OK Wrote[/green] {out}")
 
 
 @app.command("gpu-dev")
@@ -2329,13 +2329,13 @@ def gpu_dev(
         with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console) as progress:
             progress.add_task("Downloading Qwen2.5-Coder-7B Q4_K_M (~4.5GB)...", total=None)
             model_path = mgr.ensure_model()
-        console.print(f"[green]✓ Model ready:[/green] {model_path}")
+        console.print(f"[green]OK Model ready:[/green] {model_path}")
     else:
         model_path = mgr.default_model_path()
 
     console.print("[cyan]Starting llama.cpp server on GPU...[/cyan]")
     mgr.start(model_path)
-    console.print(f"[green]✓ LLM server:[/green] http://{host}:{port}/v1")
+    console.print(f"[green]OK LLM server:[/green] http://{host}:{port}/v1")
 
     if serve_only:
         console.print("[dim]Serve-only mode. Ctrl+C to stop.[/dim]")
@@ -2391,7 +2391,7 @@ def gpu_train(
 
     scan = scanner.scan()
     if not scan.gpus:
-        console.print("[red]✗ No GPU detected — training requires CUDA[/red]")
+        console.print("[red]X No GPU detected — training requires CUDA[/red]")
         raise typer.Exit(1)
 
     console.print(Panel.fit(
@@ -2404,11 +2404,11 @@ def gpu_train(
 
     dataset_path = out_base / "hephaestus_code.jsonl"
     n = build_code_dataset(repo_root, dataset_path)
-    console.print(f"[green]✓ Dataset:[/green] {n} examples -> {dataset_path}")
+    console.print(f"[green]OK Dataset:[/green] {n} examples -> {dataset_path}")
 
     if mode == "embed":
         index_dir = embed_codebase(repo_root, out_base / "embeddings")
-        console.print(f"[green]✓ Embeddings saved:[/green] {index_dir}")
+        console.print(f"[green]OK Embeddings saved:[/green] {index_dir}")
         return
 
     if mode != "lora":
@@ -2432,7 +2432,7 @@ def gpu_train(
         console.print("[yellow]Use --mode embed (works on Brev) or forge gpu-dev for inference.[/yellow]")
         raise typer.Exit(1)
 
-    console.print(f"[green]✓ LoRA adapter saved:[/green] {adapter_dir}")
+    console.print(f"[green]OK LoRA adapter saved:[/green] {adapter_dir}")
     console.print(
         "[dim]Use the adapter with transformers+peft for inference, or merge and export to GGUF later.[/dim]"
     )
@@ -2534,7 +2534,7 @@ def cloud(
         forge cloud --provider nim --task "quick material variants"
     """
     if not CLOUD_AVAILABLE:
-        console.print("[red]✗ Cloud modules not available. Check imports.[/red]")
+        console.print("[red]X Cloud modules not available. Check imports.[/red]")
         raise typer.Exit(1)
 
     HARD_MAX = 15.0
@@ -2542,7 +2542,7 @@ def cloud(
         console.print(f"[yellow]Budget ${budget:.2f} clamped to ${HARD_MAX:.2f}[/yellow]")
         budget = HARD_MAX
     if budget <= 0:
-        console.print("[red]✗ Budget must be > 0[/red]")
+        console.print("[red]X Budget must be > 0[/red]")
         raise typer.Exit(1)
 
     project_root = project_path or Path.cwd()
@@ -2550,7 +2550,7 @@ def cloud(
     config_path = forge_dir / "config.yaml"
 
     if not forge_dir.exists():
-        console.print(f"[red]✗ Not a Hephaestus project: {project_root}[/red]")
+        console.print(f"[red]X Not a Hephaestus project: {project_root}[/red]")
         raise typer.Exit(1)
 
     cloud_yaml = forge_dir / "cloud.yaml"
@@ -2578,14 +2578,14 @@ def cloud(
     ))
 
     if status["monthly"]["remaining"] <= 0:
-        console.print("[red]✗ Budget exhausted under $15 hard ceiling. Cannot launch.[/red]")
+        console.print("[red]X Budget exhausted under $15 hard ceiling. Cannot launch.[/red]")
         raise typer.Exit(1)
 
     session_id = f"heph-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     try:
         session = budget_mgr.start_session(session_id, budget)
     except BudgetExceededError as e:
-        console.print(f"[red]✗ {e}[/red]")
+        console.print(f"[red]X {e}[/red]")
         raise typer.Exit(1)
     console.print(f"[green]Session started: {session_id} (Budget: ${session.limit_usd:.2f})[/green]")
 
@@ -2609,7 +2609,7 @@ def cloud(
     elif provider == "bitdeer":
         h = hours or 1.0
         if not budget_mgr.can_afford(provider, instance, h, spot):
-            console.print(f"[red]✗ Cannot afford {provider} {instance} under $15 ceiling[/red]")
+            console.print(f"[red]X Cannot afford {provider} {instance} under $15 ceiling[/red]")
             raise typer.Exit(1)
         asyncio.run(_run_bitdeer_session(instance, gpus, h, spot, deploy, detach, budget_mgr, cfg, project_root))
     elif provider == "runpod":
@@ -2691,7 +2691,7 @@ async def _run_brev_session(
     """Launch Brev L40S (or configured GPU) with watchdog auto-stop <= $15."""
     brev_cfg = next((p for p in cfg.get("cloud", {}).get("providers", []) if p["name"] == "brev"), None)
     if not brev_cfg:
-        console.print("[red]✗ brev provider missing from cloud config[/red]")
+        console.print("[red]X brev provider missing from cloud config[/red]")
         raise typer.Exit(1)
 
     conf = brev_cfg.get("config", {})
@@ -2710,7 +2710,7 @@ async def _run_brev_session(
 
     if not BrevClient.brev_available():
         console.print(
-            "[red]✗ Brev CLI not installed.[/red]\n"
+            "[red]X Brev CLI not installed.[/red]\n"
             "  Docs: https://docs.nvidia.com/brev/getting-started/quickstart\n"
             "  Then: [bold]brev login[/bold]"
         )
@@ -2720,7 +2720,7 @@ async def _run_brev_session(
     if hours is not None:
         max_h = min(max_h, hours)
     if max_h < 0.25:
-        console.print(f"[red]✗ Not enough budget for a useful session at ${rate:.2f}/hr[/red]")
+        console.print(f"[red]X Not enough budget for a useful session at ${rate:.2f}/hr[/red]")
         raise typer.Exit(1)
 
     console.print(

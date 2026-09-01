@@ -1,6 +1,6 @@
 # Copyright (c) 2024 HephaestusForge. All Rights Reserved.
 """
-Nemotron-3 planner for the UE observe→act loop (NVIDIA NIM OpenAI-compatible API).
+Nemotron-3 planner for the UE observe->act loop (NVIDIA NIM OpenAI-compatible API).
 
 Default model: nvidia/nemotron-3-ultra-550b-a55b @ https://integrate.api.nvidia.com/v1
 Auth: NVIDIA_API_KEY or HEPHAESTUS_LLM_API_KEY
