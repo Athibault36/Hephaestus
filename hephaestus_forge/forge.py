@@ -1581,6 +1581,7 @@ def adopt(
     project_path: Annotated[Path, typer.Argument(help="Existing UE project root (.uproject folder)")],
     name: Annotated[Optional[str], typer.Option("--name", "-n", help="Display name in desktop app")] = None,
     skip_plugin: Annotated[bool, typer.Option("--skip-plugin", help="Do not copy plugin template")] = False,
+    build_mc: Annotated[bool, typer.Option("--build-mc", help="npm build React Mission Control after adopt")] = False,
 ):
     """
     Adopt an existing UE project as a Hephaestus target (factory stays in the git repo).
@@ -1649,6 +1650,17 @@ def adopt(
         if check.name in ("ue_pie", "bridge_template", "nim_api_key"):
             style = "green" if check.ok else "yellow"
             console.print(f"[{style}]  {check.name}:[/] {check.detail}")
+
+    if build_mc:
+        try:
+            from mission_control_build import build_mission_control
+        except ImportError:
+            from hephaestus_forge.mission_control_build import build_mission_control
+        try:
+            dist = build_mission_control(project_root)
+            console.print(f"[green]OK[/green] Mission Control built -> {dist}")
+        except Exception as exc:
+            console.print(f"[yellow]WARN[/yellow] build-mc skipped: {exc}")
 
 
 @app.command()
@@ -1847,6 +1859,7 @@ _MISSION_CONTROL_HTML = r"""<!DOCTYPE html>
       <button id="btnDestroy">Destroy</button>
       <button id="btnPlayIdle">Play idle</button>
       <button id="btnPlayWalk">Play walk</button>
+      <button id="btnPlayRun">Play run</button>
       <button id="btnFrameActor">Frame actor</button>
     </div>
     <h2 style="margin-top:1rem">Outliner</h2>
@@ -2403,6 +2416,7 @@ async function playLocomotionOnSelected(mode) {
 }
 document.getElementById("btnPlayIdle").onclick = () => playLocomotionOnSelected("idle");
 document.getElementById("btnPlayWalk").onclick = () => playLocomotionOnSelected("walk");
+document.getElementById("btnPlayRun").onclick = () => playLocomotionOnSelected("run");
 async function frameSelectedActor() {
   const path = document.getElementById("actorPath").value.trim();
   if (!path) { showToast("Select an actor in the outliner first"); return; }
@@ -2475,6 +2489,22 @@ async function listPaths() {
       document.getElementById("actorPath").value = path;
       actorsEl.querySelectorAll(".actor.selected").forEach(a => a.classList.remove("selected"));
       el.classList.add("selected");
+    };
+    el.oncontextmenu = (ev) => {
+      ev.preventDefault();
+      document.getElementById("actorPath").value = path;
+      actorsEl.querySelectorAll(".actor.selected").forEach(a => a.classList.remove("selected"));
+      el.classList.add("selected");
+      const menu = [
+        { label: "Play idle", fn: () => playLocomotionOnSelected("idle") },
+        { label: "Play walk", fn: () => playLocomotionOnSelected("walk") },
+        { label: "Frame", fn: () => frameSelectedActor() },
+        { label: "Destroy", fn: () => postCommand({ command: "world.destroy_actor", params: { actor_path: path } }) },
+      ];
+      const pick = window.prompt("Actor action: idle | walk | frame | destroy", "idle");
+      const action = (pick || "").toLowerCase();
+      const hit = menu.find(m => m.label.toLowerCase().includes(action));
+      if (hit) hit.fn();
     };
   });
   return paths;
@@ -3759,6 +3789,28 @@ def health(
         label = "OK" if check.ok else ("WARN" if not check.blocker else "BLOCKED")
         console.print(f"[{style}]{label}[/] {check.name}: {check.detail}")
     raise typer.Exit(0 if report.ready else 1)
+
+
+@app.command("e2e")
+def e2e_check_cmd(
+    project_path: Annotated[Optional[Path], typer.Argument(help="Adopted UE project root")] = None,
+    api: Annotated[str, typer.Option("--api", help="UE Remote API base URL")] = "http://127.0.0.1:8765",
+    sync: Annotated[bool, typer.Option("--sync", help="Run forge sync-plugin before checks")] = False,
+    offline: Annotated[bool, typer.Option("--offline", help="Skip live PIE command probes")] = False,
+):
+    """Production operator E2E checklist (template sync + optional live PIE probes)."""
+    from e2e_check import run_e2e_check
+
+    project_root = (project_path or Path.cwd()).resolve()
+    report = run_e2e_check(project_root, remote_api=api, sync=sync, live=not offline)
+    for step in report.steps:
+        style = "green" if step.ok else "red"
+        console.print(f"[{style}]{'OK' if step.ok else 'FAIL'}[/] {step.name}: {step.detail}")
+    raise typer.Exit(0 if report.ok else 2)
+
+
+def app_entry() -> None:
+    app()
 
 
 if __name__ == "__main__":

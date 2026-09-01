@@ -719,9 +719,17 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleWorldCommand(const FSt
     else if (Action == TEXT("list_actors"))
     {
         FString ClassFilter;
+        bool bIncludeDetails = false;
+        int32 DetailLimit = 12;
         if (Params.IsValid())
         {
             Params->TryGetStringField(TEXT("class_path"), ClassFilter);
+            Params->TryGetBoolField(TEXT("include_details"), bIncludeDetails);
+            double LimitNum = 12.0;
+            if (Params->TryGetNumberField(TEXT("detail_limit"), LimitNum))
+            {
+                DetailLimit = FMath::Clamp(static_cast<int32>(LimitNum), 1, 40);
+            }
         }
         TArray<FString> Paths = WorldSubsystem->ListActors(ClassFilter);
         TSharedRef<FJsonObject> ResultObj = MakeShared<FJsonObject>();
@@ -732,6 +740,30 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleWorldCommand(const FSt
         }
         ResultObj->SetArrayField(TEXT("actors"), Arr);
         ResultObj->SetNumberField(TEXT("count"), Paths.Num());
+        if (bIncludeDetails)
+        {
+            TArray<TSharedPtr<FJsonValue>> DetailArr;
+            int32 Added = 0;
+            for (const FString& Path : Paths)
+            {
+                if (Added >= DetailLimit)
+                {
+                    break;
+                }
+                FString DetailJson;
+                if (WorldSubsystem->DescribeActor(Path, DetailJson) && !DetailJson.IsEmpty())
+                {
+                    TSharedPtr<FJsonObject> DetailObj;
+                    TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(DetailJson);
+                    if (FJsonSerializer::Deserialize(Reader, DetailObj) && DetailObj.IsValid())
+                    {
+                        DetailArr.Add(MakeShared<FJsonValueObject>(DetailObj));
+                        ++Added;
+                    }
+                }
+            }
+            ResultObj->SetArrayField(TEXT("actor_details"), DetailArr);
+        }
         FString ResultJSON;
         TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&ResultJSON);
         FJsonSerializer::Serialize(ResultObj, Writer);
@@ -1094,7 +1126,16 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleAnimationCommand(const
                 Transform.SetRotation(Rot.Quaternion());
             }
         }
-        AActor* Actor = AnimationSubsystem->SpawnSkeletalMeshActor(MeshPath, Transform);
+        FString AnimBP;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("anim_blueprint_path"), AnimBP);
+            if (AnimBP.IsEmpty())
+            {
+                Params->TryGetStringField(TEXT("anim_bp_path"), AnimBP);
+            }
+        }
+        AActor* Actor = AnimationSubsystem->SpawnSkeletalMeshActor(MeshPath, Transform, AnimBP);
         if (!Actor)
         {
             return MakeErrorResult(TEXT(""), TEXT("Failed to spawn skeletal mesh actor"));
@@ -1140,7 +1181,16 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleAnimationCommand(const
                 Transform.SetRotation(Rot.Quaternion());
             }
         }
-        AActor* Actor = AnimationSubsystem->SpawnLocomotionCharacter(MeshPath, Transform);
+        FString AnimBP;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("anim_blueprint_path"), AnimBP);
+            if (AnimBP.IsEmpty())
+            {
+                Params->TryGetStringField(TEXT("anim_bp_path"), AnimBP);
+            }
+        }
+        AActor* Actor = AnimationSubsystem->SpawnLocomotionCharacter(MeshPath, Transform, AnimBP);
         if (!Actor)
         {
             return MakeErrorResult(TEXT(""), TEXT("Failed to spawn locomotion character"));
@@ -1398,6 +1448,12 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleSequenceCommand(
         Params->TryGetNumberField(TEXT("duration"), Duration);
         FString ActorPath;
         Params->TryGetStringField(TEXT("actor_path"), ActorPath);
+        FString LookAtActor;
+        Params->TryGetStringField(TEXT("look_at_actor"), LookAtActor);
+        if (LookAtActor.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("look_at_actor_path"), LookAtActor);
+        }
         FVector ActorTarget = FVector::ZeroVector;
         ParseVectorField(Params, TEXT("actor_target"), ActorTarget);
         if (ActorTarget.IsNearlyZero())
@@ -1409,7 +1465,7 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleSequenceCommand(
             return MakeErrorResult(TEXT(""), TEXT("target location required for sequence.create_shot"));
         }
         const bool bOk = SequenceSubsystem->CreateCameraShot(
-            TargetLocation, TargetRotation, static_cast<float>(Duration), ActorPath, ActorTarget);
+            TargetLocation, TargetRotation, static_cast<float>(Duration), ActorPath, ActorTarget, LookAtActor);
         return bOk
             ? MakeSuccessResult(
                   TEXT(""),

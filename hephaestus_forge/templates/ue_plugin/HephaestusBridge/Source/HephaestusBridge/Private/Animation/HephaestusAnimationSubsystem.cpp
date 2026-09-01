@@ -4,6 +4,7 @@
 #include "HephaestusBridge.h"
 #include "World/HephaestusWorldSubsystem.h"
 #include "Engine/World.h"
+#include "Animation/AnimInstance.h"
 #include "Engine/SkeletalMesh.h"
 #include "Animation/SkeletalMeshActor.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -93,7 +94,23 @@ bool UHephaestusAnimationSubsystem::LiveLinkConnect(const FString& SubjectName, 
 	return false;
 }
 
-AActor* UHephaestusAnimationSubsystem::SpawnSkeletalMeshActor(const FString& MeshPath, const FTransform& Transform)
+static void ApplyAnimBlueprint(USkeletalMeshComponent* Comp, const FString& AnimBlueprintPath)
+{
+	if (!Comp || AnimBlueprintPath.IsEmpty())
+	{
+		return;
+	}
+	if (UClass* AnimClass = LoadClass<UAnimInstance>(nullptr, *AnimBlueprintPath))
+	{
+		Comp->SetAnimationMode(EAnimationMode::AnimationBlueprint);
+		Comp->SetAnimInstanceClass(AnimClass);
+	}
+}
+
+AActor* UHephaestusAnimationSubsystem::SpawnSkeletalMeshActor(
+	const FString& MeshPath,
+	const FTransform& Transform,
+	const FString& AnimBlueprintPath)
 {
 	UWorld* World = ResolveWorld();
 	if (!World)
@@ -120,6 +137,7 @@ AActor* UHephaestusAnimationSubsystem::SpawnSkeletalMeshActor(const FString& Mes
 		if (USkeletalMeshComponent* Comp = Actor->GetSkeletalMeshComponent())
 		{
 			Comp->SetSkeletalMesh(Mesh);
+			ApplyAnimBlueprint(Comp, AnimBlueprintPath);
 		}
 	}
 	else if (!ResolvedPath.Contains(TEXT(".")))
@@ -130,6 +148,7 @@ AActor* UHephaestusAnimationSubsystem::SpawnSkeletalMeshActor(const FString& Mes
 			if (USkeletalMeshComponent* Comp = Actor->GetSkeletalMeshComponent())
 			{
 				Comp->SetSkeletalMesh(Mesh);
+				ApplyAnimBlueprint(Comp, AnimBlueprintPath);
 			}
 		}
 		else
@@ -171,7 +190,10 @@ static TArray<FString> LocomotionCandidates(const FString& Mode)
 	};
 }
 
-AActor* UHephaestusAnimationSubsystem::SpawnLocomotionCharacter(const FString& MeshPath, const FTransform& Transform)
+AActor* UHephaestusAnimationSubsystem::SpawnLocomotionCharacter(
+	const FString& MeshPath,
+	const FTransform& Transform,
+	const FString& AnimBlueprintPath)
 {
 	UWorld* World = ResolveWorld();
 	if (!World)
@@ -208,6 +230,7 @@ AActor* UHephaestusAnimationSubsystem::SpawnLocomotionCharacter(const FString& M
 		}
 		Comp->SetRelativeLocation(FVector(0.f, 0.f, -90.f));
 		Comp->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
+		ApplyAnimBlueprint(Comp, AnimBlueprintPath);
 	}
 
 	return Character;

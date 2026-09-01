@@ -555,6 +555,12 @@ class VisionLLMPlanner:
             return action
         except Exception as exc:
             self.last_error = str(exc)
+            if _vision_caption_enabled():
+                return AgentAction(
+                    kind="llm_error",
+                    reason=f"DeepSeek planner failed (vision required): {exc}",
+                    command={"command": "world.list_actors", "params": {}},
+                )
             if not self.available:
                 fallback = decide_action(
                     snapshot, self.fallback_rng, goal=self.goal, asset_hints=self.asset_hints,

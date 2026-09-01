@@ -235,6 +235,29 @@ def _pick_anim_path(goal: str, asset_hints: Optional[list[str]]) -> Optional[str
     return None
 
 
+def _creature_keywords(goal: str) -> list[str]:
+    words = ("dog", "cat", "wolf", "horse", "bird", "creature", "dragon", "fox", "character")
+    goal_l = (goal or "").lower()
+    return [w for w in words if w in goal_l]
+
+
+def _pick_creature_spawn(goal: str, asset_hints: Optional[list[str]]) -> Optional[str]:
+    if not _creature_keywords(goal):
+        return None
+    hints = list(asset_hints or [])
+    creatures = _creature_keywords(goal)
+    for path in hints:
+        blob = path.lower()
+        if any(c in blob for c in creatures) and (
+            "skeletalmesh" in blob or "/sk_" in blob or path.endswith(".skeletalmesh")
+        ):
+            return path
+    for path in hints:
+        if "SkeletalMesh" in path or "/SK_" in path:
+            return path
+    return None
+
+
 def decide_action(
     snapshot: WorldSnapshot,
     rng: random.Random,
@@ -245,6 +268,23 @@ def decide_action(
     view = snapshot.view or {}
     x, y, z = _camera_spawn_xyz(view, rng)
     asset_path = _pick_asset_path(goal, asset_hints)
+    creature_mesh = _pick_creature_spawn(goal, asset_hints)
+    if creature_mesh and snapshot.skeletal < 1 and snapshot.lights >= 1:
+        return AgentAction(
+            kind="spawn_creature",
+            reason=f"Heuristic spawn creature mesh {creature_mesh} in view",
+            command={
+                "command": "animation.spawn_character",
+                "params": {
+                    "mesh_path": creature_mesh,
+                    "transform": {
+                        "location": {"x": x, "y": y, "z": z},
+                        "rotation": {"pitch": 0.0, "yaw": float(rng.randint(0, 45)), "roll": 0.0},
+                        "scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+                    },
+                },
+            },
+        )
 
     if asset_path and snapshot.lights < 1:
         return AgentAction(
@@ -372,6 +412,22 @@ def decide_action(
         )
 
     if any(w in goal_l for w in ("jog", "run forward", "walk forward", "move forward")):
+        skel_for_move = _pick_skeletal_path(snapshot, goal)
+        anim_live = any(
+            bool(d.get("anim_playing"))
+            for d in (snapshot.actor_details or [])
+            if isinstance(d, dict)
+        )
+        if skel_for_move and not anim_live and any(w in goal_l for w in ("walk", "jog", "run")):
+            mode = "run" if "run" in goal_l else "walk"
+            return AgentAction(
+                kind="play_locomotion",
+                reason=f"Heuristic {mode} anim before pawn move",
+                command={
+                    "command": "animation.play_locomotion",
+                    "params": {"actor_path": skel_for_move, "mode": mode, "loop": True},
+                },
+            )
         return AgentAction(
             kind="apply_move",
             reason="Heuristic jog forward toward gameplay goal",
@@ -395,16 +451,20 @@ def decide_action(
             yaw = -45.0
         elif "right" in goal_l:
             yaw = 45.0
+        skel_frame = _pick_skeletal_path(snapshot, goal)
+        shot_params: dict[str, Any] = {
+            "location": {"x": cam_x, "y": cam_y, "z": cam_z},
+            "rotation": {"pitch": -10.0, "yaw": yaw, "roll": 0.0},
+            "duration": 3.0,
+        }
+        if skel_frame:
+            shot_params["look_at_actor"] = skel_frame
         return AgentAction(
             kind="create_shot",
             reason="Heuristic cinematic camera shot for framing goal",
             command={
                 "command": "sequence.create_shot",
-                "params": {
-                    "location": {"x": cam_x, "y": cam_y, "z": cam_z},
-                    "rotation": {"pitch": -10.0, "yaw": yaw, "roll": 0.0},
-                    "duration": 3.0,
-                },
+                "params": shot_params,
             },
         )
 
@@ -495,32 +555,42 @@ class ObserveActLoop:
         except urllib.error.HTTPError:
             frame_bytes = 0
 
-        listed = self.client.command({"command": "world.list_actors", "params": {}})
+        listed = self.client.command({
+            "command": "world.list_actors",
+            "params": {"include_details": True, "detail_limit": 12},
+        })
         paths = _parse_actor_paths(listed)
         lights, meshes, skeletal = summarize_actors(paths)
         actor_details: list[dict[str, Any]] = []
-        for path in paths:
-            if not any(
-                tag in path
-                for tag in (
-                    "PointLight",
-                    "StaticMeshActor",
-                    "SkeletalMeshActor",
-                    "SpotLight",
-                    "SimAgentCharacter",
-                    "Character",
+        inner = _parse_result_json(listed)
+        raw_details = inner.get("actor_details") or []
+        if isinstance(raw_details, list):
+            for item in raw_details:
+                if isinstance(item, dict):
+                    actor_details.append(item)
+        if not actor_details:
+            for path in paths:
+                if not any(
+                    tag in path
+                    for tag in (
+                        "PointLight",
+                        "StaticMeshActor",
+                        "SkeletalMeshActor",
+                        "SpotLight",
+                        "SimAgentCharacter",
+                        "Character",
+                    )
+                ):
+                    continue
+                if len(actor_details) >= 10:
+                    break
+                detail_res = self.client.command(
+                    {"command": "world.get_actor", "params": {"actor_path": path}}
                 )
-            ):
-                continue
-            if len(actor_details) >= 10:
-                break
-            detail_res = self.client.command(
-                {"command": "world.get_actor", "params": {"actor_path": path}}
-            )
-            if detail_res.get("success"):
-                detail = _parse_result_json(detail_res)
-                if detail:
-                    actor_details.append(detail)
+                if detail_res.get("success"):
+                    detail = _parse_result_json(detail_res)
+                    if detail:
+                        actor_details.append(detail)
         view = {}
         view_res = self.client.command({"command": "world.get_view", "params": {}})
         if view_res.get("success"):

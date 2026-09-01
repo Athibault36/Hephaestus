@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import urllib.error
 import urllib.request
@@ -174,7 +175,61 @@ def _probe_bridge_template(project_root: Optional[Path]) -> HealthCheck:
         False,
         f"Plugin v{installed} != factory template v{BRIDGE_VERSION} — run forge sync-plugin and rebuild",
         blocker=False,
+        )
+
+
+def _post_command(remote_api: str, payload: dict, timeout: float = 3.0) -> dict:
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        remote_api.rstrip("/") + "/v1/command",
+        data=data,
+        method="POST",
+        headers={"Content-Type": "application/json"},
     )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8") or "{}")
+
+
+def _probe_bridge_capabilities(remote_api: str) -> HealthCheck:
+    """Verify v0.1.1+ verbs exist on the live PIE plugin (not just health version string)."""
+    try:
+        loco = _post_command(
+            remote_api,
+            {"command": "animation.play_locomotion", "params": {}},
+        )
+        err = str(loco.get("error") or "").lower()
+        if "unknown" in err or "unrecognized" in err or "not supported" in err:
+            return HealthCheck(
+                "bridge_capabilities",
+                False,
+                "PIE plugin missing animation.play_locomotion — forge sync-plugin <target> and rebuild",
+                blocker=False,
+            )
+        seq = _post_command(
+            remote_api,
+            {"command": "sequence.create_shot", "params": {"location": {"x": 0, "y": 0, "z": 1}}},
+        )
+        err2 = str(seq.get("error") or "").lower()
+        if "unknown" in err2 or "unrecognized" in err2:
+            return HealthCheck(
+                "bridge_capabilities",
+                False,
+                "PIE plugin missing sequence.create_shot — rebuild HephaestusBridge",
+                blocker=False,
+            )
+        return HealthCheck(
+            "bridge_capabilities",
+            True,
+            "Locomotion + sequencer commands registered on PIE plugin",
+            blocker=False,
+        )
+    except Exception as exc:
+        return HealthCheck(
+            "bridge_capabilities",
+            False,
+            f"Could not probe bridge commands ({exc})",
+            blocker=False,
+        )
 
 
 def run_preflight(
@@ -187,6 +242,7 @@ def run_preflight(
         _probe_project(project_root),
         _probe_bridge_template(project_root),
         _probe_ue(remote_api),
+        _probe_bridge_capabilities(remote_api),
         _probe_nim_key(),
         _probe_planner(),
         _probe_vision_mode(),

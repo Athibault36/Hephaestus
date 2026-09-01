@@ -228,8 +228,15 @@ def grade_goal(goal: str, snapshot: Any, memory: Optional[list[dict[str, Any]]] 
         missing.append(f"meshes {meshes}/{min_meshes}")
     if skeletal < min_skeletal:
         missing.append(f"skeletal {skeletal}/{min_skeletal}")
-    if ("playing" in goal_l or "walk" in goal_l or "anim" in goal_l or "idle" in goal_l) and min_skeletal > 0 and not anim_playing:
-        missing.append("animation not playing")
+    if ("playing" in goal_l or "walk" in goal_l or "anim" in goal_l or "idle" in goal_l or "run" in goal_l) and min_skeletal > 0 and not anim_playing:
+        if "idle" in goal_l:
+            missing.append("idle animation not playing")
+        elif "run" in goal_l:
+            missing.append("run animation not playing")
+        elif "walk" in goal_l:
+            missing.append("walk animation not playing")
+        else:
+            missing.append("animation not playing")
 
     if ("level sequence" in goal_l or ("sequence" in goal_l and "/game/" in goal_l)):
         played = any(

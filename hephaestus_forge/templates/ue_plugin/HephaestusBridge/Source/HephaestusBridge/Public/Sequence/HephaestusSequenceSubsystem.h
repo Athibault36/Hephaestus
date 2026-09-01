@@ -30,13 +30,14 @@ public:
 	 * Minimum-viable cinematic shot: animate camera to target view over DurationSeconds.
 	 * Optionally moves an actor into frame via animation subsystem.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Hephaestus|Sequence")
+    UFUNCTION(BlueprintCallable, Category = "Hephaestus|Sequence")
 	bool CreateCameraShot(
 		const FVector& TargetLocation,
 		const FRotator& TargetRotation,
 		float DurationSeconds = 4.f,
 		const FString& ActorPath = TEXT(""),
-		const FVector& ActorTargetLocation = FVector::ZeroVector);
+		const FVector& ActorTargetLocation = FVector::ZeroVector,
+		const FString& LookAtActorPath = TEXT(""));
 
 private:
 	UWorld* ResolveWorld() const;

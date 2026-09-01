@@ -184,7 +184,7 @@ def make_handler(
                     return True
                 try:
                     sys.path.insert(0, str(FORGE_ROOT))
-                    from agent_chat import run_chat
+                    from agent_orchestrator import run_agent
 
                     thoughts: list[dict] = []
 
@@ -203,7 +203,7 @@ def make_handler(
                         if thought_hub:
                             thought_hub.set_busy(True)
                         try:
-                            return run_chat(
+                            return run_agent(
                                 body.get("message", ""),
                                 project_root=project_root,
                                 remote_api=remote_api,

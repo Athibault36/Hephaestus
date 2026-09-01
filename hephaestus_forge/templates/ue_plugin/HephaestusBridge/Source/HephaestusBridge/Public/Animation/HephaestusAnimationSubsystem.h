@@ -51,7 +51,7 @@ public:
 
 	/** Spawn a skeletal mesh actor in PIE (default: Engine mannequin if path empty) */
 	UFUNCTION(BlueprintCallable, Category = "Hephaestus|Animation")
-	AActor* SpawnSkeletalMeshActor(const FString& MeshPath, const FTransform& Transform);
+	AActor* SpawnSkeletalMeshActor(const FString& MeshPath, const FTransform& Transform, const FString& AnimBlueprintPath = TEXT(""));
 
 	/** Play an anim sequence on a skeletal mesh actor by path */
 	UFUNCTION(BlueprintCallable, Category = "Hephaestus|Animation")
@@ -75,7 +75,7 @@ public:
 
 	/** Spawn a character with skeletal mesh (better for gameplay locomotion than mesh actor) */
 	UFUNCTION(BlueprintCallable, Category = "Hephaestus|Animation")
-	AActor* SpawnLocomotionCharacter(const FString& MeshPath, const FTransform& Transform);
+	AActor* SpawnLocomotionCharacter(const FString& MeshPath, const FTransform& Transform, const FString& AnimBlueprintPath = TEXT(""));
 
 	/** Stop animation on a skeletal actor or character */
 	UFUNCTION(BlueprintCallable, Category = "Hephaestus|Animation")

@@ -11,6 +11,8 @@ export function AgentConsole() {
     loadAgentHealth,
     preflightReady,
     plannerAvailable,
+    assetMatches,
+    exportSession,
   } = useMissionControlStore();
   const [input, setInput] = useState('');
   const [mode, setMode] = useState<'auto' | 'cinematic' | 'gameplay'>('auto');
@@ -63,6 +65,16 @@ export function AgentConsole() {
         </p>
       )}
 
+      {assetMatches.length > 0 && (
+        <div className="asset-chips">
+          {assetMatches.slice(0, 8).map((path) => (
+            <button key={path} type="button" className="asset-chip" title={path} onClick={() => setInput(`Spawn ${path} in front of the camera`)}>
+              {path.split('.').pop() || path}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="agent-input-row">
         <textarea
           value={input}
@@ -87,6 +99,9 @@ export function AgentConsole() {
           </button>
           <button type="button" disabled={agentBusy} onClick={() => onSend(true)}>
             New
+          </button>
+          <button type="button" disabled={agentBusy} onClick={() => exportSession()}>
+            Export
           </button>
         </div>
       </div>

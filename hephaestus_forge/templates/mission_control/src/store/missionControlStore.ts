@@ -101,6 +101,9 @@ interface MissionControlState {
   lastGrade: GradeSummary | null;
   preflightReady: boolean;
   plannerAvailable: boolean;
+  assetMatches: string[];
+  connectThoughtStream: () => void;
+  exportSession: () => Promise<void>;
   sendAgentChat: (message: string, opts?: { reset?: boolean; mode?: string }) => Promise<void>;
   loadAgentHealth: () => Promise<void>;
   loadSession: () => Promise<void>;
@@ -130,6 +133,7 @@ interface MissionControlState {
 }
 
 let healthTimer: number | undefined;
+let thoughtSource: EventSource | null = null;
 
 export const useMissionControlStore = create<MissionControlState>((set, get) => ({
   isConnected: false,
@@ -152,6 +156,7 @@ export const useMissionControlStore = create<MissionControlState>((set, get) => 
     tick();
     get().loadAgentHealth();
     get().loadSession();
+    get().connectThoughtStream();
     healthTimer = window.setInterval(tick, 4000);
   },
 
@@ -250,6 +255,38 @@ export const useMissionControlStore = create<MissionControlState>((set, get) => 
   preflightReady: false,
   plannerAvailable: false,
 
+  assetMatches: [],
+  connectThoughtStream: () => {
+    if (thoughtSource) return;
+    thoughtSource = new EventSource(`${API_BASE}/agent/thoughts/stream`);
+    thoughtSource.onmessage = (ev) => {
+      try {
+        const t = JSON.parse(ev.data);
+        if (t.content) {
+          get().addThought({
+            type: t.kind === 'error' ? 'error' : 'reflection',
+            content: String(t.content),
+            metadata: t.metadata,
+          });
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+  },
+
+  exportSession: async () => {
+    const res = await fetch(`${API_BASE}/agent/export`);
+    const data = await res.json();
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `hephaestus-session-${data.session?.id || 'export'}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+
   loadAgentHealth: async () => {
     try {
       const res = await fetch(`${API_BASE}/agent/health`);
@@ -310,6 +347,7 @@ export const useMissionControlStore = create<MissionControlState>((set, get) => 
         });
       }
       if (data.grade) set({ lastGrade: data.grade });
+      if (data.asset_matches) set({ assetMatches: data.asset_matches });
       if (data.thoughts) {
         for (const t of data.thoughts) {
           get().addThought({
