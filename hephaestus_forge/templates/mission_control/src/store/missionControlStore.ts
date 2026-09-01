@@ -5,7 +5,7 @@ export interface ThoughtEntry {
   timestamp: number;
   type: 'observation' | 'plan' | 'action' | 'reflection' | 'tool_call' | 'tool_result' | 'error';
   content: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ActorInfo {
@@ -28,6 +28,18 @@ export interface AssetInfo {
   tags: string[];
 }
 
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface GradeSummary {
+  met: boolean;
+  score: number;
+  summary: string;
+  missing: string[];
+}
+
 export interface PerformanceMetrics {
   fps: number;
   frameTime: number;
@@ -47,7 +59,8 @@ export interface PerformanceMetrics {
 
 export type AgentState = 'idle' | 'listening' | 'thinking' | 'acting' | 'speaking' | 'error';
 
-const API_BASE = (import.meta as any).env?.VITE_HEPHAESTUS_API ?? 'http://127.0.0.1:8765';
+/** Same-origin when served by forge observe (proxies /v1 and /agent). */
+const API_BASE: string = (import.meta as { env?: { VITE_HEPHAESTUS_API?: string } }).env?.VITE_HEPHAESTUS_API ?? '';
 
 async function postCommand(body: Record<string, unknown>) {
   const res = await fetch(`${API_BASE}/v1/command`, {
@@ -65,10 +78,19 @@ interface MissionControlState {
   disconnect: () => void;
   refreshActors: () => Promise<void>;
   captureFrame: () => Promise<void>;
-  sendCommand: (body: Record<string, unknown>) => Promise<any>;
+  sendCommand: (body: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  searchAssets: (query: string, assetClass?: string) => Promise<void>;
 
   agentState: AgentState;
   setAgentState: (state: AgentState) => void;
+  agentBusy: boolean;
+  chatMessages: ChatMessage[];
+  lastGrade: GradeSummary | null;
+  preflightReady: boolean;
+  plannerAvailable: boolean;
+  sendAgentChat: (message: string, opts?: { reset?: boolean; mode?: string }) => Promise<void>;
+  loadAgentHealth: () => Promise<void>;
+  loadSession: () => Promise<void>;
 
   thoughtLog: ThoughtEntry[];
   addThought: (entry: Omit<ThoughtEntry, 'id' | 'timestamp'>) => void;
@@ -105,12 +127,18 @@ export const useMissionControlStore = create<MissionControlState>((set, get) => 
       try {
         const res = await fetch(`${API_BASE}/v1/health`);
         const json = await res.json();
-        set({ isConnected: !!json.ok });
+        const online = !!json.ok;
+        set({ isConnected: online });
+        if (online) {
+          await get().refreshActors();
+        }
       } catch {
         set({ isConnected: false });
       }
     };
     tick();
+    get().loadAgentHealth();
+    get().loadSession();
     healthTimer = window.setInterval(tick, 4000);
   },
 
@@ -123,17 +151,45 @@ export const useMissionControlStore = create<MissionControlState>((set, get) => 
     const result = await postCommand(body);
     get().addThought({
       type: result.success ? 'tool_result' : 'error',
-      content: `${body.command}: ${result.success ? 'ok' : result.error}`,
+      content: `${body.command}: ${result.success ? 'ok' : String(result.error || 'failed')}`,
       metadata: result,
     });
     return result;
   },
 
+  searchAssets: async (query, assetClass = '') => {
+    const q = query.trim();
+    if (!q) {
+      set({ assets: [] });
+      return;
+    }
+    const params: Record<string, unknown> = { query: q, limit: 24 };
+    if (assetClass) params.class = assetClass;
+    const result = await get().sendCommand({ command: 'asset.search', params });
+    let paths: string[] = [];
+    try {
+      const inner = JSON.parse(String(result.result_json || '{}'));
+      if (Array.isArray(inner.assets)) paths = inner.assets;
+    } catch {
+      /* ignore */
+    }
+    set({
+      assets: paths.map((path) => ({
+        path,
+        name: path.split('.').pop() || path,
+        type: path.includes('SkeletalMesh') ? 'SkeletalMesh' : path.includes('Anim') ? 'AnimSequence' : 'Asset',
+        size: 0,
+        modified: 0,
+        tags: [],
+      })),
+    });
+  },
+
   refreshActors: async () => {
     const result = await get().sendCommand({ command: 'world.list_actors', params: {} });
-    let paths: string[] = result.actor_paths ?? [];
+    let paths: string[] = (result.actor_paths as string[]) ?? [];
     try {
-      const inner = JSON.parse(result.result_json || '{}');
+      const inner = JSON.parse(String(result.result_json || '{}'));
       if (Array.isArray(inner.actors)) paths = inner.actors;
     } catch {
       /* ignore */
@@ -161,13 +217,92 @@ export const useMissionControlStore = create<MissionControlState>((set, get) => 
 
   agentState: 'idle',
   setAgentState: (state) => set({ agentState: state }),
+  agentBusy: false,
+  chatMessages: [],
+  lastGrade: null,
+  preflightReady: false,
+  plannerAvailable: false,
+
+  loadAgentHealth: async () => {
+    try {
+      const res = await fetch(`${API_BASE}/agent/health`);
+      const data = await res.json();
+      set({
+        preflightReady: !!data.ready_for_goals,
+        plannerAvailable: !!data.llm_available,
+      });
+    } catch {
+      set({ preflightReady: false, plannerAvailable: false });
+    }
+  },
+
+  loadSession: async () => {
+    try {
+      const res = await fetch(`${API_BASE}/agent/session`);
+      const data = await res.json();
+      const messages = data.session?.messages;
+      if (Array.isArray(messages)) {
+        set({
+          chatMessages: messages.map((m: { role: string; content: string }) => ({
+            role: m.role === 'user' ? 'user' : 'assistant',
+            content: m.content || '',
+          })),
+        });
+      }
+      if (data.session?.last_grade) {
+        set({ lastGrade: data.session.last_grade });
+      }
+    } catch {
+      /* ignore */
+    }
+  },
+
+  sendAgentChat: async (message, opts = {}) => {
+    set({ agentBusy: true, agentState: 'thinking' });
+    try {
+      const res = await fetch(`${API_BASE}/agent/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message,
+          reset: !!opts.reset,
+          mode: opts.mode || 'auto',
+          max_steps: 20,
+        }),
+      });
+      const data = await res.json();
+      if (data.session?.messages) {
+        set({
+          chatMessages: data.session.messages.map((m: { role: string; content: string }) => ({
+            role: m.role === 'user' ? 'user' : 'assistant',
+            content: m.content || '',
+          })),
+        });
+      }
+      if (data.grade) set({ lastGrade: data.grade });
+      if (data.thoughts) {
+        for (const t of data.thoughts) {
+          get().addThought({
+            type: (t.kind as ThoughtEntry['type']) || 'reflection',
+            content: t.content || '',
+            metadata: t.metadata,
+          });
+        }
+      }
+      set({ agentState: data.ok ? 'idle' : 'error' });
+      await get().refreshActors();
+      await get().captureFrame();
+    } finally {
+      set({ agentBusy: false });
+    }
+  },
 
   thoughtLog: [],
   addThought: (entry) => set((state) => ({
     thoughtLog: [
       ...state.thoughtLog,
-      { ...entry, id: crypto.randomUUID(), timestamp: Date.now() }
-    ].slice(-500)
+      { ...entry, id: crypto.randomUUID(), timestamp: Date.now() },
+    ].slice(-500),
   })),
   clearThoughts: () => set({ thoughtLog: [] }),
 
@@ -192,7 +327,7 @@ export const useMissionControlStore = create<MissionControlState>((set, get) => 
     const detail = await get().sendCommand({ command: 'world.get_actor', params: { actor_path: path } });
     let loc = { x: 0, y: 0, z: 200 };
     try {
-      const inner = JSON.parse(detail.result_json || '{}');
+      const inner = JSON.parse(String(detail.result_json || '{}'));
       if (inner.location) loc = inner.location;
     } catch {
       /* ignore */
@@ -220,7 +355,7 @@ export const useMissionControlStore = create<MissionControlState>((set, get) => 
 
   metrics: null,
   updateMetrics: (metrics) => set((state) => ({
-    metrics: state.metrics ? { ...state.metrics, ...metrics } : metrics as PerformanceMetrics
+    metrics: state.metrics ? { ...state.metrics, ...metrics } : metrics as PerformanceMetrics,
   })),
 
   isRecording: false,

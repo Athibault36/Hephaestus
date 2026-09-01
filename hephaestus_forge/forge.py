@@ -1447,6 +1447,7 @@ def observe(
     project_path: Annotated[Optional[Path], typer.Argument(help="Project root directory")] = None,
     port: Annotated[int, typer.Option("--port", "-p", help="Dashboard port")] = 3000,
     api: Annotated[str, typer.Option("--api", help="Hephaestus Remote API base URL")] = "http://127.0.0.1:8765",
+    static: Annotated[bool, typer.Option("--static", help="Force inline HTML dashboard (skip React dist)")] = False,
 ):
     """
     Open Mission Control Dashboard.
@@ -1466,15 +1467,25 @@ def observe(
 
     dashboard_dir = project_root / config.paths.mission_control_dir
     dist_dir = dashboard_dir / "dist"
-    index_html = dist_dir / "index.html"
 
-    # Always refresh dashboard HTML; empty API base = same-origin /v1/* via proxy below
-    _write_mission_control_fallback(dist_dir, "")
+    try:
+        from mission_control_build import prepare_mission_control_dist
+    except ImportError:
+        from hephaestus_forge.mission_control_build import prepare_mission_control_dist
+
+    dist_dir = prepare_mission_control_dist(
+        project_root,
+        config.paths.mission_control_dir,
+        force_static=static,
+        write_fallback=_write_mission_control_fallback,
+    )
+    ui_mode = "static HTML" if static or not (dist_dir / "assets").is_dir() else "React build"
 
     console.print(Panel.fit(
         f"[bold]Mission Control Dashboard[/bold]\n"
         f"Port: [cyan]{port}[/cyan]\n"
         f"Remote API (proxied): [cyan]{api}[/cyan]\n"
+        f"UI: [cyan]{ui_mode}[/cyan]\n"
         f"Dashboard: [cyan]{dist_dir}[/cyan]",
         border_style="blue",
     ))
@@ -1543,6 +1554,26 @@ def sync_plugin_cmd(
         console.print(f"[red]FAIL: {exc}[/red]")
         raise typer.Exit(1)
     console.print(f"[green]OK[/green] Synced plugin -> {dest}")
+
+
+@app.command("build-mc")
+def build_mission_control_cmd(
+    project_path: Annotated[Optional[Path], typer.Argument(help="UE project root")] = None,
+):
+    """Build React Mission Control into {project}/MissionControl/dist (requires Node.js)."""
+    project_root = (project_path or Path.cwd()).resolve()
+    try:
+        from mission_control_build import build_mission_control
+    except ImportError:
+        from hephaestus_forge.mission_control_build import build_mission_control
+
+    try:
+        dist = build_mission_control(project_root)
+    except (RuntimeError, subprocess.CalledProcessError, FileNotFoundError) as exc:
+        console.print(f"[red]FAIL: {exc}[/red]")
+        raise typer.Exit(1)
+    console.print(f"[green]OK[/green] Mission Control built -> {dist}")
+    console.print(f"[dim]Run forge observe {project_root} to serve the React UI[/dim]")
 
 
 @app.command()

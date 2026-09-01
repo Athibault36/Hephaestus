@@ -7,7 +7,7 @@ import { ChainOfThought } from './components/ChainOfThought';
 import { WorldOutliner } from './components/WorldOutliner';
 import { ActorActions } from './components/ActorActions';
 import { AssetBrowser } from './components/AssetBrowser';
-import { VoiceConsole } from './components/VoiceConsole';
+import { AgentConsole } from './components/AgentConsole';
 import { PerformanceMonitor } from './components/PerformanceMonitor';
 import { useMissionControlStore } from './store/missionControlStore';
 import './MissionControl.css';
@@ -76,8 +76,8 @@ export function MissionControl() {
 
         {activePanels.voiceConsole && (
           <section className="panel voice-console-panel" data-panel="voiceConsole">
-            <PanelHeader title="Voice Console" icon="🎤" />
-            <VoiceConsole />
+            <PanelHeader title="Agent" icon="🤖" />
+            <AgentConsole />
           </section>
         )}
 
@@ -124,7 +124,7 @@ function PanelToggles({
     { key: 'chainOfThought', label: 'Thought', icon: '🧠' },
     { key: 'worldOutliner', label: 'Outliner', icon: '🌍' },
     { key: 'assetBrowser', label: 'Assets', icon: '📦' },
-    { key: 'voiceConsole', label: 'Voice', icon: '🎤' },
+    { key: 'voiceConsole', label: 'Agent', icon: '🤖' },
     { key: 'performance', label: 'Perf', icon: '📊' },
   ];
 
