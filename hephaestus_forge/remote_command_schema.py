@@ -117,6 +117,19 @@ def validate_animation_play_montage(command_obj: dict[str, Any]) -> list[str]:
     return errors
 
 
+def validate_animation_play_locomotion(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "animation.play_locomotion":
+        errors.append("command must be animation.play_locomotion")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not params.get("actor_path"):
+        errors.append("missing actor_path")
+    return errors
+
+
 def validate_sequence_play(command_obj: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     if command_obj.get("command") != "sequence.play":

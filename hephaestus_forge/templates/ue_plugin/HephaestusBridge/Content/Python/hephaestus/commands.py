@@ -157,6 +157,33 @@ def build_spawn_skeletal_command(
     }
 
 
+def build_spawn_character_command(
+    mesh_path: str = "",
+    location: Vec3 = None,
+    rotation: Vec3 = None,
+    scale: Vec3 = None,
+) -> dict[str, Any]:
+    return {
+        "command": "animation.spawn_character",
+        "params": {
+            "mesh_path": mesh_path,
+            "transform": _transform(location, rotation, scale),
+        },
+    }
+
+
+def build_play_locomotion_command(
+    actor_path: str,
+    mode: str = "idle",
+    *,
+    loop: bool = True,
+) -> dict[str, Any]:
+    return {
+        "command": "animation.play_locomotion",
+        "params": {"actor_path": actor_path, "mode": mode, "loop": bool(loop)},
+    }
+
+
 def build_play_sequence_command(
     actor_path: str,
     anim_path: str,

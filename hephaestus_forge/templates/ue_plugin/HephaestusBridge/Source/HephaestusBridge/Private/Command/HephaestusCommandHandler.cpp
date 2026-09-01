@@ -235,7 +235,9 @@ TArray<FString> UHephaestusCommandHandler::GetAvailableCommands() const
         TEXT("animation.edit_sequence"),
         TEXT("animation.livelink_connect"),
         TEXT("animation.spawn_skeletal_mesh"),
+        TEXT("animation.spawn_character"),
         TEXT("animation.play_sequence"),
+        TEXT("animation.play_locomotion"),
         TEXT("animation.play_transform_sequence"),
         TEXT("animation.play_montage"),
         TEXT("animation.stop"),
@@ -1104,6 +1106,52 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleAnimationCommand(const
             {},
             { ActorPath });
     }
+    else if (Action == TEXT("spawn_character") || Action == TEXT("spawn_locomotion_character"))
+    {
+        if (!WorldSubsystem)
+        {
+            if (UGameInstance* GI = GetGameInstance())
+            {
+                WorldSubsystem = GI->GetSubsystem<UHephaestusWorldSubsystem>();
+            }
+        }
+        FString MeshPath;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("mesh_path"), MeshPath);
+            if (MeshPath.IsEmpty())
+            {
+                Params->TryGetStringField(TEXT("mesh"), MeshPath);
+            }
+        }
+        FTransform Transform = FTransform::Identity;
+        if (Params.IsValid())
+        {
+            ParseTransformParams(Params, Transform);
+        }
+        if (Transform.Equals(FTransform::Identity) && WorldSubsystem)
+        {
+            FVector Loc, Forward;
+            FRotator Rot;
+            if (WorldSubsystem->GetView(Loc, Rot, Forward))
+            {
+                const FVector SpawnLoc = Loc + Forward * 400.f;
+                Transform.SetLocation(SpawnLoc);
+                Transform.SetRotation(Rot.Quaternion());
+            }
+        }
+        AActor* Actor = AnimationSubsystem->SpawnLocomotionCharacter(MeshPath, Transform);
+        if (!Actor)
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Failed to spawn locomotion character"));
+        }
+        const FString ActorPath = Actor->GetPathName();
+        return MakeSuccessResult(
+            TEXT(""),
+            FString::Printf(TEXT("{\"actor_path\":\"%s\",\"class\":\"Character\"}"), *ActorPath),
+            {},
+            { ActorPath });
+    }
     else if (Action == TEXT("play_sequence") || Action == TEXT("play_anim"))
     {
         if (!Params.IsValid())
@@ -1137,6 +1185,40 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleAnimationCommand(const
                   {},
                   { ActorPath })
             : MakeErrorResult(TEXT(""), TEXT("Failed to play animation (check skeletal mesh + anim paths)"));
+    }
+    else if (Action == TEXT("play_locomotion") || Action == TEXT("locomotion"))
+    {
+        if (!Params.IsValid())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Missing params for animation.play_locomotion"));
+        }
+        FString ActorPath;
+        FString Mode = TEXT("idle");
+        bool bLoop = true;
+        Params->TryGetStringField(TEXT("actor_path"), ActorPath);
+        if (ActorPath.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("actor"), ActorPath);
+        }
+        Params->TryGetStringField(TEXT("mode"), Mode);
+        if (Mode.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("locomotion"), Mode);
+        }
+        Params->TryGetBoolField(TEXT("loop"), bLoop);
+        if (ActorPath.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("actor_path required"));
+        }
+        const bool bOk = AnimationSubsystem->PlayLocomotionFallback(ActorPath, Mode, bLoop);
+        return bOk
+            ? MakeSuccessResult(
+                  TEXT(""),
+                  FString::Printf(TEXT("{\"actor_path\":\"%s\",\"mode\":\"%s\",\"loop\":%s}"),
+                      *ActorPath, *Mode, bLoop ? TEXT("true") : TEXT("false")),
+                  {},
+                  { ActorPath })
+            : MakeErrorResult(TEXT(""), TEXT("Failed to play locomotion fallback (no mannequin anims loaded)"));
     }
     else if (Action == TEXT("play_transform_sequence") || Action == TEXT("move_actor"))
     {

@@ -75,6 +75,18 @@ def test_decide_play_anim_when_skeletal_and_hint():
     assert action.command["params"]["anim_path"] == "/Game/Anims/Dog_Run.Dog_Run"
 
 
+def test_decide_play_locomotion_fallback_when_idle_no_hint():
+    skel = "/Temp/UEDPIE.PersistentLevel.SkeletalMeshActor_0"
+    snap = WorldSnapshot(lights=2, meshes=3, skeletal=1, actor_paths=[skel])
+    action = decide_action(
+        snap,
+        random.Random(0),
+        goal=f"play idle animation on {skel}",
+    )
+    assert action.kind == "play_locomotion"
+    assert action.command["params"]["mode"] == "idle"
+
+
 if __name__ == "__main__":
     test_summarize_actors()
     test_decide_seeds_light_first()

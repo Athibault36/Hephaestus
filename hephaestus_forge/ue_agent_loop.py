@@ -189,7 +189,26 @@ def _pick_asset_path(goal: str, asset_hints: Optional[list[str]]) -> Optional[st
     return ordered[0] if ordered else None
 
 
-def _pick_skeletal_path(snapshot: WorldSnapshot) -> Optional[str]:
+from locomotion_fallback import infer_locomotion_mode
+
+
+def _pick_actor_path_from_goal(goal: str, snapshot: WorldSnapshot) -> Optional[str]:
+    for match in re.findall(r"/Temp/[^\s,;\"']+", goal or ""):
+        for path in snapshot.actor_paths:
+            if match in path or path.endswith(match.split(".")[-1]):
+                return path
+        return match
+    return None
+
+
+def _pick_skeletal_path(snapshot: WorldSnapshot, goal: str = "") -> Optional[str]:
+    from_goal = _pick_actor_path_from_goal(goal, snapshot)
+    if from_goal:
+        return from_goal
+    return _pick_skeletal_path_from_snapshot(snapshot)
+
+
+def _pick_skeletal_path_from_snapshot(snapshot: WorldSnapshot) -> Optional[str]:
     for path in snapshot.actor_paths:
         if any(tag in path for tag in ("SkeletalMeshActor", "SimAgentCharacter", "Character")):
             return path
@@ -251,11 +270,14 @@ def decide_action(
             or "/SK_" in asset_path
         )
         if skel and snapshot.skeletal < 1:
+            use_character = any(
+                w in (goal or "").lower() for w in ("jog", "walk", "run", "gameplay", "character")
+            )
             return AgentAction(
-                kind="spawn_character",
+                kind="spawn_character" if use_character else "spawn_skeletal",
                 reason=f"Heuristic spawn skeletal {asset_path} in view",
                 command={
-                    "command": "animation.spawn_skeletal_mesh",
+                    "command": "animation.spawn_character" if use_character else "animation.spawn_skeletal_mesh",
                     "params": {
                         "mesh_path": asset_path,
                         "transform": {
@@ -284,8 +306,18 @@ def decide_action(
             )
 
     goal_l = (goal or "").lower()
-    skel_path = _pick_skeletal_path(snapshot)
+    skel_path = _pick_skeletal_path(snapshot, goal)
     anim_path = _pick_anim_path(goal, asset_hints)
+    locomotion_mode = infer_locomotion_mode(goal)
+    if skel_path and locomotion_mode and not anim_path:
+        return AgentAction(
+            kind="play_locomotion",
+            reason=f"Heuristic locomotion {locomotion_mode} on {skel_path}",
+            command={
+                "command": "animation.play_locomotion",
+                "params": {"actor_path": skel_path, "mode": locomotion_mode, "loop": True},
+            },
+        )
     if skel_path and anim_path and any(w in goal_l for w in ("walk", "run", "idle", "anim", "playing")):
         if "montage" in anim_path.lower():
             return AgentAction(

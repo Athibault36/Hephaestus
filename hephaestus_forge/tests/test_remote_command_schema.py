@@ -16,6 +16,7 @@ from remote_command_schema import (  # noqa: E402
     parse_scale,
     resolve_params,
     validate_animation_play_montage,
+    validate_animation_play_locomotion,
     validate_sequence_create_shot,
     validate_sequence_play,
     validate_world_apply_move_input,
@@ -96,6 +97,10 @@ def test_validate_apply_move_and_montage():
         "command": "animation.play_montage",
         "params": {"actor_path": "/Temp/A"},
     })
+    assert validate_animation_play_locomotion({
+        "command": "animation.play_locomotion",
+        "params": {"actor_path": "/Temp/A", "mode": "idle"},
+    }) == []
 
 
 def test_validate_sequence_play_and_create_shot():

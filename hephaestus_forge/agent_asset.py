@@ -165,10 +165,11 @@ def augment_goal_with_assets(client: RemoteUeClient, goal: str) -> tuple[str, li
     anim_hints = ("walk", "run", "idle", "anim", "montage")
     if any(h in goal.lower() for h in anim_hints):
         for token in tokens[:3]:
-            anims = search_project_assets(client, token, asset_class="AnimSequence", limit=6)
-            for p in anims:
-                if p not in all_matches:
-                    all_matches.append(p)
+            for asset_class in ("AnimSequence", "AnimMontage"):
+                anims = search_project_assets(client, token, asset_class=asset_class, limit=6)
+                for p in anims:
+                    if p not in all_matches:
+                        all_matches.append(p)
 
     meta["matches"] = _rank_asset_paths(goal, all_matches)[:20]
     all_matches = list(meta["matches"])

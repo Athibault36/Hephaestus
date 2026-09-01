@@ -69,6 +69,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Hephaestus|Animation")
 	bool PlayMontage(const FString& ActorPath, const FString& MontagePath, bool bLoop = false);
 
+	/** Try project/engine fallback idle|walk|run anims when no explicit anim path is known */
+	UFUNCTION(BlueprintCallable, Category = "Hephaestus|Animation")
+	bool PlayLocomotionFallback(const FString& ActorPath, const FString& Mode, bool bLoop = true);
+
+	/** Spawn a character with skeletal mesh (better for gameplay locomotion than mesh actor) */
+	UFUNCTION(BlueprintCallable, Category = "Hephaestus|Animation")
+	AActor* SpawnLocomotionCharacter(const FString& MeshPath, const FTransform& Transform);
+
 	/** Stop animation on a skeletal actor or character */
 	UFUNCTION(BlueprintCallable, Category = "Hephaestus|Animation")
 	bool StopAnimation(const FString& ActorPath);

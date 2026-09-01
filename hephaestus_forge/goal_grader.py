@@ -41,6 +41,21 @@ def _has_gradable_criteria(goal_l: str, min_lights: int, min_meshes: int, min_sk
     return any(h in goal_l for h in hints)
 
 
+def _actor_path_from_goal(goal: str) -> Optional[str]:
+    paths = re.findall(r"/Temp/[^\s,;\"']+", goal or "")
+    return paths[-1] if paths else None
+
+
+def _anim_playing_for_actor(details: list[Any], actor_path: str) -> bool:
+    for detail in details:
+        if not isinstance(detail, dict):
+            continue
+        path = str(detail.get("actor_path") or "")
+        if path == actor_path or actor_path in path or path in actor_path:
+            return bool(detail.get("anim_playing"))
+    return False
+
+
 def _extract_game_paths(text: str) -> list[str]:
     return re.findall(r"/Game/[^\s,;\"']+", text or "")
 
@@ -156,7 +171,7 @@ def grade_goal(goal: str, snapshot: Any, memory: Optional[list[dict[str, Any]]] 
     # Common seed phrases
     if "lit" in goal_l or "light" in goal_l:
         min_lights = max(min_lights, 1)
-    if "cube" in goal_l or "mesh" in goal_l or "object" in goal_l:
+    if "cube" in goal_l or re.search(r"\bmesh(es)?\b", goal_l) or "object" in goal_l:
         min_meshes = max(min_meshes, 1)
     if "few cubes" in goal_l or "some cubes" in goal_l:
         min_meshes = max(min_meshes, 3)
@@ -173,7 +188,11 @@ def grade_goal(goal: str, snapshot: Any, memory: Optional[list[dict[str, Any]]] 
     anim_playing = False
     details = getattr(snapshot, "actor_details", None) or []
     if isinstance(details, list):
-        anim_playing = any(bool(d.get("anim_playing")) for d in details if isinstance(d, dict))
+        target_actor = _actor_path_from_goal(goal)
+        if target_actor and ("idle" in goal_l or "anim" in goal_l):
+            anim_playing = _anim_playing_for_actor(details, target_actor)
+        else:
+            anim_playing = any(bool(d.get("anim_playing")) for d in details if isinstance(d, dict))
 
     missing: list[str] = []
     if lights < min_lights:
@@ -182,7 +201,7 @@ def grade_goal(goal: str, snapshot: Any, memory: Optional[list[dict[str, Any]]] 
         missing.append(f"meshes {meshes}/{min_meshes}")
     if skeletal < min_skeletal:
         missing.append(f"skeletal {skeletal}/{min_skeletal}")
-    if ("playing" in goal_l or "walk" in goal_l or "anim" in goal_l) and min_skeletal > 0 and not anim_playing:
+    if ("playing" in goal_l or "walk" in goal_l or "anim" in goal_l or "idle" in goal_l) and min_skeletal > 0 and not anim_playing:
         missing.append("animation not playing")
 
     if ("level sequence" in goal_l or ("sequence" in goal_l and "/game/" in goal_l)):

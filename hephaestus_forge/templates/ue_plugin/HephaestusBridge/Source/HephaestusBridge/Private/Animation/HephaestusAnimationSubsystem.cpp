@@ -145,6 +145,88 @@ AActor* UHephaestusAnimationSubsystem::SpawnSkeletalMeshActor(const FString& Mes
 	return Actor;
 }
 
+static TArray<FString> LocomotionCandidates(const FString& Mode)
+{
+	const FString ModeLower = Mode.ToLower();
+	if (ModeLower.Contains(TEXT("run")))
+	{
+		return {
+			TEXT("/Game/Characters/Mannequins/Animations/Manny/MM_Run_InPlace.MM_Run_InPlace"),
+			TEXT("/Game/Characters/Mannequins/Animations/Quinn/MF_Run_InPlace.MF_Run_InPlace"),
+			TEXT("/Game/ThirdPerson/Animations/ThirdPersonRun.ThirdPersonRun"),
+		};
+	}
+	if (ModeLower.Contains(TEXT("walk")) || ModeLower.Contains(TEXT("jog")))
+	{
+		return {
+			TEXT("/Game/Characters/Mannequins/Animations/Manny/MM_Walk_InPlace.MM_Walk_InPlace"),
+			TEXT("/Game/Characters/Mannequins/Animations/Quinn/MF_Walk_InPlace.MF_Walk_InPlace"),
+			TEXT("/Game/ThirdPerson/Animations/ThirdPersonWalk.ThirdPersonWalk"),
+		};
+	}
+	return {
+		TEXT("/Game/Characters/Mannequins/Animations/Manny/MM_Idle.MM_Idle"),
+		TEXT("/Game/Characters/Mannequins/Animations/Quinn/MF_Idle.MF_Idle"),
+		TEXT("/Game/ThirdPerson/Animations/ThirdPersonIdle.ThirdPersonIdle"),
+	};
+}
+
+AActor* UHephaestusAnimationSubsystem::SpawnLocomotionCharacter(const FString& MeshPath, const FTransform& Transform)
+{
+	UWorld* World = ResolveWorld();
+	if (!World)
+	{
+		return nullptr;
+	}
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	ACharacter* Character = World->SpawnActor<ACharacter>(ACharacter::StaticClass(), Transform, SpawnParams);
+	if (!Character)
+	{
+		return nullptr;
+	}
+
+	FString ResolvedPath = MeshPath;
+	if (ResolvedPath.IsEmpty())
+	{
+		ResolvedPath = TEXT("/Engine/EngineMeshes/SkeletalMesh/SK_Mannequin.SK_Mannequin");
+	}
+
+	USkeletalMesh* Mesh = LoadObject<USkeletalMesh>(nullptr, *ResolvedPath);
+	if (!Mesh && !ResolvedPath.Contains(TEXT(".")))
+	{
+		const FString WithSuffix = ResolvedPath + TEXT(".") + FPaths::GetCleanFilename(ResolvedPath);
+		Mesh = LoadObject<USkeletalMesh>(nullptr, *WithSuffix);
+	}
+
+	if (USkeletalMeshComponent* Comp = Character->GetMesh())
+	{
+		if (Mesh)
+		{
+			Comp->SetSkeletalMesh(Mesh);
+		}
+		Comp->SetRelativeLocation(FVector(0.f, 0.f, -90.f));
+		Comp->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
+	}
+
+	return Character;
+}
+
+bool UHephaestusAnimationSubsystem::PlayLocomotionFallback(const FString& ActorPath, const FString& Mode, bool bLoop)
+{
+	for (const FString& Candidate : LocomotionCandidates(Mode))
+	{
+		if (PlayAnimSequence(ActorPath, Candidate, bLoop))
+		{
+			UE_LOG(LogHephaestusBridge, Log, TEXT("PlayLocomotionFallback: %s on %s"), *Candidate, *ActorPath);
+			return true;
+		}
+	}
+	UE_LOG(LogHephaestusBridge, Warning, TEXT("PlayLocomotionFallback: no fallback anim loaded for mode %s"), *Mode);
+	return false;
+}
+
 bool UHephaestusAnimationSubsystem::PlayAnimSequence(const FString& ActorPath, const FString& AnimPath, bool bLoop)
 {
 	if (AnimPath.IsEmpty())

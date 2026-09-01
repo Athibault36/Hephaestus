@@ -804,9 +804,13 @@ bool UHephaestusWorldSubsystem::DescribeActor(const FString& ActorPath, FString&
             {
                 MeshPath = Mesh->GetPathName();
             }
-            if (UAnimInstance* AnimInst = Comp->GetAnimInstance())
+            bAnimPlaying = Comp->IsPlaying();
+            if (!bAnimPlaying)
             {
-                bAnimPlaying = AnimInst->IsAnyMontagePlaying();
+                if (UAnimInstance* AnimInst = Comp->GetAnimInstance())
+                {
+                    bAnimPlaying = AnimInst->IsAnyMontagePlaying();
+                }
             }
         }
     }
