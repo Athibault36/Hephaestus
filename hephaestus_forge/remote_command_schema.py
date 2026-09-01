@@ -56,6 +56,21 @@ def parse_scale(params: dict[str, Any]) -> tuple[float, float, float]:
     return scale if scale is not None else (1.0, 1.0, 1.0)
 
 
+def validate_world_get_actor(command_obj: dict[str, Any]) -> list[str]:
+    """Return list of problems (empty = ok)."""
+    errors: list[str] = []
+    if command_obj.get("command") != "world.get_actor":
+        errors.append("command must be world.get_actor")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    path = params.get("actor_path") or params.get("actor")
+    if not path:
+        errors.append("missing actor_path")
+    return errors
+
+
 def validate_world_spawn_mesh(command_obj: dict[str, Any]) -> list[str]:
     """Return list of problems (empty = ok)."""
     errors: list[str] = []
@@ -75,3 +90,55 @@ def validate_world_spawn_mesh(command_obj: dict[str, Any]) -> list[str]:
 def assert_uses_params_key(command_obj: dict[str, Any]) -> None:
     """Client builders should emit params (args is only a server-side alias)."""
     assert "params" in command_obj, "payload must include params for Remote API clients"
+
+
+def validate_world_apply_move_input(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "world.apply_move_input":
+        errors.append("command must be world.apply_move_input")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+    return errors
+
+
+def validate_animation_play_montage(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "animation.play_montage":
+        errors.append("command must be animation.play_montage")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not params.get("actor_path"):
+        errors.append("missing actor_path")
+    if not params.get("montage_path"):
+        errors.append("missing montage_path")
+    return errors
+
+
+def validate_sequence_play(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "sequence.play":
+        errors.append("command must be sequence.play")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not (params.get("sequence_path") or params.get("path")):
+        errors.append("missing sequence_path")
+    return errors
+
+
+def validate_sequence_create_shot(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "sequence.create_shot":
+        errors.append("command must be sequence.create_shot")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if parse_location(params) is None and not any(k in params for k in ("x", "y", "z")):
+        errors.append("missing target location")
+    return errors
+

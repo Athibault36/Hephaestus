@@ -104,4 +104,8 @@ public:
     /** Get all assets in path */
     UFUNCTION(BlueprintCallable, Category = "Hephaestus|Assets")
     TArray<UObject*> GetAssetsInPath(const FString& Path, TSubclassOf<UObject> ClassFilter = nullptr) const;
+
+    /** Search /Game assets whose name or path contains Query (JSON array in OutJson) */
+    UFUNCTION(BlueprintCallable, Category = "Hephaestus|Assets")
+    bool SearchAssetsJson(const FString& Query, const FString& AssetClass, int32 Limit, FString& OutJson) const;
 };

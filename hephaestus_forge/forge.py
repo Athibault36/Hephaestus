@@ -83,6 +83,10 @@ class SystemScanResult(BaseModel):
 
 
 class ModelConfig(BaseModel):
+    planner: dict = Field(default_factory=lambda: {
+        "model_id": "deepseek-ai/deepseek-v4-pro-0813",
+        "base_url": "https://integrate.api.nvidia.com/v1",
+    })
     nemotron: dict = Field(default_factory=lambda: {
         "model_id": "nvidia/nemotron-3-ultra-550b-a55b",
         "quantization": "Q4_K_M",
@@ -216,7 +220,7 @@ class SystemScanner:
         self.console = console
 
     def scan(self) -> SystemScanResult:
-        self.console.print("[bold cyan]🔍 Scanning system...[/bold cyan]")
+        self.console.print("[bold cyan]Scanning system...[/bold cyan]")
 
         result = SystemScanResult(
             platform=platform.platform(),
@@ -269,7 +273,7 @@ class SystemScanner:
                     cuda_version=self._get_cuda_version(),
                 ))
         except (subprocess.CalledProcessError, FileNotFoundError):
-            self.console.print("[yellow]⚠ nvidia-smi not found. GPU acceleration unavailable.[/yellow]")
+            self.console.print("[yellow][WARN] nvidia-smi not found. GPU acceleration unavailable.[/yellow]")
 
         return gpus
 
@@ -379,18 +383,18 @@ class SystemScanner:
         table.add_column("Status", style="green")
         table.add_column("Details", style="white")
 
-        table.add_row("Platform", "✓", result.platform)
-        table.add_row("Python", "✓", f"{result.python_version} ({result.python_executable})")
+        table.add_row("Platform", "[OK]", result.platform)
+        table.add_row("Python", "[OK]", f"{result.python_version} ({result.python_executable})")
 
-        ue_status = "✓" if result.ue_path else "✗"
+        ue_status = "[OK]" if result.ue_path else "[FAIL]"
         ue_detail = f"{result.ue_version} at {result.ue_path}" if result.ue_path else "NOT FOUND"
         table.add_row("Unreal Engine 5.8", ue_status, ue_detail)
 
-        blender_status = "✓" if result.blender_path else "✗"
+        blender_status = "[OK]" if result.blender_path else "[FAIL]"
         blender_detail = f"{result.blender_version} at {result.blender_path}" if result.blender_path else "NOT FOUND"
         table.add_row("Blender", blender_status, blender_detail)
 
-        cc5_status = "✓" if result.cc5_path else "✗"
+        cc5_status = "[OK]" if result.cc5_path else "[FAIL]"
         cc5_detail = result.cc5_path if result.cc5_path else "NOT FOUND (optional)"
         table.add_row("Character Creator 5", cc5_status, cc5_detail)
 
@@ -398,23 +402,23 @@ class SystemScanner:
             for gpu in result.gpus:
                 table.add_row(
                     f"GPU {gpu.index}",
-                    "✓",
+                    "[OK]",
                     f"{gpu.name} | VRAM: {gpu.vram_total_mb}MB total / {gpu.vram_free_mb}MB free | Driver: {gpu.driver_version} | CUDA: {gpu.cuda_version}",
                 )
         else:
-            table.add_row("GPU", "✗", "No NVIDIA GPU detected")
+            table.add_row("GPU", "[FAIL]", "No NVIDIA GPU detected")
 
-        table.add_row("Total VRAM", "✓" if result.total_vram_mb > 0 else "✗", f"{result.total_vram_mb} MB")
-        table.add_row("Recommended Quant", "✓", result.recommended_quant)
-        table.add_row("Vision Resolution", "✓", f"{result.vision_resolution}px")
-        table.add_row("TTS Model Size", "✓", result.tts_model_size)
+        table.add_row("Total VRAM", "[OK]" if result.total_vram_mb > 0 else "[FAIL]", f"{result.total_vram_mb} MB")
+        table.add_row("Recommended Quant", "[OK]", result.recommended_quant)
+        table.add_row("Vision Resolution", "[OK]", f"{result.vision_resolution}px")
+        table.add_row("TTS Model Size", "[OK]", result.tts_model_size)
 
         self.console.print(table)
 
         if result.warnings:
-            self.console.print("\n[bold yellow]⚠ Warnings:[/bold yellow]")
+            self.console.print("\n[bold yellow]Warnings:[/bold yellow]")
             for w in result.warnings:
-                self.console.print(f"  • {w}")
+                self.console.print(f"  - {w}")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -478,7 +482,7 @@ class ProjectScaffold:
         # Copy templates (UE plugin, mission control, runtime services)
         self._copy_templates(project_root, config)
 
-        self.console.print("[green]✓ Project scaffold complete[/green]")
+        self.console.print("[green][OK] Project scaffold complete[/green]")
 
     def _copy_templates(self, project_root: Path, config: ForgeConfig) -> None:
         templates_dir = Path(__file__).resolve().parent / "templates"
@@ -1272,7 +1276,7 @@ def deploy(
     no_agent: Annotated[bool, typer.Option("--no-agent", help="Launch UE without agent runtime")] = False,
     # NIM API options
     use_nim: Annotated[bool, typer.Option("--use-nim", help="Use NVIDIA NIM API instead of local llama-server")] = False,
-    nim_model: Annotated[str, typer.Option("--nim-model", help="NIM model to use")] = "nvidia/nemotron-3-ultra-550b-a55b",
+    nim_model: Annotated[str, typer.Option("--nim-model", help="NIM model to use")] = "deepseek-ai/deepseek-v4-pro-0813",
 ):
     """
     Deploy and launch UE5.8 with the Hephaestus agent.
@@ -1479,154 +1483,158 @@ def observe(
     console.print("[dim]Press Ctrl+C to stop. Start PIE in UE first for live data.[/dim]")
     console.print("[yellow]If observe was already running: Ctrl+C it, then re-run this command.[/yellow]")
 
+    remote_api = api.rstrip("/")
+
+    # Preflight: surface blockers before opening the dashboard
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from preflight_health import run_preflight
+
+    report = run_preflight(remote_api, project_root)
+    for check in report.checks:
+        style = "green" if check.ok else ("yellow" if not check.blocker else "red")
+        label = "OK" if check.ok else ("WARN" if not check.blocker else "BLOCKED")
+        console.print(f"[{style}]{label}[/] {check.name}: {check.detail}")
+    if not report.ready:
+        console.print("[yellow]Mission Control will open, but agent goals need PIE + HephaestusBridge online.[/yellow]")
+
     try:
-        import http.server
-        import socketserver
-        import urllib.error
-        import urllib.request
         import webbrowser
 
-        remote_api = api.rstrip("/")
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from avatar_hub import AvatarHub
+        from mission_control_server import ObserveServer
+        from thought_hub import ThoughtHub
+        from agent_job_hub import AgentJobHub
 
-        class SPAHandler(http.server.SimpleHTTPRequestHandler):
-            def __init__(self, *args, **kwargs):
-                super().__init__(*args, directory=str(dist_dir), **kwargs)
-
-            def _proxy(self, method: str) -> bool:
-                path = self.path.split("?")[0]
-                if not path.startswith("/v1/"):
-                    return False
-                url = remote_api + self.path
-                length = int(self.headers.get("Content-Length", "0") or 0)
-                body = self.rfile.read(length) if length > 0 else None
-                req = urllib.request.Request(url, data=body, method=method)
-                ctype = self.headers.get("Content-Type")
-                if ctype:
-                    req.add_header("Content-Type", ctype)
-                try:
-                    with urllib.request.urlopen(req, timeout=60) as resp:
-                        data = resp.read()
-                        self.send_response(resp.status)
-                        self.send_header("Content-Type", resp.headers.get("Content-Type", "application/octet-stream"))
-                        self.send_header("Content-Length", str(len(data)))
-                        self.send_header("Cache-Control", "no-store")
-                        self.end_headers()
-                        self.wfile.write(data)
-                except urllib.error.HTTPError as exc:
-                    err_body = exc.read()
-                    self.send_response(exc.code)
-                    self.send_header("Content-Type", exc.headers.get("Content-Type", "application/json"))
-                    self.send_header("Content-Length", str(len(err_body)))
-                    self.end_headers()
-                    self.wfile.write(err_body)
-                except Exception as exc:
-                    msg = json.dumps({"ok": False, "error": str(exc)}).encode()
-                    self.send_response(502)
-                    self.send_header("Content-Type", "application/json")
-                    self.send_header("Content-Length", str(len(msg)))
-                    self.end_headers()
-                    self.wfile.write(msg)
-                return True
-
-            def _json_response(self, code: int, payload: dict) -> None:
-                data = json.dumps(payload).encode("utf-8")
-                self.send_response(code)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(data)))
-                self.send_header("Cache-Control", "no-store")
-                self.end_headers()
-                self.wfile.write(data)
-
-            def _handle_agent(self) -> bool:
-                """Local Nemotron agent endpoints (not proxied to UE)."""
-                path = self.path.split("?")[0]
-                if path == "/agent/health" and self.command == "GET":
-                    self._json_response(200, {
-                        "ok": True,
-                        "planner": "nvidia/nemotron-3-ultra-550b-a55b",
-                        "ue": remote_api,
-                    })
-                    return True
-                if path in ("/agent/step", "/agent/loop") and self.command == "POST":
-                    length = int(self.headers.get("Content-Length", "0") or 0)
-                    raw = self.rfile.read(length) if length > 0 else b"{}"
-                    try:
-                        body = json.loads(raw.decode("utf-8") or "{}")
-                    except json.JSONDecodeError:
-                        self._json_response(400, {"ok": False, "error": "invalid_json"})
-                        return True
-                    try:
-                        sys.path.insert(0, str(Path(__file__).resolve().parent))
-                        from ue_agent_loop import ObserveActLoop, RemoteUeClient
-                        from ue_vision_planner import VisionLLMPlanner
-
-                        steps = 1 if path.endswith("/step") else int(body.get("steps", 3))
-                        goal = body.get("goal") or (
-                            "Seed a lit test scene with a few cubes, then idle."
-                        )
-                        client = RemoteUeClient(remote_api, timeout=60.0)
-                        llm = VisionLLMPlanner(goal=goal)
-                        use_llm = llm.available
-                        thoughts: list[dict] = []
-
-                        def on_thought(kind: str, content: str, metadata: dict) -> None:
-                            thoughts.append({"kind": kind, "content": content, "metadata": metadata})
-
-                        loop = ObserveActLoop(
-                            client=client,
-                            on_thought=on_thought,
-                            planner=(llm.decide if use_llm else None),
-                            goal=goal if use_llm else "",
-                        )
-                        results = loop.run(steps=steps)
-                        self._json_response(200, {
-                            "ok": all(r.ok for r in results),
-                            "planner": ("nemotron/" + llm.model) if use_llm else "heuristic",
-                            "llm_error": llm.last_error,
-                            "thoughts": thoughts[-40:],
-                            "steps": [
-                                {
-                                    "step": r.step,
-                                    "kind": r.action.kind,
-                                    "reason": r.action.reason,
-                                    "ok": r.ok,
-                                    "lights": r.reobservation.lights,
-                                    "meshes": r.reobservation.meshes,
-                                }
-                                for r in results
-                            ],
-                        })
-                    except Exception as exc:
-                        self._json_response(500, {"ok": False, "error": str(exc)})
-                    return True
-                return False
-
-            def do_GET(self):
-                if self._handle_agent():
-                    return
-                if self._proxy("GET"):
-                    return
-                if not (dist_dir / self.path.lstrip("/").split("?")[0]).exists() and "." not in self.path.split("?")[0]:
-                    self.path = "/index.html"
-                return super().do_GET()
-
-            def do_POST(self):
-                if self._handle_agent():
-                    return
-                if self._proxy("POST"):
-                    return
-                self.send_error(404)
-
-            def log_message(self, format, *args):
-                pass
-
-        socketserver.TCPServer.allow_reuse_address = True
-        with socketserver.TCPServer(("127.0.0.1", port), SPAHandler) as httpd:
-            webbrowser.open(f"http://127.0.0.1:{port}")
-            httpd.serve_forever()
+        hub = AvatarHub()
+        thought_hub = ThoughtHub()
+        job_hub = AgentJobHub()
+        server = ObserveServer(
+            dist_dir=dist_dir,
+            port=port,
+            remote_api=remote_api,
+            on_avatar=hub.callback,
+            avatar_hub=hub,
+            thought_hub=thought_hub,
+            job_hub=job_hub,
+            project_root=project_root,
+        )
+        webbrowser.open(f"http://127.0.0.1:{port}")
+        server.start(blocking=True)
 
     except KeyboardInterrupt:
         console.print("\n[yellow]Dashboard stopped[/yellow]")
+
+
+@app.command("sync-plugin")
+def sync_plugin_cmd(
+    project_path: Annotated[Optional[Path], typer.Argument(help="UE project root")] = None,
+):
+    """Copy HephaestusBridge template into {project}/Plugins/HephaestusBridge."""
+    project_root = (project_path or Path.cwd()).resolve()
+    try:
+        from hephaestus_forge.plugin_sync import sync_plugin
+    except ImportError:
+        from plugin_sync import sync_plugin
+
+    try:
+        dest = sync_plugin(project_root)
+    except FileNotFoundError as exc:
+        console.print(f"[red]FAIL: {exc}[/red]")
+        raise typer.Exit(1)
+    console.print(f"[green]OK[/green] Synced plugin -> {dest}")
+
+
+@app.command()
+def adopt(
+    project_path: Annotated[Path, typer.Argument(help="Existing UE project root (.uproject folder)")],
+    name: Annotated[Optional[str], typer.Option("--name", "-n", help="Display name in desktop app")] = None,
+    skip_plugin: Annotated[bool, typer.Option("--skip-plugin", help="Do not copy plugin template")] = False,
+):
+    """
+    Adopt an existing UE project as a Hephaestus target (factory stays in the git repo).
+
+    Creates .hephaestus_forge/, syncs Plugins/HephaestusBridge, registers in ~/.hephaestus/projects.json.
+    """
+    project_root = project_path.expanduser().resolve()
+    uprojects = list(project_root.glob("*.uproject"))
+    if not uprojects:
+        console.print(f"[red]FAIL: No .uproject in {project_root}[/red]")
+        raise typer.Exit(1)
+
+    project_name = name or uprojects[0].stem
+    forge_dir = project_root / ".hephaestus_forge"
+
+    if not forge_dir.exists():
+        scan = scanner.scan()
+        paths = PathsConfig(
+            project_root=str(project_root),
+            ue_plugin_dir="Plugins/HephaestusBridge",
+        )
+        config = ForgeConfig(project_name=project_name, system=scan, paths=paths)
+        forge_dir.mkdir(parents=True, exist_ok=True)
+        config_path = forge_dir / "config.yaml"
+        config_dict = config.model_dump()
+        template = Path(__file__).resolve().parent / "forge_config" / "cloud.yaml"
+        if template.exists():
+            with open(template, encoding="utf-8") as f:
+                cloud_tpl = yaml.safe_load(f) or {}
+            if "cloud" in cloud_tpl:
+                config_dict["cloud"] = cloud_tpl["cloud"]
+        config_path.write_text(yaml.dump(config_dict, sort_keys=False, default_flow_style=False), encoding="utf-8")
+        mc_src = Path(__file__).resolve().parent / "templates" / "mission_control"
+        mc_dest = project_root / "MissionControl"
+        if mc_src.is_dir() and not mc_dest.exists():
+            shutil.copytree(mc_src, mc_dest)
+        console.print(f"[green]OK[/green] Created {forge_dir}")
+
+    if not skip_plugin:
+        try:
+            from hephaestus_forge.plugin_sync import sync_plugin
+        except ImportError:
+            from plugin_sync import sync_plugin
+        dest = sync_plugin(project_root)
+        console.print(f"[green]OK[/green] Synced plugin -> {dest}")
+
+    try:
+        from hephaestus_forge.project_registry import ProjectRegistry
+    except ImportError:
+        from project_registry import ProjectRegistry
+
+    reg = ProjectRegistry.load()
+    reg.add(project_root, name=project_name)
+    console.print(f"[green]OK[/green] Registered {project_name} -> {project_root}")
+    console.print(
+        "[bold]Next:[/bold] Rebuild HephaestusBridge in UE → Play (PIE) → "
+        f"[cyan]forge observe {project_root}[/cyan]"
+    )
+    from preflight_health import run_preflight
+
+    report = run_preflight("http://127.0.0.1:8765", project_root)
+    for check in report.checks:
+        if check.name in ("ue_pie", "bridge_template", "nim_api_key"):
+            style = "green" if check.ok else "yellow"
+            console.print(f"[{style}]  {check.name}:[/] {check.detail}")
+
+
+@app.command()
+def desktop(
+    project_path: Annotated[Optional[Path], typer.Argument(help="UE project root (optional)")] = None,
+    port: Annotated[int, typer.Option("--port", "-p", help="Local port")] = 3000,
+    api: Annotated[str, typer.Option("--api", help="UE Remote API base URL")] = "http://127.0.0.1:8765",
+    browser_only: Annotated[bool, typer.Option("--browser", help="Use browser instead of native window")] = False,
+):
+    """
+    Hephaestus Desktop — project picker + Mission Control in a native window.
+
+    Requires: pip install pywebview (optional; falls back to browser).
+    """
+    try:
+        from hephaestus_forge.desktop_app import run_desktop
+    except ImportError:
+        from desktop_app import run_desktop
+
+    run_desktop(project=project_path, port=port, api=api, browser_only=browser_only)
 
 
 def _write_mission_control_fallback(dist_dir: Path, api: str) -> None:
@@ -1634,7 +1642,7 @@ def _write_mission_control_fallback(dist_dir: Path, api: str) -> None:
     dist_dir.mkdir(parents=True, exist_ok=True)
     html = _MISSION_CONTROL_HTML.replace("__API_BASE__", api.rstrip("/"))
     (dist_dir / "index.html").write_text(html, encoding="utf-8")
-    console.print(f"[green]✓ Wrote static Mission Control → {dist_dir / 'index.html'}[/green]")
+    console.print(f"[green]Wrote static Mission Control -> {dist_dir / 'index.html'}[/green]")
 
 
 _MISSION_CONTROL_HTML = r"""<!DOCTYPE html>
@@ -1654,6 +1662,9 @@ _MISSION_CONTROL_HTML = r"""<!DOCTYPE html>
     --warn: #f0a202;
     --err: #e4572e;
     --ok: #6bcb77;
+    --avatar-primary: #3dd6c6;
+    --avatar-secondary: #06b6d4;
+    --avatar-glow: #22d3ee;
   }
   * { box-sizing: border-box; }
   body {
@@ -1667,12 +1678,28 @@ _MISSION_CONTROL_HTML = r"""<!DOCTYPE html>
     backdrop-filter: blur(8px); position: sticky; top: 0; z-index: 2;
   }
   header h1 { font-size: 1.05rem; margin: 0; letter-spacing: 0.04em; font-weight: 600; }
+  .avatar-wrap {
+    width: 48px; height: 48px; flex-shrink: 0; margin-right: 0.5rem;
+  }
+  #avatar { width: 100%; height: 100%; display: block; }
   .pill {
     font-size: 0.75rem; padding: 0.2rem 0.55rem; border-radius: 999px;
     border: 1px solid var(--line); color: var(--muted);
   }
   .pill.ok { color: var(--ok); border-color: #2f5d3a; }
   .pill.bad { color: var(--err); border-color: #6a2f22; }
+  .pill.busy {
+    color: var(--accent); border-color: var(--accent);
+    animation: agentPulse 1.2s ease-in-out infinite;
+  }
+  @keyframes agentPulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(61,214,198,0.35); }
+    50% { opacity: 0.88; box-shadow: 0 0 10px 2px rgba(61,214,198,0.45); }
+  }
+  #agentThought {
+    font-size: 0.8rem; color: var(--muted); margin: 0.25rem 0 0;
+    min-height: 1.1em; font-style: italic;
+  }
   main {
     display: grid; grid-template-columns: 1.4fr 1fr; gap: 1rem;
     padding: 1rem; max-width: 1400px; margin: 0 auto;
@@ -1703,20 +1730,61 @@ _MISSION_CONTROL_HTML = r"""<!DOCTYPE html>
   button { cursor: pointer; }
   button.primary { background: #163a36; border-color: #2a6b62; color: var(--accent); }
   button:hover { filter: brightness(1.08); }
-  #log, #actors {
+  #log, #actors, #chatLog {
     font-family: ui-monospace, Consolas, monospace; font-size: 0.78rem;
     max-height: 320px; overflow: auto; white-space: pre-wrap; color: #c9d6e8;
   }
+  #chatLog { max-height: 240px; margin-bottom: 0.75rem; border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem; background: #0a0e13; }
+  #assetButtons button { font-size: 0.75rem; padding: 0.25rem 0.5rem; }
+  .chat-row { display: flex; gap: 0.5rem; }
+  #chatInput { flex: 1; min-height: 72px; resize: vertical; }
   .actor { padding: 0.25rem 0; border-bottom: 1px solid #1c2530; color: var(--muted); }
   .hint { color: var(--muted); font-size: 0.8rem; margin-top: 0.5rem; }
+  /* Avatar form selector */
+  .avatar-form-selector {
+    display: flex; gap: 4px; margin-left: auto; padding-left: 1rem;
+  }
+  .form-btn {
+    width: 28px; height: 28px;
+    border-radius: 4px;
+    border: 1px solid var(--line);
+    background: transparent;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .form-btn:hover { border-color: var(--accent); background: #163a36; color: var(--accent); }
+  .form-btn.active { border-color: var(--accent); background: #163a36; color: var(--accent); }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  }
+  #toast {
+    position: fixed; bottom: 1rem; right: 1rem; max-width: 360px;
+    padding: 0.65rem 0.9rem; border-radius: 8px; border: 1px solid var(--line);
+    background: #1a2330; color: var(--text); font-size: 0.85rem; z-index: 99;
+    opacity: 0; pointer-events: none; transition: opacity 0.2s;
+  }
+  #toast.show { opacity: 1; }
+  #toast.err { border-color: #6a2f22; color: #ffb4a8; }
+  #toast.ok { border-color: #2f5d3a; color: #9dffc0; }
 </style>
 </head>
 <body>
 <header>
+  <div class="avatar-wrap"><canvas id="avatar" width="96" height="96"></canvas></div>
   <h1>HEPHAESTUS · Mission Control</h1>
   <span id="status" class="pill bad">API offline</span>
+  <span class="pill" id="plannerStatus">Planner …</span>
+  <span class="pill" id="agentStatus">Agent idle</span>
   <span class="pill" id="apiLabel"></span>
 </header>
+<section id="preflightPanel" style="max-width:1400px;margin:0 auto;padding:0 1rem 0.5rem">
+  <h2 style="font-size:0.85rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin:0 0 0.5rem">Preflight</h2>
+  <div id="preflightChecks" class="row" style="gap:0.4rem"></div>
+  <p id="preflightHint" class="hint" style="margin:0.25rem 0 0"></p>
+</section>
 <main>
   <section>
     <h2>Viewport</h2>
@@ -1724,7 +1792,7 @@ _MISSION_CONTROL_HTML = r"""<!DOCTYPE html>
       <button class="primary" id="btnCapture">Capture frame</button>
       <button id="btnRefresh">Refresh image</button>
       <button id="btnHealth">Ping API</button>
-      <button id="btnAgentLoop" class="primary">Run agent loop</button>
+      <button id="btnAgentLoop" class="primary">Run agent loop (DeepSeek)</button>
     </div>
     <div class="viewport-wrap">
       <img id="viewport" alt=""/>
@@ -1747,22 +1815,449 @@ _MISSION_CONTROL_HTML = r"""<!DOCTYPE html>
     <div id="actors"></div>
   </section>
   <section style="grid-column: 1 / -1">
+    <h2>Hephaestus</h2>
+    <div id="chatLog"></div>
+    <p id="agentThought"></p>
+    <div id="assetButtons" class="row" style="flex-wrap:wrap;margin:0.5rem 0"></div>
+    <div class="chat-row">
+      <textarea id="chatInput" placeholder="Describe what you want in UE — e.g. Seed a lit scene with three cubes in front of the camera"></textarea>
+      <div style="display:flex;flex-direction:column;gap:0.5rem">
+        <label class="hint" for="chatMode">Mode</label>
+        <select id="chatMode">
+          <option value="auto">Auto</option>
+          <option value="cinematic">Cinematic</option>
+          <option value="gameplay">Gameplay</option>
+        </select>
+        <button class="primary" id="btnChatSend">Send</button>
+        <button id="btnChatReset">New session</button>
+        <button id="btnExportSession">Export session</button>
+      </div>
+    </div>
+    <p class="hint">DeepSeek V4 Pro operates UE until your goal is met (or reports what's blocking). Set HEPHAESTUS_PLANNER_VISION=1 for viewport captions. Requires NVIDIA_API_KEY on the forge process.</p>
+  </section>
+  <section style="grid-column: 1 / -1">
     <h2>Command log</h2>
     <div id="log"></div>
   </section>
 </main>
+<div id="toast" role="status" aria-live="polite"></div>
 <script>
+// =======================
+// Polymorphic Avatar System (shared with launcher)
+// =======================
+const canvas = document.getElementById('avatar');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+const CX = W / 2, CY = H / 2;
+
+const FORMS = [
+  { id: 'geometric', label: 'Geometric', char: '◆' },
+  { id: 'organic', label: 'Organic', char: '◉' },
+  { id: 'abstract', label: 'Abstract', char: '⬢' },
+  { id: 'particle', label: 'Swarm', char: '⋆' }
+];
+
+let currentForm = 0;
+let targetForm = 0;
+let morphProgress = 0;
+let state = 'idle';
+let time = 0;
+let particles = [];
+let formShapes = [];
+let avatarEventSource = null;
+
+const STATE_COLORS = {
+  idle: { primary: '#3dd6c6', secondary: '#06b6d4', glow: '#22d3ee' },
+  connecting: { primary: '#f0a202', secondary: '#fbbf24', glow: '#fde047' },
+  active: { primary: '#6bcb77', secondary: '#86efac', glow: '#86efac' },
+  thinking: { primary: '#a855f7', secondary: '#d946ef', glow: '#f0abfc' },
+  working: { primary: '#3dd6c6', secondary: '#06b6d4', glow: '#22d3ee' },
+  success: { primary: '#6bcb77', secondary: '#4ade80', glow: '#86efac' },
+  error: { primary: '#e4572e', secondary: '#f87171', glow: '#fecaca' }
+};
+
+function generateShapes(formId, count) {
+  const shapes = [];
+  for (let i = 0; i < count; i++) {
+    const angle = (i / count) * Math.PI * 2;
+    const radius = 35 + Math.random() * 20;
+    const phase = Math.random() * Math.PI * 2;
+    const speed = 0.3 + Math.random() * 0.7;
+    const size = 3 + Math.random() * 5;
+    shapes.push({ angle, radius, phase, speed, size, form: formId });
+  }
+  return shapes;
+}
+
+function initParticles() {
+  particles = [];
+  for (let i = 0; i < 60; i++) {
+    particles.push({
+      x: CX + (Math.random() - 0.5) * 80,
+      y: CY + (Math.random() - 0.5) * 80,
+      vx: (Math.random() - 0.5) * 0.5,
+      vy: (Math.random() - 0.5) * 0.5,
+      size: 1 + Math.random() * 2.5,
+      life: Math.random(),
+      decay: 0.003 + Math.random() * 0.007,
+      hue: 190 + Math.random() * 40
+    });
+  }
+}
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+function easeInOutCubic(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
+function getStateColors() { return STATE_COLORS[state] || STATE_COLORS.idle; }
+
+function drawGeometricShape(ctx, shape, colors, progress) {
+  const a = shape.angle + time * shape.speed * 0.5;
+  const r = shape.radius + Math.sin(time * shape.speed + shape.phase) * 8;
+  const x = CX + Math.cos(a) * r;
+  const y = CY + Math.sin(a) * r;
+  const s = shape.size * (1 + 0.3 * Math.sin(time * 2 + shape.phase));
+
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(a + time * 0.3);
+
+  const sides = 4 + Math.floor(progress * 4);
+  ctx.beginPath();
+  for (let i = 0; i < sides; i++) {
+    const aa = (i / sides) * Math.PI * 2;
+    const rr = s * (0.7 + 0.3 * Math.sin(time * 3 + aa * 2));
+    ctx.lineTo(Math.cos(aa) * rr, Math.sin(aa) * rr);
+  }
+  ctx.closePath();
+
+  const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, s * 1.5);
+  grad.addColorStop(0, colors.primary);
+  grad.addColorStop(1, colors.secondary);
+  ctx.fillStyle = grad;
+  ctx.fill();
+  ctx.strokeStyle = colors.glow;
+  ctx.lineWidth = 1.5;
+  ctx.shadowColor = colors.glow;
+  ctx.shadowBlur = 8;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawOrganicShape(ctx, shape, colors, progress) {
+  const a = shape.angle + time * shape.speed * 0.3;
+  const r = shape.radius + Math.sin(time * shape.speed * 0.7 + shape.phase) * 12;
+  const x = CX + Math.cos(a) * r;
+  const y = CY + Math.sin(a) * r;
+  const s = shape.size * (1 + 0.4 * Math.sin(time * 1.5 + shape.phase));
+
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(a);
+
+  ctx.beginPath();
+  const lobes = 3 + Math.floor(progress * 4);
+  for (let i = 0; i < lobes * 2; i++) {
+    const aa = (i / (lobes * 2)) * Math.PI * 2;
+    const rr = s * (i % 2 === 0 ? 1 : 0.5 + 0.3 * Math.sin(time * 2 + aa * 3));
+    ctx.lineTo(Math.cos(aa) * rr, Math.sin(aa) * rr);
+  }
+  ctx.closePath();
+
+  const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, s * 2);
+  grad.addColorStop(0, colors.primary + 'CC');
+  grad.addColorStop(0.5, colors.secondary + '88');
+  grad.addColorStop(1, 'transparent');
+  ctx.fillStyle = grad;
+  ctx.fill();
+  ctx.strokeStyle = colors.glow;
+  ctx.lineWidth = 1;
+  ctx.shadowColor = colors.glow;
+  ctx.shadowBlur = 12;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawAbstractShape(ctx, shape, colors, progress) {
+  const a = shape.angle + time * shape.speed * 0.4;
+  const r = shape.radius + Math.sin(time * shape.speed * 0.5 + shape.phase) * 6;
+  const x = CX + Math.cos(a) * r;
+  const y = CY + Math.sin(a) * r;
+  const s = shape.size * (1 + 0.2 * Math.sin(time * 2.5 + shape.phase));
+
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(a + time * 0.2);
+
+  ctx.beginPath();
+  const sides = 6;
+  for (let i = 0; i < sides; i++) {
+    const aa = (i / sides) * Math.PI * 2;
+    const rr = s * (0.8 + 0.4 * Math.sin(time * 4 + aa * 3 + progress * Math.PI));
+    ctx.lineTo(Math.cos(aa) * rr, Math.sin(aa) * rr);
+  }
+  ctx.closePath();
+
+  const grad = ctx.createLinearGradient(-s, -s, s, s);
+  grad.addColorStop(0, colors.primary);
+  grad.addColorStop(1, colors.secondary);
+  ctx.fillStyle = grad;
+  ctx.globalAlpha = 0.7 + 0.3 * Math.sin(time * 2 + shape.phase);
+  ctx.fill();
+  ctx.strokeStyle = colors.glow;
+  ctx.lineWidth = 1;
+  ctx.shadowColor = colors.glow;
+  ctx.shadowBlur = 6;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function renderShapes(colors, formProgress) {
+  const drawFns = {
+    geometric: drawGeometricShape,
+    organic: drawOrganicShape,
+    abstract: drawAbstractShape,
+    particle: () => {}
+  };
+  const curShapes = formShapes[currentForm];
+  const curDraw = drawFns[FORMS[currentForm].id];
+  curShapes.forEach(s => curDraw(ctx, s, colors, formProgress));
+
+  if (targetForm !== currentForm && morphProgress > 0) {
+    const tgtShapes = formShapes[targetForm];
+    const tgtDraw = drawFns[FORMS[targetForm].id];
+    const mp = easeInOutCubic(morphProgress);
+    const maxLen = Math.max(curShapes.length, tgtShapes.length);
+    for (let i = 0; i < maxLen; i++) {
+      const s1 = curShapes[i % curShapes.length];
+      const s2 = tgtShapes[i % tgtShapes.length];
+      const merged = {
+        angle: lerp(s1.angle, s2.angle, mp),
+        radius: lerp(s1.radius, s2.radius, mp),
+        phase: lerp(s1.phase, s2.phase, mp),
+        speed: lerp(s1.speed, s2.speed, mp),
+        size: lerp(s1.size, s2.size, mp),
+      };
+      tgtDraw(ctx, merged, colors, mp);
+    }
+  }
+}
+
+function renderParticles(colors) {
+  particles.forEach(p => {
+    const dx = CX - p.x, dy = CY - p.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist > 1) { p.vx += dx * 0.0003; p.vy += dy * 0.0003; }
+    p.vx *= 0.985; p.vy *= 0.985;
+    p.x += p.vx; p.y += p.vy;
+    p.life -= p.decay;
+    if (p.life <= 0 || dist > 120) {
+      const angle = Math.random() * Math.PI * 2;
+      const r = 60 + Math.random() * 40;
+      p.x = CX + Math.cos(angle) * r;
+      p.y = CY + Math.sin(angle) * r;
+      p.life = 1;
+      p.vx = (Math.random() - 0.5) * 0.5;
+      p.vy = (Math.random() - 0.5) * 0.5;
+    }
+    const alpha = Math.max(0, Math.min(1, p.life * 1.5));
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fillStyle = `hsla(${p.hue}, 80%, 60%, ${alpha * 0.6})`;
+    ctx.shadowColor = colors.glow;
+    ctx.shadowBlur = 4;
+    ctx.fill();
+  });
+}
+
+function renderCore(colors) {
+  const pulse = 0.6 + 0.4 * Math.sin(time * 3);
+  const coreSize = 18 * pulse;
+  const grad = ctx.createRadialGradient(CX, CY, 0, CX, CY, coreSize * 2);
+  grad.addColorStop(0, colors.primary);
+  grad.addColorStop(0.5, colors.secondary + '88');
+  grad.addColorStop(1, 'transparent');
+  ctx.beginPath();
+  ctx.arc(CX, CY, coreSize, 0, Math.PI * 2);
+  ctx.fillStyle = grad;
+  ctx.shadowColor = colors.glow;
+  ctx.shadowBlur = 20 * pulse;
+  ctx.fill();
+}
+
+function renderRing(colors) {
+  const ringRadius = 55 + 5 * Math.sin(time * 0.8);
+  ctx.beginPath();
+  ctx.arc(CX, CY, ringRadius, 0, Math.PI * 2);
+  ctx.strokeStyle = colors.glow + '44';
+  ctx.lineWidth = 1;
+  ctx.shadowColor = colors.glow;
+  ctx.shadowBlur = 8;
+  ctx.stroke();
+  for (let i = 0; i < 3; i++) {
+    const a = time * 0.7 + i * Math.PI * 2 / 3;
+    const x = CX + Math.cos(a) * ringRadius;
+    const y = CY + Math.sin(a) * ringRadius;
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, Math.PI * 2);
+    ctx.fillStyle = colors.glow;
+    ctx.shadowColor = colors.glow;
+    ctx.shadowBlur = 6;
+    ctx.fill();
+  }
+}
+
+function render() {
+  ctx.clearRect(0, 0, W, H);
+  time += 1/60;
+  if (targetForm !== currentForm) {
+    morphProgress = Math.min(1, morphProgress + 0.02);
+    if (morphProgress >= 1) { currentForm = targetForm; morphProgress = 0; }
+  } else {
+    morphProgress = Math.max(0, morphProgress - 0.02);
+  }
+  const colors = getStateColors();
+  const formProgress = Math.min(1, time * 0.5);
+  if (state === 'particle' || FORMS[currentForm].id === 'particle') {
+    renderParticles(colors);
+    renderCore(colors);
+  } else {
+    renderShapes(colors, formProgress);
+    renderCore(colors);
+    renderRing(colors);
+  }
+  if (state === 'thinking' || state === 'working') {
+    const t = Math.sin(time * 5) * 0.5 + 0.5;
+    ctx.beginPath();
+    ctx.arc(CX, CY, 50 + t * 8, 0, Math.PI * 2);
+    ctx.strokeStyle = colors.glow + Math.floor(t * 100).toString(16).padStart(2, '0');
+    ctx.lineWidth = 2;
+    ctx.shadowBlur = 0;
+    ctx.stroke();
+  }
+  if (state === 'success') {
+    const burst = Math.sin(time * 10) * 0.5 + 0.5;
+    ctx.beginPath();
+    ctx.arc(CX, CY, 40 + burst * 20, 0, Math.PI * 2);
+    ctx.strokeStyle = colors.glow + Math.floor(burst * 150).toString(16).padStart(2, '0');
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  }
+  if (state === 'error') {
+    const shake = Math.sin(time * 30) * 2;
+    ctx.translate(shake, 0);
+  }
+  requestAnimationFrame(render);
+}
+
+function initAvatar() {
+  formShapes = FORMS.map(f => generateShapes(f.id, 12));
+  initParticles();
+  connectAvatarSSE();
+  requestAnimationFrame(render);
+}
+
+function connectAvatarSSE() {
+  if (avatarEventSource) avatarEventSource.close();
+  avatarEventSource = new EventSource("/api/avatar/stream");
+  avatarEventSource.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      if (data.state) state = data.state;
+      if (typeof data.form === 'number') targetForm = data.form;
+    } catch (e) {}
+  };
+  avatarEventSource.onerror = () => {
+    setTimeout(connectAvatarSSE, 3000);
+  };
+}
+
+async function pollAvatarState() {
+  try {
+    const res = await fetch("/api/avatar/state");
+    const data = await res.json();
+    if (data.state) state = data.state;
+    if (typeof data.form === 'number') targetForm = data.form;
+  } catch {}
+  setTimeout(pollAvatarState, 800);
+}
+
+initAvatar();
+pollAvatarState();
+
+// =======================
+// Mission Control Logic
+// =======================
 const API = "__API_BASE__";
 const statusEl = document.getElementById("status");
+const plannerStatusEl = document.getElementById("plannerStatus");
 const logEl = document.getElementById("log");
 const actorsEl = document.getElementById("actors");
 const viewport = document.getElementById("viewport");
 const viewportPlaceholder = document.getElementById("viewportPlaceholder");
 document.getElementById("apiLabel").textContent = API || (location.origin + " → UE :8765");
 
+async function spawnAssetDirect(assetPath) {
+  if (!assetPath || agentBusy) return;
+  setAgentBusy(true, "Spawning asset…");
+  state = "working";
+  try {
+    const res = await fetch("/agent/spawn", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ asset_path: assetPath }),
+    });
+    const json = await res.json();
+    log("spawn", json);
+    await showFrame();
+    await listPaths();
+    state = json.ok ? "success" : "error";
+  } catch (e) {
+    log("error", String(e));
+    state = "error";
+  } finally {
+    setAgentBusy(false);
+  }
+}
+
+function renderAssetButtons(paths) {
+  const el = document.getElementById("assetButtons");
+  if (!el) return;
+  el.innerHTML = "";
+  for (const p of (paths || []).slice(0, 8)) {
+    const b = document.createElement("button");
+    b.textContent = "Spawn " + p.split("/").pop();
+    b.title = p;
+    b.onclick = () => spawnAssetDirect(p);
+    el.appendChild(b);
+  }
+}
+
+async function searchAssets(query) {
+  if (!query) return;
+  try {
+    const res = await fetch("/agent/search?q=" + encodeURIComponent(query));
+    const json = await res.json();
+    if (json.assets && json.assets.length) {
+      renderAssetButtons(json.assets);
+      log("assets", json.assets);
+    }
+  } catch (e) {
+    log("error", String(e));
+  }
+}
+
 function log(msg, data) {
   const line = typeof data === "undefined" ? msg : msg + " " + JSON.stringify(data, null, 0);
   logEl.textContent = new Date().toLocaleTimeString() + "  " + line + "\n" + logEl.textContent;
+}
+
+let toastTimer = null;
+function showToast(message, kind) {
+  const el = document.getElementById("toast");
+  if (!el) return;
+  el.textContent = message;
+  el.className = "show" + (kind ? " " + kind : "");
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.className = ""; }, 4500);
 }
 
 let frameObjectUrl = null;
@@ -1770,9 +2265,7 @@ async function showFrame() {
   const url = API + "/v1/frame?t=" + Date.now();
   try {
     const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) {
-      throw new Error("HTTP " + res.status);
-    }
+    if (!res.ok) { throw new Error("HTTP " + res.status); }
     const blob = await res.blob();
     if (frameObjectUrl) URL.revokeObjectURL(frameObjectUrl);
     frameObjectUrl = URL.createObjectURL(blob);
@@ -1841,11 +2334,8 @@ document.getElementById("btnCapture").onclick = async () => {
   viewportPlaceholder.classList.remove("hidden");
   viewportPlaceholder.textContent = "Capturing…";
   const r = await postCommand({ command: "vision.capture_frame", params: {} });
-  if (r && r.success) {
-    await showFrame();
-  } else {
-    viewportPlaceholder.textContent = "Capture failed — is PIE running?";
-  }
+  if (r && r.success) { await showFrame(); }
+  else { viewportPlaceholder.textContent = "Capture failed — is PIE running?"; }
 };
 document.getElementById("btnRefresh").onclick = () => showFrame();
 document.getElementById("btnSpawnLight").onclick = () =>
@@ -1855,10 +2345,7 @@ document.getElementById("btnSpawnCube").onclick = () =>
 document.getElementById("btnList").onclick = async () => {
   const r = await postCommand({ command: "world.list_actors", params: {} });
   let paths = r.actor_paths || [];
-  try {
-    const inner = JSON.parse(r.result_json || "{}");
-    if (inner.actors) paths = inner.actors;
-  } catch (_) {}
+  try { const inner = JSON.parse(r.result_json || "{}"); if (inner.actors) paths = inner.actors; } catch (_) {}
   actorsEl.innerHTML = paths.map(p => `<div class="actor">${p}</div>`).join("") || "<div class='actor'>(empty)</div>";
 };
 document.getElementById("btnDestroy").onclick = () => {
@@ -1904,42 +2391,271 @@ function decide(paths) {
 async function listPaths() {
   const r = await postCommand({ command: "world.list_actors", params: {} });
   let paths = r.actor_paths || [];
-  try {
-    const inner = JSON.parse(r.result_json || "{}");
-    if (inner.actors) paths = inner.actors;
-  } catch (_) {}
-  actorsEl.innerHTML = paths.map(p => `<div class="actor">${p}</div>`).join("") || "<div class='actor'>(empty)</div>";
+  try { const inner = JSON.parse(r.result_json || "{}"); if (inner.actors) paths = inner.actors; } catch (_) {}
+  actorsEl.innerHTML = paths.map(p => `<div class="actor" data-path="${p.replace(/"/g, '&quot;')}" title="Click to select for destroy">${p}</div>`).join("") || "<div class='actor'>(empty)</div>";
+  actorsEl.querySelectorAll(".actor[data-path]").forEach(el => {
+    el.onclick = () => { document.getElementById("actorPath").value = el.getAttribute("data-path") || ""; };
+  });
   return paths;
 }
 
 let agentBusy = false;
+const agentStatusEl = document.getElementById("agentStatus");
+const agentThoughtEl = document.getElementById("agentThought");
+let thoughtStream = null;
+
+function setAgentBusy(busy, label) {
+  agentBusy = !!busy;
+  if (agentStatusEl) {
+    agentStatusEl.textContent = busy ? (label || "Agent working…") : "Agent idle";
+    agentStatusEl.className = busy ? "pill busy" : "pill";
+  }
+  if (!busy && agentThoughtEl) agentThoughtEl.textContent = "";
+}
+
+function connectThoughtStream() {
+  if (thoughtStream) return;
+  thoughtStream = new EventSource("/agent/thoughts/stream");
+  fetch("/agent/thoughts/last").then((r) => r.json()).then((t) => {
+    if (t && t.metadata && t.metadata.busy) setAgentBusy(true, "Agent working…");
+    if (t && t.kind !== "status" && t.content && agentThoughtEl) {
+      agentThoughtEl.textContent = String(t.content).slice(0, 240);
+    }
+  }).catch(() => {});
+  thoughtStream.onmessage = (ev) => {
+    try {
+      const t = JSON.parse(ev.data);
+      if (t.metadata && typeof t.metadata.busy === "boolean") {
+        setAgentBusy(t.metadata.busy || t.busy, t.metadata.busy ? "Agent working…" : undefined);
+      } else if (t.busy) {
+        setAgentBusy(true, "Agent working…");
+      }
+      if (t.kind === "status") return;
+      if (t.content) {
+        if (agentThoughtEl) agentThoughtEl.textContent = String(t.content).slice(0, 240);
+        const avatarState = (t.kind === "plan" || t.kind === "llm") ? "thinking" : "working";
+        if (agentBusy) state = avatarState;
+        log(t.kind || "thought", t.content);
+      }
+    } catch (_) {}
+  };
+  thoughtStream.onerror = () => {
+    if (thoughtStream) { thoughtStream.close(); thoughtStream = null; }
+    setTimeout(connectThoughtStream, 3000);
+  };
+}
+connectThoughtStream();
+
+async function pollAgentJob(jobId) {
+  const deadline = Date.now() + 30 * 60 * 1000;
+  while (Date.now() < deadline) {
+    const res = await fetch("/agent/job/" + encodeURIComponent(jobId));
+    const data = await res.json();
+    if (data.status === "done" && data.result) return data.result;
+    if (data.status === "error") throw new Error(data.error || "Agent job failed");
+    await new Promise((r) => setTimeout(r, 350));
+  }
+  throw new Error("Agent job timed out");
+}
+
+function applyChatResult(json) {
+  log("chat", json.reply || json.error || json);
+  if (json.grade) log("reflection", json.grade.summary || json.grade);
+  if (json.asset_matches && json.asset_matches.length) {
+    renderAssetButtons(json.asset_matches);
+    log("assets", json.asset_matches);
+  }
+  if (json.llm_error) {
+    log("error", "LLM: " + json.llm_error);
+    showToast("LLM: " + json.llm_error, "err");
+  }
+  if (!json.llm_available && json.planner === "heuristic") {
+    showToast("Heuristic mode — set NVIDIA_API_KEY for DeepSeek", "err");
+  }
+  if (json.session) renderChat(json.session.messages || []);
+  state = json.ok ? "success" : "active";
+}
+
+function applyLoopResult(json) {
+  log("tool_result", json);
+  if (json.llm_error) log("error", "LLM: " + json.llm_error);
+  if (!json.llm_available) log("error", "DeepSeek not used — check NVIDIA_API_KEY in shell running forge observe");
+  (json.thoughts || []).forEach((t) => log(t.kind || "plan", t.content || ""));
+  state = json.ok ? "success" : "error";
+  setTimeout(() => { state = "active"; }, 1500);
+  log("reflection", json.planner ? ("Finished with planner " + json.planner) : "Finished");
+}
+
+function renderChat(messages) {
+  const el = document.getElementById("chatLog");
+  if (!el) return;
+  el.innerHTML = "";
+  for (const m of messages || []) {
+    const div = document.createElement("div");
+    div.style.whiteSpace = "pre-wrap";
+    div.textContent = (m.role === "user" ? "You: " : "Hephaestus: ") + (m.content || "");
+    el.appendChild(div);
+  }
+  el.scrollTop = el.scrollHeight;
+}
+
+async function loadAgentHealth() {
+  if (!plannerStatusEl) return;
+  try {
+    const res = await fetch("/agent/health");
+    const data = await res.json();
+    const checksEl = document.getElementById("preflightChecks");
+    const hintEl = document.getElementById("preflightHint");
+    if (checksEl && data.checks) {
+      checksEl.innerHTML = "";
+      for (const c of data.checks) {
+        const span = document.createElement("span");
+        span.className = "pill " + (c.ok ? "ok" : "bad");
+        span.title = c.detail || "";
+        span.textContent = (c.ok ? "✓ " : "✗ ") + c.name;
+        checksEl.appendChild(span);
+      }
+    }
+    if (hintEl) {
+      hintEl.textContent = data.ready_for_goals
+        ? "Ready for agent goals."
+        : (data.checks || []).filter(c => !c.ok && c.blocker).map(c => c.detail).join(" ") || "Fix blockers above before chatting.";
+    }
+    if (data.llm_available) {
+      plannerStatusEl.textContent = "DeepSeek ready";
+      plannerStatusEl.className = "pill ok";
+    } else {
+      plannerStatusEl.textContent = "No API key";
+      plannerStatusEl.className = "pill bad";
+      if (data.llm_error) log("error", data.llm_error);
+    }
+    const statusEl = document.getElementById("status");
+    if (statusEl) {
+      const ueCheck = (data.checks || []).find(c => c.name === "ue_pie");
+      if (ueCheck && ueCheck.ok) {
+        statusEl.textContent = "PIE online";
+        statusEl.className = "pill ok";
+      } else {
+        statusEl.textContent = "PIE offline";
+        statusEl.className = "pill bad";
+      }
+    }
+  } catch {
+    plannerStatusEl.textContent = "Planner offline";
+    plannerStatusEl.className = "pill bad";
+  }
+}
+
+async function loadSession() {
+  try {
+    const res = await fetch("/agent/session");
+    const data = await res.json();
+    if (data.session) {
+      renderChat(data.session.messages || []);
+      const modeEl = document.getElementById("chatMode");
+      if (modeEl && data.session.mode) modeEl.value = data.session.mode;
+    }
+  } catch {}
+}
+
+async function sendChat(reset) {
+  if (agentBusy) return;
+  const input = document.getElementById("chatInput");
+  const message = (input && input.value || "").trim();
+  if (!message && !reset) return;
+  setAgentBusy(true, "Hephaestus working…");
+  const btn = document.getElementById("btnChatSend");
+  if (btn) btn.disabled = true;
+  state = "working";
+  try {
+    const modeEl = document.getElementById("chatMode");
+    const mode = modeEl ? modeEl.value : "auto";
+    const res = await fetch("/agent/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: message || "Start fresh", reset: !!reset, max_steps: 20, mode }),
+    });
+    let json = await res.json();
+    if (json.job_id) {
+      log("plan", "Job " + json.job_id + " — streaming thoughts…");
+      json = await pollAgentJob(json.job_id);
+    }
+    applyChatResult(json);
+    if (input && !reset) input.value = "";
+    await showFrame();
+    await listPaths();
+  } catch (e) {
+    log("error", String(e));
+    showToast(String(e), "err");
+    state = "error";
+  } finally {
+    setAgentBusy(false);
+    if (btn) btn.disabled = false;
+  }
+}
+
+document.getElementById("btnChatSend").onclick = () => sendChat(false);
+document.getElementById("btnChatReset").onclick = () => sendChat(true);
+document.getElementById("btnExportSession").onclick = async () => {
+  try {
+    const res = await fetch("/agent/export");
+    const data = await res.json();
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "hephaestus-session-" + (data.session && data.session.id ? data.session.id : "export") + ".json";
+    a.click();
+    URL.revokeObjectURL(a.href);
+    showToast("Session exported", "ok");
+  } catch (e) {
+    showToast("Export failed: " + e, "err");
+  }
+};
+document.getElementById("chatInput").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(false); }
+});
+document.getElementById("chatInput").addEventListener("blur", () => {
+  const q = document.getElementById("chatInput").value.trim();
+  if (q && q.length < 40) searchAssets(q);
+});
+loadSession();
+loadAgentHealth();
+setInterval(loadAgentHealth, 30000);
+
 document.getElementById("btnAgentLoop").onclick = async () => {
   if (agentBusy) return;
-  agentBusy = true;
+  setAgentBusy(true, "Agent loop running…");
   const btn = document.getElementById("btnAgentLoop");
   btn.disabled = true;
   try {
-    log("plan", "Starting Nemotron-3 agent loop via /agent/loop");
+    log("plan", "Starting DeepSeek agent loop via /agent/loop");
     viewportPlaceholder.classList.remove("hidden");
-    viewportPlaceholder.textContent = "Agent running…";
+    viewportPlaceholder.textContent = "Agent running (DeepSeek V4 Pro)…";
+    state = 'working';
+    const chatInput = document.getElementById("chatInput");
+    const goalText = (chatInput && chatInput.value.trim()) || "Seed a lit test scene with a few cubes in front of the camera, then idle.";
     const res = await fetch("/agent/loop", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        steps: 3,
-        goal: "Seed a lit test scene with a few cubes, tune a light if present, then idle.",
+        max_steps: 12,
+        goal: goalText,
       }),
     });
-    const json = await res.json();
-    log("tool_result", json);
-    (json.thoughts || []).forEach(t => log(t.kind || "plan", t.content || ""));
+    let json = await res.json();
+    if (json.job_id) {
+      log("plan", "Loop job " + json.job_id + " — streaming thoughts…");
+      json = await pollAgentJob(json.job_id);
+    }
+    applyLoopResult(json);
     await showFrame();
     await listPaths();
-    log("reflection", json.planner ? ("Finished with planner " + json.planner) : "Finished");
   } catch (e) {
+    state = 'error';
+    setTimeout(() => { state = 'idle'; }, 1000);
     log("error", String(e));
   } finally {
-    agentBusy = false;
+    setAgentBusy(false);
     btn.disabled = false;
   }
 };
@@ -1951,6 +2667,58 @@ showFrame();
 </body>
 </html>
 """
+
+
+@app.command("search-assets")
+def search_assets_cmd(
+    query: Annotated[str, typer.Argument(help="Search token e.g. dog, cube")],
+    host: Annotated[str, typer.Option("--host")] = "127.0.0.1",
+    port: Annotated[int, typer.Option("--port")] = 8765,
+):
+    """Search /Game (and engine basics) for meshes matching query."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from agent_asset import search_project_assets
+    from ue_agent_loop import RemoteUeClient
+
+    client = RemoteUeClient(f"http://{host}:{port}", timeout=30.0)
+    seen: list[str] = []
+    for cls in ("", "SkeletalMesh", "StaticMesh", "AnimSequence"):
+        for p in search_project_assets(client, query, asset_class=cls, limit=12):
+            if p not in seen:
+                seen.append(p)
+    for p in seen:
+        console.print(p)
+    if not seen:
+        console.print("[yellow]No matches[/yellow]")
+        raise typer.Exit(1)
+
+
+@app.command("spawn-asset")
+def spawn_asset_cmd(
+    asset_path: Annotated[str, typer.Argument(help="/Game/... mesh or skeletal asset path")],
+    host: Annotated[str, typer.Option("--host")] = "127.0.0.1",
+    port: Annotated[int, typer.Option("--port")] = 8765,
+    no_light: Annotated[bool, typer.Option("--no-light", help="Skip spawning a point light")] = False,
+):
+    """Spawn a project asset in front of the PIE camera (no LLM)."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from agent_asset import spawn_asset_in_view
+    from ue_agent_loop import RemoteUeClient
+
+    client = RemoteUeClient(f"http://{host}:{port}", timeout=60.0)
+    try:
+        client.health()
+    except Exception as exc:
+        console.print(f"[red]✗ Remote API unreachable: {exc}[/red]")
+        raise typer.Exit(1)
+    results = spawn_asset_in_view(client, asset_path, with_light=not no_light)
+    for i, res in enumerate(results, 1):
+        console.print(f"[dim]step {i}[/dim] success={res.get('success')} error={res.get('error')}")
+    if results and all(r.get("success") for r in results):
+        console.print(f"[green]✓ Spawned {asset_path}[/green]")
+    else:
+        console.print(f"[red]✗ Spawn failed for {asset_path}[/red]")
+        raise typer.Exit(2)
 
 
 @app.command("command")
@@ -2025,7 +2793,7 @@ def command_cmd(
 
 @app.command("loop")
 def agent_loop_cmd(
-    steps: Annotated[int, typer.Option("--steps", "-n", help="Max observe->act cycles")] = 3,
+    steps: Annotated[int, typer.Option("--steps", "-n", help="Max observe->act cycles")] = 20,
     host: Annotated[str, typer.Option("--host")] = "127.0.0.1",
     port: Annotated[int, typer.Option("--port")] = 8765,
     seed: Annotated[Optional[int], typer.Option("--seed", help="RNG seed for spawn positions")] = None,
@@ -2035,7 +2803,7 @@ def agent_loop_cmd(
         "Seed a lit test scene with a few cubes visible in frame, then idle."
     ),
     llm_model: Annotated[Optional[str], typer.Option("--llm-model", help="Chat model id")] = (
-        "nvidia/nemotron-3-ultra-550b-a55b"
+        "deepseek-ai/deepseek-v4-pro-0813"
     ),
     llm_url: Annotated[Optional[str], typer.Option("--llm-url", help="OpenAI-compatible base URL")] = (
         "https://integrate.api.nvidia.com/v1"
@@ -2044,8 +2812,8 @@ def agent_loop_cmd(
     """
     Run an observe -> decide -> act -> recapture loop against a live PIE session.
 
-    Default planner LLM is Nemotron-3 Ultra (nvidia/nemotron-3-ultra-550b-a55b) via NVIDIA NIM.
-    Requires NVIDIA_API_KEY. --planner auto uses Nemotron when a key is available, else heuristic.
+    Default planner LLM is DeepSeek V4 Pro (deepseek-ai/deepseek-v4-pro-0813) via NVIDIA NIM.
+    Requires NVIDIA_API_KEY. --planner auto uses NIM when a key is available, else heuristic.
     """
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from ue_agent_loop import ObserveActLoop, RemoteUeClient
@@ -2053,11 +2821,16 @@ def agent_loop_cmd(
 
     mode = resolve_planner_mode(planner)
     base = f"http://{host}:{port}"
+    client = RemoteUeClient(base, timeout=max(timeout, 120.0))
+    from agent_asset import augment_goal_with_assets
+
+    goal, asset_matches, _asset_meta = augment_goal_with_assets(client, goal)
 
     llm = VisionLLMPlanner(
         base_url=llm_url,
         model=llm_model,
         goal=goal,
+        asset_hints=asset_matches,
         fallback_rng=__import__("random").Random(seed),
         timeout=max(timeout, 120.0),
     )
@@ -2073,7 +2846,7 @@ def agent_loop_cmd(
         f"[bold]Observe -> Act loop[/bold]\n"
         f"API: [cyan]{base}[/cyan]\n"
         f"Steps: [cyan]{steps}[/cyan]\n"
-        f"Planner: [cyan]{'nemotron/' + llm.model if use_llm else 'heuristic'}[/cyan]",
+        f"Planner: [cyan]{'nim/' + llm.model if use_llm else 'heuristic'}[/cyan]",
         border_style="green",
     ))
     if use_llm:
@@ -2100,7 +2873,6 @@ def agent_loop_cmd(
         safe = content.replace("\u2192", "->").replace("[", "(").replace("]", ")")
         console.print(f"[{color}]{kind}:[/{color}] {safe}")
 
-    client = RemoteUeClient(base, timeout=timeout)
     try:
         health = client.health()
         console.print(f"[dim]health: {health}[/dim]")
@@ -2114,20 +2886,20 @@ def agent_loop_cmd(
         seed=seed,
         on_thought=on_thought,
         planner=(llm.decide if use_llm else None),
-        goal=goal if use_llm else "",
+        goal=goal,
+        asset_hints=asset_matches,
     )
-    results = loop.run(steps=steps)
+    step_budget = max(steps, 16) if asset_matches else steps
+    results, grade = loop.run_until_goal(max_steps=step_budget)
     if use_llm and llm.last_error:
         console.print(f"[yellow]Last LLM error (fallback may have been used): {llm.last_error}[/yellow]")
     failed = [r for r in results if not r.ok]
     console.print(
-        f"[bold]Done[/bold]: {len(results)} step(s), "
-        f"last lights={results[-1].reobservation.lights} "
-        f"meshes={results[-1].reobservation.meshes}"
-        if results
-        else "[yellow]No steps[/yellow]"
+        f"[bold]{'Goal met' if grade.met else 'Stopped'}[/bold]: {grade.summary} — "
+        f"{len(results)} step(s), lights={results[-1].reobservation.lights if results else 0} "
+        f"meshes={results[-1].reobservation.meshes if results else 0}"
     )
-    if failed:
+    if failed or not grade.met:
         raise typer.Exit(2)
 
 
@@ -2256,10 +3028,13 @@ def nim_parallel(
 
     try:
         from hephaestus_forge.cloud.parallel_nim import ParallelNemotronCoder
-        from hephaestus_forge.cloud.nim_client import DEFAULT_CHAT_MODEL, DEFAULT_FAST_MODEL
+        from hephaestus_forge.cloud.nim_client import (
+            DEFAULT_FAST_MODEL,
+            DEFAULT_PLANNER_MODEL,
+        )
     except ImportError:
         from cloud.parallel_nim import ParallelNemotronCoder
-        from cloud.nim_client import DEFAULT_CHAT_MODEL, DEFAULT_FAST_MODEL
+        from cloud.nim_client import DEFAULT_FAST_MODEL, DEFAULT_PLANNER_MODEL
 
     context = ""
     if context_file and context_file.exists():
@@ -2270,7 +3045,7 @@ def nim_parallel(
 
     console.print(Panel.fit(
         f"[bold]Parallel Nemotron coding[/bold]\n"
-        f"Ultra: [cyan]{DEFAULT_CHAT_MODEL}[/cyan]\n"
+        f"Planner: [cyan]{DEFAULT_PLANNER_MODEL}[/cyan]\n"
         f"Lightning: [cyan]{DEFAULT_FAST_MODEL}[/cyan]\n"
         f"Task: {task[:200]}",
         border_style="blue",
@@ -2774,7 +3549,7 @@ async def _run_nim_session(task: str, budget_mgr: BudgetManager, cfg: dict):
 
     if task:
         response = await nim_client.chat_completion(
-            model="nvidia/nemotron-3-ultra-550b-a55b",
+            model="deepseek-ai/deepseek-v4-pro-0813",
             messages=[{"role": "user", "content": task}],
             max_tokens=512,
         )
@@ -2863,6 +3638,42 @@ async def _wait_for_deployment(ip: str, budget_mgr: BudgetManager, timeout: int 
                 pass
             await asyncio.sleep(5)
     raise TimeoutError("Deployment did not become healthy")
+
+
+@app.command("version")
+def version_cmd():
+    """Print HephaestusForge and bridge template versions."""
+    from version import BRIDGE_VERSION, FORGE_VERSION
+
+    console.print(f"HephaestusForge [cyan]{FORGE_VERSION}[/cyan]")
+    console.print(f"HephaestusBridge template [cyan]{BRIDGE_VERSION}[/cyan]")
+
+
+@app.command()
+def health(
+    project_path: Annotated[Optional[Path], typer.Argument(help="Adopted UE project root")] = None,
+    api: Annotated[str, typer.Option("--api", help="UE Remote API base URL")] = "http://127.0.0.1:8765",
+):
+    """Preflight check: UE PIE API, NIM key, planner, adopted project."""
+    from preflight_health import run_preflight
+
+    project_root = project_path
+    if project_root is None:
+        try:
+            from project_registry import ProjectRegistry
+
+            reg = ProjectRegistry()
+            if reg.active_path:
+                project_root = Path(reg.active_path)
+        except Exception:
+            project_root = None
+
+    report = run_preflight(api, project_root)
+    for check in report.checks:
+        style = "green" if check.ok else ("yellow" if not check.blocker else "red")
+        label = "OK" if check.ok else ("WARN" if not check.blocker else "BLOCKED")
+        console.print(f"[{style}]{label}[/] {check.name}: {check.detail}")
+    raise typer.Exit(0 if report.ready else 1)
 
 
 if __name__ == "__main__":

@@ -15,6 +15,11 @@ from remote_command_schema import (  # noqa: E402
     parse_location,
     parse_scale,
     resolve_params,
+    validate_animation_play_montage,
+    validate_sequence_create_shot,
+    validate_sequence_play,
+    validate_world_apply_move_input,
+    validate_world_get_actor,
     validate_world_spawn_mesh,
 )
 
@@ -53,6 +58,16 @@ def test_python_builder_emits_params():
     assert parse_location(payload["params"]) == (1.0, 2.0, 3.0)
 
 
+def test_validate_world_get_actor_requires_path():
+    assert validate_world_get_actor({"command": "world.get_actor", "params": {}}) == [
+        "missing actor_path"
+    ]
+    assert validate_world_get_actor({
+        "command": "world.get_actor",
+        "params": {"actor_path": "/Game/Maps/UEDPIE_0_Level.Level:PersistentLevel.StaticMeshActor_0"},
+    }) == []
+
+
 def test_args_only_client_still_resolves():
     body = {
         "command": "world.spawn_mesh",
@@ -66,6 +81,33 @@ def test_args_only_client_still_resolves():
     params = resolve_params(body)
     assert params is not None
     assert parse_location(params) == (-500.0, 0.0, 120.0)
+
+
+def test_validate_apply_move_and_montage():
+    assert validate_world_apply_move_input({
+        "command": "world.apply_move_input",
+        "params": {"forward": 1.0, "duration": 2.0},
+    }) == []
+    assert validate_animation_play_montage({
+        "command": "animation.play_montage",
+        "params": {"actor_path": "/Temp/A", "montage_path": "/Game/M.Run"},
+    }) == []
+    assert "missing montage_path" in validate_animation_play_montage({
+        "command": "animation.play_montage",
+        "params": {"actor_path": "/Temp/A"},
+    })
+
+
+def test_validate_sequence_play_and_create_shot():
+    assert validate_sequence_play({"command": "sequence.play", "params": {}}) == ["missing sequence_path"]
+    assert validate_sequence_play({
+        "command": "sequence.play",
+        "params": {"sequence_path": "/Game/Seq.Intro"},
+    }) == []
+    assert validate_sequence_create_shot({
+        "command": "sequence.create_shot",
+        "params": {"location": {"x": 1, "y": 2, "z": 3}},
+    }) == []
 
 
 if __name__ == "__main__":

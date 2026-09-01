@@ -19,18 +19,40 @@ except ImportError:
 console = Console()
 
 # Canonical NIM model ids (verified against integrate.api.nvidia.com)
-DEFAULT_CHAT_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
+DEFAULT_PLANNER_MODEL = "deepseek-ai/deepseek-v4-pro-0813"
+DEFAULT_LEGACY_ULTRA_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
 DEFAULT_FAST_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
+# Multimodal caption model for viewport → text (when HEPHAESTUS_PLANNER_VISION=1)
+DEFAULT_VISION_MODEL = "microsoft/phi-3.5-vision-instruct"
+# Primary chat/planner default (fast + strong coding on NIM)
+DEFAULT_CHAT_MODEL = DEFAULT_PLANNER_MODEL
 
 # Old / shorthand ids → working NIM ids
 MODEL_ALIASES = {
-    "nvidia/nemotron-3-ultra": DEFAULT_CHAT_MODEL,
-    "nvidia/Nemotron-3-Ultra": DEFAULT_CHAT_MODEL,
+    "nvidia/nemotron-3-ultra": DEFAULT_LEGACY_ULTRA_MODEL,
+    "nvidia/Nemotron-3-Ultra": DEFAULT_LEGACY_ULTRA_MODEL,
     "nvidia/nemotron-3-8b": DEFAULT_FAST_MODEL,
-    "nemotron-3-ultra": DEFAULT_CHAT_MODEL,
+    "nemotron-3-ultra": DEFAULT_LEGACY_ULTRA_MODEL,
     "nemotron-3-8b": DEFAULT_FAST_MODEL,
-    "nemotron-3-ultra-550b-a55b": DEFAULT_CHAT_MODEL,
+    "nemotron-3-ultra-550b-a55b": DEFAULT_LEGACY_ULTRA_MODEL,
+    "deepseek-v4-pro": DEFAULT_PLANNER_MODEL,
+    "deepseek-ai/deepseek-v4-pro": DEFAULT_PLANNER_MODEL,
+    "deepseek-v4": DEFAULT_PLANNER_MODEL,
 }
+
+
+def chat_template_kwargs_for_model(model: str) -> dict:
+    """Model-specific chat_template_kwargs for NIM / OpenAI-compatible APIs."""
+    name = resolve_model_alias(model).lower()
+    if "deepseek" in name:
+        return {"thinking": False}
+    if "nemotron" in name:
+        return {"enable_thinking": False, "force_nonempty_content": True}
+    return {}
+
+
+def resolve_model_alias(model: str) -> str:
+    return MODEL_ALIASES.get(model, model)
 
 
 @dataclass
@@ -46,8 +68,15 @@ class NIMClient:
     """NVIDIA NIM API client with automatic budget tracking."""
 
     MODELS = {
-        DEFAULT_CHAT_MODEL: NIMModel(
-            name=DEFAULT_CHAT_MODEL,
+        DEFAULT_PLANNER_MODEL: NIMModel(
+            name=DEFAULT_PLANNER_MODEL,
+            input_cost_per_1m=0.12,
+            output_cost_per_1m=0.48,
+            max_tokens=16384,
+            context_window=1000000,
+        ),
+        DEFAULT_LEGACY_ULTRA_MODEL: NIMModel(
+            name=DEFAULT_LEGACY_ULTRA_MODEL,
             input_cost_per_1m=0.15,
             output_cost_per_1m=0.60,
             max_tokens=4096,
@@ -72,12 +101,7 @@ class NIMClient:
     @classmethod
     def resolve_model(cls, model: str) -> str:
         """Map aliases / dead ids to a known working NIM model id."""
-        resolved = MODEL_ALIASES.get(model, model)
-        if resolved not in cls.MODELS and resolved != "nvidia/nv-embed-qa":
-            # Allow unknown ids through only if explicitly configured; prefer default chat
-            if model in MODEL_ALIASES:
-                return resolved
-        return resolved
+        return resolve_model_alias(model)
 
     def __init__(
         self,
@@ -138,12 +162,10 @@ class NIMClient:
             "max_tokens": max_tokens,
             "temperature": temperature,
             "stream": stream,
-            # Nemotron reasoning models: keep content non-empty for tool/coding use
-            "chat_template_kwargs": {
-                "enable_thinking": False,
-                "force_nonempty_content": True,
-            },
         }
+        template_kwargs = chat_template_kwargs_for_model(model)
+        if template_kwargs:
+            payload["chat_template_kwargs"] = template_kwargs
 
         if stream:
             return self._stream_chat(payload, model, input_tokens)

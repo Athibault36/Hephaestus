@@ -9,6 +9,7 @@
 #include "PCG/HephaestusPCGSubsystem.h"
 #include "Animation/HephaestusAnimationSubsystem.h"
 #include "Audio/HephaestusAudioSubsystem.h"
+#include "Sequence/HephaestusSequenceSubsystem.h"
 #include "Vision/HephaestusVisionSubsystem.h"
 
 #include "Async/Async.h"
@@ -38,6 +39,7 @@ void UHephaestusCommandHandler::Initialize(FSubsystemCollectionBase& Collection)
         RenderingSubsystem = GameInstance->GetSubsystem<UHephaestusRenderingSubsystem>();
         PCGSubsystem = GameInstance->GetSubsystem<UHephaestusPCGSubsystem>();
         AnimationSubsystem = GameInstance->GetSubsystem<UHephaestusAnimationSubsystem>();
+        SequenceSubsystem = GameInstance->GetSubsystem<UHephaestusSequenceSubsystem>();
         AudioSubsystem = GameInstance->GetSubsystem<UHephaestusAudioSubsystem>();
     }
 
@@ -200,10 +202,16 @@ TArray<FString> UHephaestusCommandHandler::GetAvailableCommands() const
         TEXT("world.spawn_actor"),
         TEXT("world.spawn_mesh"),
         TEXT("world.destroy_actor"),
+        TEXT("world.destroy"),
         TEXT("world.list_actors"),
         TEXT("world.set_transform"),
         TEXT("world.set_light"),
         TEXT("world.get_view"),
+        TEXT("world.set_view"),
+        TEXT("world.get_actor"),
+        TEXT("world.set_mesh_color"),
+        TEXT("world.apply_move_input"),
+        TEXT("world.get_pawn_state"),
         TEXT("world.batch_edit"),
         TEXT("world.query_spatial"),
         TEXT("asset.create_material"),
@@ -211,6 +219,7 @@ TArray<FString> UHephaestusCommandHandler::GetAvailableCommands() const
         TEXT("asset.reimport"),
         TEXT("asset.export"),
         TEXT("asset.create_instance"),
+        TEXT("asset.search"),
         TEXT("blueprint.compile"),
         TEXT("blueprint.add_function"),
         TEXT("blueprint.set_property"),
@@ -225,6 +234,14 @@ TArray<FString> UHephaestusCommandHandler::GetAvailableCommands() const
         TEXT("animation.retarget"),
         TEXT("animation.edit_sequence"),
         TEXT("animation.livelink_connect"),
+        TEXT("animation.spawn_skeletal_mesh"),
+        TEXT("animation.play_sequence"),
+        TEXT("animation.play_transform_sequence"),
+        TEXT("animation.play_montage"),
+        TEXT("animation.stop"),
+        TEXT("sequence.play"),
+        TEXT("sequence.stop"),
+        TEXT("sequence.create_shot"),
         TEXT("audio.create_metasound"),
         TEXT("audio.play_quartz"),
         TEXT("audio.synthesize"),
@@ -344,7 +361,7 @@ FHephaestusCommandResult UHephaestusCommandHandler::RouteCommand(const TSharedPt
     }
     else if (Command.StartsWith(TEXT("asset.")))
     {
-        return HandleAssetCommand(Params);
+        return HandleAssetCommand(Command, Params);
     }
     else if (Command.StartsWith(TEXT("blueprint.")))
     {
@@ -360,7 +377,11 @@ FHephaestusCommandResult UHephaestusCommandHandler::RouteCommand(const TSharedPt
     }
     else if (Command.StartsWith(TEXT("animation.")))
     {
-        return HandleAnimationCommand(Params);
+        return HandleAnimationCommand(Command, Params);
+    }
+    else if (Command.StartsWith(TEXT("sequence.")))
+    {
+        return HandleSequenceCommand(Command, Params);
     }
     else if (Command.StartsWith(TEXT("audio.")))
     {
@@ -492,7 +513,7 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleWorldCommand(const FSt
         }
         return MakeErrorResult(TEXT(""), TEXT("Failed to spawn static mesh actor"));
     }
-    else if (Action == TEXT("destroy_actor"))
+    else if (Action == TEXT("destroy_actor") || Action == TEXT("destroy"))
     {
         if (!Params.IsValid())
         {
@@ -584,6 +605,113 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleWorldCommand(const FSt
         const FString ResultJSON = FString::Printf(
             TEXT("{\"location\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},\"rotation\":{\"pitch\":%.3f,\"yaw\":%.3f,\"roll\":%.3f},\"forward\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f}}"),
             Loc.X, Loc.Y, Loc.Z, Rot.Pitch, Rot.Yaw, Rot.Roll, Forward.X, Forward.Y, Forward.Z);
+        return MakeSuccessResult(TEXT(""), ResultJSON);
+    }
+    else if (Action == TEXT("set_view"))
+    {
+        if (!Params.IsValid())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Missing params for world.set_view"));
+        }
+        FVector Loc = FVector::ZeroVector;
+        FRotator Rot = FRotator::ZeroRotator;
+        FTransform Transform = FTransform::Identity;
+        if (ParseTransformParams(Params, Transform))
+        {
+            Loc = Transform.GetLocation();
+            Rot = Transform.Rotator();
+        }
+        else
+        {
+            ParseVectorField(Params, TEXT("location"), Loc);
+            ParseRotatorField(Params, TEXT("rotation"), Rot);
+        }
+        if (!WorldSubsystem->SetView(Loc, Rot))
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Failed to set view (is PIE running?)"));
+        }
+        const FString ResultJSON = FString::Printf(
+            TEXT("{\"location\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},\"rotation\":{\"pitch\":%.3f,\"yaw\":%.3f,\"roll\":%.3f}}"),
+            Loc.X, Loc.Y, Loc.Z, Rot.Pitch, Rot.Yaw, Rot.Roll);
+        return MakeSuccessResult(TEXT(""), ResultJSON);
+    }
+    else if (Action == TEXT("get_actor"))
+    {
+        if (!Params.IsValid())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Missing params for world.get_actor"));
+        }
+        FString ActorPath;
+        if (!Params->TryGetStringField(TEXT("actor_path"), ActorPath) || ActorPath.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("actor"), ActorPath);
+        }
+        FString ResultJSON;
+        if (!WorldSubsystem->DescribeActor(ActorPath, ResultJSON))
+        {
+            return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Actor not found: %s"), *ActorPath));
+        }
+        return MakeSuccessResult(TEXT(""), ResultJSON, {}, { ActorPath });
+    }
+    else if (Action == TEXT("set_mesh_color"))
+    {
+        if (!Params.IsValid())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Missing params for world.set_mesh_color"));
+        }
+        FString ActorPath;
+        if (!Params->TryGetStringField(TEXT("actor_path"), ActorPath) || ActorPath.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("actor"), ActorPath);
+        }
+        FLinearColor Color = FLinearColor::White;
+        const TSharedPtr<FJsonObject>* ColorObj = nullptr;
+        if (Params->TryGetObjectField(TEXT("color"), ColorObj) && ColorObj && ColorObj->IsValid())
+        {
+            double R = 1, G = 1, B = 1, A = 1;
+            (*ColorObj)->TryGetNumberField(TEXT("r"), R);
+            (*ColorObj)->TryGetNumberField(TEXT("g"), G);
+            (*ColorObj)->TryGetNumberField(TEXT("b"), B);
+            (*ColorObj)->TryGetNumberField(TEXT("a"), A);
+            Color = FLinearColor(static_cast<float>(R), static_cast<float>(G), static_cast<float>(B), static_cast<float>(A));
+        }
+        const bool bOk = WorldSubsystem->SetStaticMeshColor(ActorPath, Color);
+        return bOk
+            ? MakeSuccessResult(
+                  TEXT(""),
+                  FString::Printf(TEXT("{\"actor_path\":\"%s\",\"color\":{\"r\":%.3f,\"g\":%.3f,\"b\":%.3f}}"),
+                      *ActorPath, Color.R, Color.G, Color.B),
+                  {},
+                  { ActorPath })
+            : MakeErrorResult(TEXT(""), TEXT("Failed to set mesh color (need StaticMeshActor path)"));
+    }
+    else if (Action == TEXT("apply_move_input") || Action == TEXT("move_input"))
+    {
+        if (!Params.IsValid())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Missing params for world.apply_move_input"));
+        }
+        double Forward = 1.0;
+        double Right = 0.0;
+        double Duration = 2.0;
+        Params->TryGetNumberField(TEXT("forward"), Forward);
+        Params->TryGetNumberField(TEXT("right"), Right);
+        Params->TryGetNumberField(TEXT("duration"), Duration);
+        if (!WorldSubsystem->ApplyMoveInput(static_cast<float>(Forward), static_cast<float>(Right), static_cast<float>(Duration)))
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Failed to apply move input (no possessed pawn?)"));
+        }
+        return MakeSuccessResult(
+            TEXT(""),
+            FString::Printf(TEXT("{\"forward\":%.2f,\"right\":%.2f,\"duration\":%.2f}"), Forward, Right, Duration));
+    }
+    else if (Action == TEXT("get_pawn_state"))
+    {
+        FString ResultJSON;
+        if (!WorldSubsystem->GetPawnStateJson(ResultJSON))
+        {
+            return MakeErrorResult(TEXT(""), TEXT("No possessed pawn (is PIE running?)"));
+        }
         return MakeSuccessResult(TEXT(""), ResultJSON);
     }
     else if (Action == TEXT("list_actors"))
@@ -691,16 +819,53 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleWorldCommand(const FSt
     return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Unknown world action: %s"), *Action));
 }
 
-FHephaestusCommandResult UHephaestusCommandHandler::HandleAssetCommand(const TSharedPtr<FJsonObject>& Params)
+FHephaestusCommandResult UHephaestusCommandHandler::HandleAssetCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params)
 {
     if (!AssetSubsystem)
     {
-        return MakeErrorResult(TEXT(""), TEXT("Asset subsystem not available"));
+        if (UGameInstance* GI = GetGameInstance())
+        {
+            AssetSubsystem = GI->GetSubsystem<UHephaestusAssetSubsystem>();
+        }
+    }
+    if (!AssetSubsystem)
+    {
+        return MakeErrorResult(TEXT(""), TEXT("Asset subsystem not available (start PIE)"));
     }
 
-    FString Action = Params->GetStringField(TEXT("action"));
+    FString Action;
+    if (Params.IsValid())
+    {
+        Params->TryGetStringField(TEXT("action"), Action);
+    }
+    if (Action.IsEmpty())
+    {
+        Command.Split(TEXT("."), nullptr, &Action, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
+    }
 
-    if (Action == TEXT("create_material"))
+    if (Action == TEXT("search"))
+    {
+        FString Query;
+        FString AssetClass;
+        int32 Limit = 12;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("query"), Query);
+            Params->TryGetStringField(TEXT("class"), AssetClass);
+            double LimitNum = 12.0;
+            if (Params->TryGetNumberField(TEXT("limit"), LimitNum))
+            {
+                Limit = static_cast<int32>(LimitNum);
+            }
+        }
+        FString ResultJSON;
+        if (!AssetSubsystem->SearchAssetsJson(Query, AssetClass, Limit, ResultJSON))
+        {
+            return MakeErrorResult(TEXT(""), TEXT("asset.search requires non-empty query"));
+        }
+        return MakeSuccessResult(TEXT(""), ResultJSON);
+    }
+    else if (Action == TEXT("create_material"))
     {
         // Params: material_desc
         return MakeSuccessResult(TEXT(""), TEXT("{\"material_path\":\"\"}"));
@@ -808,33 +973,369 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandlePCGCommand(const TShar
     return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Unknown PCG action: %s"), *Action));
 }
 
-FHephaestusCommandResult UHephaestusCommandHandler::HandleAnimationCommand(const TSharedPtr<FJsonObject>& Params)
+FHephaestusCommandResult UHephaestusCommandHandler::HandleAnimationCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params)
 {
     if (!AnimationSubsystem)
     {
-        return MakeErrorResult(TEXT(""), TEXT("Animation subsystem not available"));
+        if (UGameInstance* GI = GetGameInstance())
+        {
+            AnimationSubsystem = GI->GetSubsystem<UHephaestusAnimationSubsystem>();
+        }
+    }
+    if (!AnimationSubsystem)
+    {
+        return MakeErrorResult(TEXT(""), TEXT("Animation subsystem not available (start PIE)"));
     }
 
-    FString Action = Params->GetStringField(TEXT("action"));
+    FString Action;
+    if (Params.IsValid())
+    {
+        Params->TryGetStringField(TEXT("action"), Action);
+    }
+    if (Action.IsEmpty())
+    {
+        Command.Split(TEXT("."), nullptr, &Action, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
+    }
 
     if (Action == TEXT("create_control_rig"))
     {
-        return MakeSuccessResult(TEXT(""), TEXT("{}"));
+        return MakeSuccessResult(TEXT(""), TEXT("{\"stub\":true}"));
     }
     else if (Action == TEXT("retarget"))
     {
-        return MakeSuccessResult(TEXT(""), TEXT("{}"));
+        return MakeSuccessResult(TEXT(""), TEXT("{\"stub\":true}"));
     }
     else if (Action == TEXT("edit_sequence"))
     {
-        return MakeSuccessResult(TEXT(""), TEXT("{}"));
+        if (!Params.IsValid())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Missing params for animation.edit_sequence"));
+        }
+        FString ActorPath;
+        FString AnimPath;
+        Params->TryGetStringField(TEXT("actor_path"), ActorPath);
+        if (ActorPath.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("actor"), ActorPath);
+        }
+        Params->TryGetStringField(TEXT("anim_path"), AnimPath);
+        if (AnimPath.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("animation"), AnimPath);
+        }
+        double Duration = 3.0;
+        Params->TryGetNumberField(TEXT("duration"), Duration);
+        if (!ActorPath.IsEmpty() && !AnimPath.IsEmpty())
+        {
+            const bool bOk = AnimationSubsystem->PlayAnimSequence(ActorPath, AnimPath, false);
+            return bOk
+                ? MakeSuccessResult(
+                      TEXT(""),
+                      FString::Printf(TEXT("{\"actor_path\":\"%s\",\"anim_path\":\"%s\",\"mode\":\"play_anim\"}"),
+                          *ActorPath, *AnimPath),
+                      {},
+                      { ActorPath })
+                : MakeErrorResult(TEXT(""), TEXT("edit_sequence: failed to play animation"));
+        }
+        FVector TargetLocation = FVector::ZeroVector;
+        ParseVectorField(Params, TEXT("target_location"), TargetLocation);
+        if (!ActorPath.IsEmpty() && !TargetLocation.IsNearlyZero())
+        {
+            const bool bOk = AnimationSubsystem->PlayTransformSequence(
+                ActorPath, TargetLocation, static_cast<float>(Duration));
+            return bOk
+                ? MakeSuccessResult(
+                      TEXT(""),
+                      FString::Printf(TEXT("{\"actor_path\":\"%s\",\"mode\":\"transform_sequence\",\"duration\":%.2f}"),
+                          *ActorPath, Duration),
+                      {},
+                      { ActorPath })
+                : MakeErrorResult(TEXT(""), TEXT("edit_sequence: failed to play transform sequence"));
+        }
+        return MakeErrorResult(TEXT(""), TEXT("edit_sequence requires actor_path + anim_path OR target_location"));
     }
     else if (Action == TEXT("livelink_connect"))
     {
-        return MakeSuccessResult(TEXT(""), TEXT("{}"));
+        return MakeSuccessResult(TEXT(""), TEXT("{\"stub\":true}"));
+    }
+    else if (Action == TEXT("spawn_skeletal_mesh"))
+    {
+        if (!WorldSubsystem)
+        {
+            if (UGameInstance* GI = GetGameInstance())
+            {
+                WorldSubsystem = GI->GetSubsystem<UHephaestusWorldSubsystem>();
+            }
+        }
+        FString MeshPath;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("mesh_path"), MeshPath);
+            if (MeshPath.IsEmpty())
+            {
+                Params->TryGetStringField(TEXT("mesh"), MeshPath);
+            }
+        }
+        FTransform Transform = FTransform::Identity;
+        if (Params.IsValid())
+        {
+            ParseTransformParams(Params, Transform);
+        }
+        if (Transform.Equals(FTransform::Identity) && WorldSubsystem)
+        {
+            FVector Loc, Forward;
+            FRotator Rot;
+            if (WorldSubsystem->GetView(Loc, Rot, Forward))
+            {
+                const FVector SpawnLoc = Loc + Forward * 400.f;
+                Transform.SetLocation(SpawnLoc);
+                Transform.SetRotation(Rot.Quaternion());
+            }
+        }
+        AActor* Actor = AnimationSubsystem->SpawnSkeletalMeshActor(MeshPath, Transform);
+        if (!Actor)
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Failed to spawn skeletal mesh actor"));
+        }
+        const FString ActorPath = Actor->GetPathName();
+        return MakeSuccessResult(
+            TEXT(""),
+            FString::Printf(TEXT("{\"actor_path\":\"%s\"}"), *ActorPath),
+            {},
+            { ActorPath });
+    }
+    else if (Action == TEXT("play_sequence") || Action == TEXT("play_anim"))
+    {
+        if (!Params.IsValid())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Missing params for animation.play_sequence"));
+        }
+        FString ActorPath;
+        FString AnimPath;
+        Params->TryGetStringField(TEXT("actor_path"), ActorPath);
+        if (ActorPath.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("actor"), ActorPath);
+        }
+        Params->TryGetStringField(TEXT("anim_path"), AnimPath);
+        if (AnimPath.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("animation"), AnimPath);
+        }
+        bool bLoop = true;
+        Params->TryGetBoolField(TEXT("loop"), bLoop);
+        if (ActorPath.IsEmpty() || AnimPath.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("actor_path and anim_path required"));
+        }
+        const bool bOk = AnimationSubsystem->PlayAnimSequence(ActorPath, AnimPath, bLoop);
+        return bOk
+            ? MakeSuccessResult(
+                  TEXT(""),
+                  FString::Printf(TEXT("{\"actor_path\":\"%s\",\"anim_path\":\"%s\",\"loop\":%s}"),
+                      *ActorPath, *AnimPath, bLoop ? TEXT("true") : TEXT("false")),
+                  {},
+                  { ActorPath })
+            : MakeErrorResult(TEXT(""), TEXT("Failed to play animation (check skeletal mesh + anim paths)"));
+    }
+    else if (Action == TEXT("play_transform_sequence") || Action == TEXT("move_actor"))
+    {
+        if (!Params.IsValid())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Missing params for animation.play_transform_sequence"));
+        }
+        FString ActorPath;
+        Params->TryGetStringField(TEXT("actor_path"), ActorPath);
+        if (ActorPath.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("actor"), ActorPath);
+        }
+        FVector TargetLocation = FVector::ZeroVector;
+        ParseVectorField(Params, TEXT("target_location"), TargetLocation);
+        if (TargetLocation.IsNearlyZero())
+        {
+            double Tx = 0, Ty = 0, Tz = 0;
+            Params->TryGetNumberField(TEXT("x"), Tx);
+            Params->TryGetNumberField(TEXT("y"), Ty);
+            Params->TryGetNumberField(TEXT("z"), Tz);
+            TargetLocation = FVector(Tx, Ty, Tz);
+        }
+        double Duration = 3.0;
+        Params->TryGetNumberField(TEXT("duration"), Duration);
+        if (ActorPath.IsEmpty() || TargetLocation.IsNearlyZero())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("actor_path and target location required"));
+        }
+        const bool bOk = AnimationSubsystem->PlayTransformSequence(
+            ActorPath, TargetLocation, static_cast<float>(Duration));
+        return bOk
+            ? MakeSuccessResult(
+                  TEXT(""),
+                  FString::Printf(TEXT("{\"actor_path\":\"%s\",\"duration\":%.2f}"), *ActorPath, Duration),
+                  {},
+                  { ActorPath })
+            : MakeErrorResult(TEXT(""), TEXT("Failed to play transform sequence"));
+    }
+    else if (Action == TEXT("play_montage") || Action == TEXT("montage"))
+    {
+        if (!Params.IsValid())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Missing params for animation.play_montage"));
+        }
+        FString ActorPath;
+        FString MontagePath;
+        bool bLoop = false;
+        Params->TryGetStringField(TEXT("actor_path"), ActorPath);
+        Params->TryGetStringField(TEXT("montage_path"), MontagePath);
+        Params->TryGetBoolField(TEXT("loop"), bLoop);
+        if (ActorPath.IsEmpty() || MontagePath.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("actor_path and montage_path required"));
+        }
+        const bool bOk = AnimationSubsystem->PlayMontage(ActorPath, MontagePath, bLoop);
+        return bOk
+            ? MakeSuccessResult(
+                  TEXT(""),
+                  FString::Printf(TEXT("{\"actor_path\":\"%s\",\"montage_path\":\"%s\"}"), *ActorPath, *MontagePath),
+                  {},
+                  { ActorPath })
+            : MakeErrorResult(TEXT(""), TEXT("Failed to play montage"));
+    }
+    else if (Action == TEXT("stop") || Action == TEXT("stop_animation"))
+    {
+        if (!Params.IsValid())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Missing params for animation.stop"));
+        }
+        FString ActorPath;
+        Params->TryGetStringField(TEXT("actor_path"), ActorPath);
+        if (ActorPath.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("actor"), ActorPath);
+        }
+        if (ActorPath.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("actor_path required"));
+        }
+        const bool bOk = AnimationSubsystem->StopAnimation(ActorPath);
+        return bOk
+            ? MakeSuccessResult(TEXT(""), FString::Printf(TEXT("{\"actor_path\":\"%s\",\"stopped\":true}"), *ActorPath), {}, { ActorPath })
+            : MakeErrorResult(TEXT(""), TEXT("Failed to stop animation"));
     }
 
     return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Unknown animation action: %s"), *Action));
+}
+
+FHephaestusCommandResult UHephaestusCommandHandler::HandleSequenceCommand(
+    const FString& Command,
+    const TSharedPtr<FJsonObject>& Params)
+{
+    if (!SequenceSubsystem)
+    {
+        if (UGameInstance* GI = GetGameInstance())
+        {
+            SequenceSubsystem = GI->GetSubsystem<UHephaestusSequenceSubsystem>();
+        }
+    }
+    if (!SequenceSubsystem)
+    {
+        return MakeErrorResult(TEXT(""), TEXT("Sequence subsystem not available (start PIE)"));
+    }
+
+    FString Action;
+    if (Params.IsValid())
+    {
+        Params->TryGetStringField(TEXT("action"), Action);
+    }
+    if (Action.IsEmpty())
+    {
+        Command.Split(TEXT("."), nullptr, &Action, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
+    }
+
+    if (Action == TEXT("play"))
+    {
+        if (!Params.IsValid())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Missing params for sequence.play"));
+        }
+        FString SequencePath;
+        Params->TryGetStringField(TEXT("sequence_path"), SequencePath);
+        if (SequencePath.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("path"), SequencePath);
+        }
+        bool bLoop = false;
+        Params->TryGetBoolField(TEXT("loop"), bLoop);
+        if (SequencePath.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("sequence_path required"));
+        }
+        const bool bOk = SequenceSubsystem->PlayLevelSequence(SequencePath, bLoop);
+        return bOk
+            ? MakeSuccessResult(
+                  TEXT(""),
+                  FString::Printf(TEXT("{\"sequence_path\":\"%s\",\"playing\":true}"), *SequencePath))
+            : MakeErrorResult(TEXT(""), TEXT("Failed to play level sequence (check asset path)"));
+    }
+
+    if (Action == TEXT("stop"))
+    {
+        const bool bOk = SequenceSubsystem->StopLevelSequence();
+        return bOk
+            ? MakeSuccessResult(TEXT(""), TEXT("{\"stopped\":true}"))
+            : MakeSuccessResult(TEXT(""), TEXT("{\"stopped\":false}"));
+    }
+
+    if (Action == TEXT("create_shot") || Action == TEXT("create"))
+    {
+        if (!Params.IsValid())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Missing params for sequence.create_shot"));
+        }
+        FVector TargetLocation = FVector::ZeroVector;
+        FRotator TargetRotation = FRotator::ZeroRotator;
+        ParseVectorField(Params, TEXT("location"), TargetLocation);
+        ParseRotatorField(Params, TEXT("rotation"), TargetRotation);
+        if (TargetLocation.IsNearlyZero())
+        {
+            double Tx = 0, Ty = 0, Tz = 0;
+            Params->TryGetNumberField(TEXT("x"), Tx);
+            Params->TryGetNumberField(TEXT("y"), Ty);
+            Params->TryGetNumberField(TEXT("z"), Tz);
+            TargetLocation = FVector(Tx, Ty, Tz);
+        }
+        if (TargetRotation.IsNearlyZero())
+        {
+            double Pitch = 0, Yaw = 0, Roll = 0;
+            Params->TryGetNumberField(TEXT("pitch"), Pitch);
+            Params->TryGetNumberField(TEXT("yaw"), Yaw);
+            Params->TryGetNumberField(TEXT("roll"), Roll);
+            TargetRotation = FRotator(Pitch, Yaw, Roll);
+        }
+        double Duration = 4.0;
+        Params->TryGetNumberField(TEXT("duration"), Duration);
+        FString ActorPath;
+        Params->TryGetStringField(TEXT("actor_path"), ActorPath);
+        FVector ActorTarget = FVector::ZeroVector;
+        ParseVectorField(Params, TEXT("actor_target"), ActorTarget);
+        if (ActorTarget.IsNearlyZero())
+        {
+            ParseVectorField(Params, TEXT("target_location"), ActorTarget);
+        }
+        if (TargetLocation.IsNearlyZero())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("target location required for sequence.create_shot"));
+        }
+        const bool bOk = SequenceSubsystem->CreateCameraShot(
+            TargetLocation, TargetRotation, static_cast<float>(Duration), ActorPath, ActorTarget);
+        return bOk
+            ? MakeSuccessResult(
+                  TEXT(""),
+                  FString::Printf(TEXT("{\"duration\":%.2f,\"camera_shot\":true}"), Duration))
+            : MakeErrorResult(TEXT(""), TEXT("Failed to create camera shot"));
+    }
+
+    return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Unknown sequence action: %s"), *Action));
 }
 
 FHephaestusCommandResult UHephaestusCommandHandler::HandleAudioCommand(const TSharedPtr<FJsonObject>& Params)

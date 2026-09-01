@@ -104,6 +104,117 @@ def build_capture_frame_command() -> dict[str, Any]:
     return {"command": "vision.capture_frame", "params": {}}
 
 
+def build_apply_move_input_command(
+    forward: float = 1.0,
+    right: float = 0.0,
+    duration: float = 2.0,
+) -> dict[str, Any]:
+    return {
+        "command": "world.apply_move_input",
+        "params": {"forward": float(forward), "right": float(right), "duration": float(duration)},
+    }
+
+
+def build_get_pawn_state_command() -> dict[str, Any]:
+    return {"command": "world.get_pawn_state", "params": {}}
+
+
+def build_play_montage_command(
+    actor_path: str,
+    montage_path: str,
+    *,
+    loop: bool = False,
+) -> dict[str, Any]:
+    return {
+        "command": "animation.play_montage",
+        "params": {
+            "actor_path": actor_path,
+            "montage_path": montage_path,
+            "loop": bool(loop),
+        },
+    }
+
+
+def build_asset_search_command(query: str, *, asset_class: str = "", limit: int = 12) -> dict[str, Any]:
+    params: dict[str, Any] = {"query": query, "limit": int(limit)}
+    if asset_class:
+        params["class"] = asset_class
+    return {"command": "asset.search", "params": params}
+
+
+def build_spawn_skeletal_command(
+    mesh_path: str = "",
+    location: Vec3 = None,
+    rotation: Vec3 = None,
+    scale: Vec3 = None,
+) -> dict[str, Any]:
+    return {
+        "command": "animation.spawn_skeletal_mesh",
+        "params": {
+            "mesh_path": mesh_path,
+            "transform": _transform(location, rotation, scale),
+        },
+    }
+
+
+def build_play_sequence_command(
+    actor_path: str,
+    anim_path: str,
+    *,
+    loop: bool = False,
+) -> dict[str, Any]:
+    return {
+        "command": "animation.play_sequence",
+        "params": {
+            "actor_path": actor_path,
+            "anim_path": anim_path,
+            "loop": bool(loop),
+        },
+    }
+
+
+def build_get_actor_command(actor_path: str) -> dict[str, Any]:
+    return {"command": "world.get_actor", "params": {"actor_path": actor_path}}
+
+
+def build_get_view_command() -> dict[str, Any]:
+    return {"command": "world.get_view", "params": {}}
+
+
+def build_stop_animation_command(actor_path: str) -> dict[str, Any]:
+    return {"command": "animation.stop", "params": {"actor_path": actor_path}}
+
+
+def build_sequence_play_command(sequence_path: str, *, loop: bool = False) -> dict[str, Any]:
+    return {
+        "command": "sequence.play",
+        "params": {"sequence_path": sequence_path, "loop": bool(loop)},
+    }
+
+
+def build_sequence_create_shot_command(
+    location: Vec3 = None,
+    rotation: Vec3 = None,
+    *,
+    duration: float = 4.0,
+    actor_path: str = "",
+    actor_target: Vec3 = None,
+) -> dict[str, Any]:
+    params: dict[str, Any] = {
+        "location": _vec3(location, (0.0, 0.0, 200.0)),
+        "rotation": _rotator(rotation),
+        "duration": float(duration),
+    }
+    if actor_path:
+        params["actor_path"] = actor_path
+        params["target_location"] = _vec3(actor_target, params["location"])
+    return {"command": "sequence.create_shot", "params": params}
+
+
+def build_sequence_stop_command() -> dict[str, Any]:
+    return {"command": "sequence.stop", "params": {}}
+
+
 def spawn_actor_json(**kwargs: Any) -> str:
     """JSON string ready for ExecuteCommand."""
     return json.dumps(build_spawn_actor_command(**kwargs))

@@ -1,6 +1,13 @@
 {
   "models": [
     {
+      "name": "DeepSeek V4 Pro (NIM)",
+      "model": "deepseek-ai/deepseek-v4-pro-0813",
+      "apiBase": "https://integrate.api.nvidia.com/v1",
+      "completionEndpoint": "/chat/completions",
+      "apiKey": "REPLACE_WITH_NVIDIA_API_KEY"
+    },
+    {
       "name": "Nemotron-3 Ultra (NIM)",
       "model": "nvidia/nemotron-3-ultra-550b-a55b",
       "apiBase": "https://integrate.api.nvidia.com/v1",

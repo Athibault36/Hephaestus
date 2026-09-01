@@ -50,9 +50,13 @@ cloud:
         api_key_env: "NVIDIA_API_KEY"
         base_url: "https://integrate.api.nvidia.com/v1"
         models:
+          - "deepseek-ai/deepseek-v4-pro-0813"
           - "nvidia/nemotron-3-ultra-550b-a55b"
           - "nvidia/nemotron-3.5-lightning-30b-a3b"
         pricing:
+          deepseek-v4-pro-0813:
+            input: 0.12
+            output: 0.48
           nemotron-3-ultra-550b-a55b:
             input: 0.15
             output: 0.60
@@ -92,6 +96,9 @@ cloud:
       - condition: "task.type == 'embedding' || task.type == 'fast_edit'"
         target: "nim:nemotron-3.5-lightning-30b-a3b"
         max_cost_per_hour: 0.10
+      - condition: "task.type == 'plan' || task.type == 'architecture'"
+        target: "nim:deepseek-v4-pro-0813"
+        max_cost_per_hour: 0.25
       - condition: "always"
         target: "local"
         max_cost_per_hour: 0.00

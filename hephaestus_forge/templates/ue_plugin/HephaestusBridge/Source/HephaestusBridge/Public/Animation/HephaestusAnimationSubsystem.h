@@ -48,4 +48,31 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Hephaestus|Animation")
 	bool LiveLinkConnect(const FString& SubjectName, const FString& Config);
+
+	/** Spawn a skeletal mesh actor in PIE (default: Engine mannequin if path empty) */
+	UFUNCTION(BlueprintCallable, Category = "Hephaestus|Animation")
+	AActor* SpawnSkeletalMeshActor(const FString& MeshPath, const FTransform& Transform);
+
+	/** Play an anim sequence on a skeletal mesh actor by path */
+	UFUNCTION(BlueprintCallable, Category = "Hephaestus|Animation")
+	bool PlayAnimSequence(const FString& ActorPath, const FString& AnimPath, bool bLoop = true);
+
+	/** Create a transient level sequence moving an actor to TargetLocation over DurationSeconds, then play */
+	UFUNCTION(BlueprintCallable, Category = "Hephaestus|Animation")
+	bool PlayTransformSequence(const FString& ActorPath, const FVector& TargetLocation, float DurationSeconds = 3.f);
+
+	/** Whether a skeletal mesh actor is currently playing animation */
+	UFUNCTION(BlueprintCallable, Category = "Hephaestus|Animation")
+	bool IsActorAnimPlaying(const FString& ActorPath) const;
+
+	/** Play an anim montage on a skeletal actor */
+	UFUNCTION(BlueprintCallable, Category = "Hephaestus|Animation")
+	bool PlayMontage(const FString& ActorPath, const FString& MontagePath, bool bLoop = false);
+
+	/** Stop animation on a skeletal actor or character */
+	UFUNCTION(BlueprintCallable, Category = "Hephaestus|Animation")
+	bool StopAnimation(const FString& ActorPath);
+
+private:
+	UWorld* ResolveWorld() const;
 };

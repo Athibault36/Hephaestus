@@ -58,6 +58,8 @@ Thumbs.db
 .vscode/
 *.user
 
-# Logs
-*.log
-logs/
+# Debug / agent diagnostics (local only)
+hephaestus_forge/_diag_*.png
+hephaestus_forge/_agent_*.txt
+hephaestus_forge/_observe_*.txt
+out.md

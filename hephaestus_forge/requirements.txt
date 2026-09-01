@@ -17,6 +17,9 @@ starlette-context>=0.3.6
 tiktoken>=0.7.0
 sentence-transformers>=3.0.0
 
+# Optional: Hephaestus Desktop native window
+# pywebview>=5.0
+
 # Optional: local LLM server
 # llama-cpp-python[server]  # install separately with CUDA wheel on Linux
 

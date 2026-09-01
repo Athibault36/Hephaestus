@@ -5,11 +5,14 @@ alwaysApply: true
 
 # Hephaestus core
 
-- Read `AGENTS.md` at repo root for paths, ports, and model ids.
+- Read `AGENTS.md` at repo root — factory vs target UE project, not one fixed game path.
 - Remote commands: use JSON key **`params`** (bridge also accepts `args`). Prefer nested `transform` with `{x,y,z}` objects.
+- Plugin template lives in repo; target copy at `{UE_PROJECT}/Plugins/HephaestusBridge/` via `forge sync-plugin` or `forge adopt`.
+- Desktop: `forge desktop` — pywebview shell + `~/.hephaestus/projects.json` registry.
 - Spawn/edit in **camera frustum** via `world.get_view`; never assume world origin is visible.
-- NIM models (both valid, use in parallel when asked):
-  - Ultra `nvidia/nemotron-3-ultra-550b-a55b`
+- NIM models (use in parallel when asked):
+  - Planner (default) `deepseek-ai/deepseek-v4-pro-0813`
+  - Ultra (legacy) `nvidia/nemotron-3-ultra-550b-a55b`
   - Lightning `nvidia/nemotron-3.5-lightning-30b-a3b`
   - Never call dead ids `nvidia/nemotron-3-ultra` or `nvidia/nemotron-3-8b` without alias remap.
 - Docs: use **Context7** MCP for library/UE API truth.

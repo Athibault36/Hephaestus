@@ -1,0 +1,24 @@
+name: Python tests
+
+on:
+  push:
+    paths:
+      - "hephaestus_forge/**"
+      - ".github/workflows/pytest.yml"
+  pull_request:
+    paths:
+      - "hephaestus_forge/**"
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r hephaestus_forge/requirements.txt pytest
+      - name: Run tests
+        working-directory: hephaestus_forge
+        run: python -m pytest tests/ -q

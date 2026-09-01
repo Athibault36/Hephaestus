@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Hephaestus</title>
+  <style>
+    :root {
+      --bg: #0c0f14;
+      --panel: #141a22;
+      --border: #243044;
+      --text: #e8eef7;
+      --muted: #8b9cb3;
+      --accent: #3b82f6;
+      --accent-dim: #1e3a5f;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --err: #ef4444;
+      --avatar-primary: #3b82f6;
+      --avatar-secondary: #06b6d4;
+      --avatar-glow: #22d3ee;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      width: min(640px, 100%);
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px;
+      position: relative;
+      overflow: hidden;
+    }
+    .card::before {
+      content: "";
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--avatar-primary), var(--avatar-secondary));
+    }
+    .avatar-wrap {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 16px;
+    }
+    #avatar {
+      width: 96px;
+      height: 96px;
+      display: block;
+    }
+    .avatar-label {
+      text-align: center;
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-top: 8px;
+      min-height: 18px;
+      transition: opacity 0.3s ease;
+    }
+    h1 { margin: 0 0 8px; font-size: 1.5rem; text-align: center; }
+    p { color: var(--muted); margin: 0 0 20px; line-height: 1.5; text-align: center; }
+    label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; }
+    input {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #0a0e13;
+      color: var(--text);
+      margin-bottom: 12px;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+    button {
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 16px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: background 0.2s, transform 0.1s;
+    }
+    button:hover { background: #2563eb; }
+    button:active { transform: scale(0.98); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.secondary { background: transparent; border: 1px solid var(--border); color: var(--text); }
+    button.secondary:hover { background: #1e293b; border-color: var(--accent); }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
+    ul { list-style: none; padding: 0; margin: 0; }
+    li {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    li:hover { border-color: var(--accent); background: var(--accent-dim); }
+    li.active { border-color: var(--ok); background: rgba(34, 197, 94, 0.1); }
+    .name { font-weight: 600; }
+    .path { font-size: 0.8rem; color: var(--muted); word-break: break-all; }
+    .err { color: var(--err); margin-top: 8px; font-size: 0.9rem; min-height: 1.2em; }
+    .hint { font-size: 0.8rem; color: var(--muted); margin-top: 16px; text-align: center; }
+    .status-dot {
+      display: inline-block;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      margin-right: 8px;
+      transition: background 0.3s, box-shadow 0.3s;
+    }
+    .status-dot.idle { background: var(--muted); }
+    .status-dot.connecting { background: var(--warn); animation: pulse 1.5s infinite; }
+    .status-dot.active { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+    .status-dot.error { background: var(--err); }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .avatar-form-selector {
+      display: flex;
+      gap: 4px;
+      justify-content: center;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+    }
+    .form-btn {
+      width: 32px; height: 32px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: transparent;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+      font-size: 14px;
+    }
+    .form-btn:hover { border-color: var(--accent); background: var(--accent-dim); }
+    .form-btn.active { border-color: var(--accent); background: var(--accent-dim); }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="avatar-wrap">
+      <canvas id="avatar" width="192" height="192"></canvas>
+    </div>
+    <div class="avatar-label" id="avatarLabel">Initializing...</div>
+
+    <h1>Hephaestus</h1>
+    <p>Select a UE project with <code>.hephaestus_forge/</code>, or adopt one with
+      <code>forge adopt <path></code> then add it here.</p>
+
+    <label for="path">UE project folder</label>
+    <input id="path" placeholder="C:\dev\MyGame" />
+    <div class="row">
+      <button id="add">Add / open project</button>
+      <button class="secondary" id="refresh">Refresh list</button>
+    </div>
+    <div id="err" class="err"></div>
+
+    <ul id="list"></ul>
+    <p class="hint">Factory repo stays separate. Each game is a target project with HephaestusBridge in Plugins/.</p>
+  </div>
+
+  <script>
+    // =======================
+    // Polymorphic Avatar System
+    // =======================
+    const canvas = document.getElementById('avatar');
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    const CX = W / 2, CY = H / 2;
+
+    // Avatar forms: geometric, organic, abstract, particle
+    const FORMS = [
+      { id: 'geometric', label: 'Geometric', char: '◆' },
+      { id: 'organic', label: 'Organic', char: '◉' },
+      { id: 'abstract', label: 'Abstract', char: '⬢' },
+      { id: 'particle', label: 'Swarm', char: '⋆' }
+    ];
+
+    let currentForm = 0;
+    let state = 'idle'; // idle, connecting, active, thinking, working, success, error
+    let time = 0;
+    let particles = [];
+    let morphProgress = 0;
+    let targetForm = 0;
+    let formShapes = [];
+
+    // Color palette per state
+    const STATE_COLORS = {
+      idle: { primary: '#3b82f6', secondary: '#06b6d4', glow: '#22d3ee' },
+      connecting: { primary: '#f59e0b', secondary: '#fbbf24', glow: '#fde047' },
+      active: { primary: '#22c55e', secondary: '#4ade80', glow: '#86efac' },
+      thinking: { primary: '#a855f7', secondary: '#d946ef', glow: '#f0abfc' },
+      working: { primary: '#3b82f6', secondary: '#06b6d4', glow: '#22d3ee' },
+      success: { primary: '#22c55e', secondary: '#4ade80', glow: '#86efac' },
+      error: { primary: '#ef4444', secondary: '#f87171', glow: '#fecaca' }
+    };
+
+    // Generate base shapes for each form
+    function generateShapes(formId, count) {
+      const shapes = [];
+      for (let i = 0; i < count; i++) {
+        const angle = (i / count) * Math.PI * 2;
+        const radius = 35 + Math.random() * 20;
+        const phase = Math.random() * Math.PI * 2;
+        const speed = 0.3 + Math.random() * 0.7;
+        const size = 3 + Math.random() * 5;
+        shapes.push({ angle, radius, phase, speed, size, form: formId });
+      }
+      return shapes;
+    }
+
+    function initParticles() {
+      particles = [];
+      for (let i = 0; i < 60; i++) {
+        particles.push({
+          x: CX + (Math.random() - 0.5) * 80,
+          y: CY + (Math.random() - 0.5) * 80,
+          vx: (Math.random() - 0.5) * 0.5,
+          vy: (Math.random() - 0.5) * 0.5,
+          size: 1 + Math.random() * 2.5,
+          life: Math.random(),
+          decay: 0.003 + Math.random() * 0.007,
+          hue: 190 + Math.random() * 40
+        });
+      }
+    }
+
+    function init() {
+      formShapes = FORMS.map(f => generateShapes(f.id, 12));
+      initParticles();
+      requestAnimationFrame(render);
+    }
+
+    function lerp(a, b, t) { return a + (b - a) * t; }
+
+    function easeInOutCubic(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
+
+    function getStateColors() {
+      return STATE_COLORS[state] || STATE_COLORS.idle;
+    }
+
+    function drawGeometricShape(ctx, shape, colors, progress) {
+      const a = shape.angle + time * shape.speed * 0.5;
+      const r = shape.radius + Math.sin(time * shape.speed + shape.phase) * 8;
+      const x = CX + Math.cos(a) * r;
+      const y = CY + Math.sin(a) * r;
+      const s = shape.size * (1 + 0.3 * Math.sin(time * 2 + shape.phase));
+
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(a + time * 0.3);
+
+      const sides = 4 + Math.floor(progress * 4);
+      ctx.beginPath();
+      for (let i = 0; i < sides; i++) {
+        const aa = (i / sides) * Math.PI * 2;
+        const rr = s * (0.7 + 0.3 * Math.sin(time * 3 + aa * 2));
+        ctx.lineTo(Math.cos(aa) * rr, Math.sin(aa) * rr);
+      }
+      ctx.closePath();
+
+      const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, s * 1.5);
+      grad.addColorStop(0, colors.primary);
+      grad.addColorStop(1, colors.secondary);
+      ctx.fillStyle = grad;
+      ctx.fill();
+
+      ctx.strokeStyle = colors.glow;
+      ctx.lineWidth = 1.5;
+      ctx.shadowColor = colors.glow;
+      ctx.shadowBlur = 8;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawOrganicShape(ctx, shape, colors, progress) {
+      const a = shape.angle + time * shape.speed * 0.3;
+      const r = shape.radius + Math.sin(time * shape.speed * 0.7 + shape.phase) * 12;
+      const x = CX + Math.cos(a) * r;
+      const y = CY + Math.sin(a) * r;
+      const s = shape.size * (1 + 0.4 * Math.sin(time * 1.5 + shape.phase));
+
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(a);
+
+      ctx.beginPath();
+      const lobes = 3 + Math.floor(progress * 4);
+      for (let i = 0; i < lobes * 2; i++) {
+        const aa = (i / (lobes * 2)) * Math.PI * 2;
+        const rr = s * (i % 2 === 0 ? 1 : 0.5 + 0.3 * Math.sin(time * 2 + aa * 3));
+        ctx.lineTo(Math.cos(aa) * rr, Math.sin(aa) * rr);
+      }
+      ctx.closePath();
+
+      const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, s * 2);
+      grad.addColorStop(0, colors.primary + 'CC');
+      grad.addColorStop(0.5, colors.secondary + '88');
+      grad.addColorStop(1, 'transparent');
+      ctx.fillStyle = grad;
+      ctx.fill();
+
+      ctx.strokeStyle = colors.glow;
+      ctx.lineWidth = 1;
+      ctx.shadowColor = colors.glow;
+      ctx.shadowBlur = 12;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawAbstractShape(ctx, shape, colors, progress) {
+      const a = shape.angle + time * shape.speed * 0.4;
+      const r = shape.radius + Math.sin(time * shape.speed * 0.5 + shape.phase) * 6;
+      const x = CX + Math.cos(a) * r;
+      const y = CY + Math.sin(a) * r;
+      const s = shape.size * (1 + 0.2 * Math.sin(time * 2.5 + shape.phase));
+
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(a + time * 0.2);
+
+      ctx.beginPath();
+      const sides = 6;
+      for (let i = 0; i < sides; i++) {
+        const aa = (i / sides) * Math.PI * 2;
+        const rr = s * (0.8 + 0.4 * Math.sin(time * 4 + aa * 3 + progress * Math.PI));
+        ctx.lineTo(Math.cos(aa) * rr, Math.sin(aa) * rr);
+      }
+      ctx.closePath();
+
+      const grad = ctx.createLinearGradient(-s, -s, s, s);
+      grad.addColorStop(0, colors.primary);
+      grad.addColorStop(1, colors.secondary);
+      ctx.fillStyle = grad;
+      ctx.globalAlpha = 0.7 + 0.3 * Math.sin(time * 2 + shape.phase);
+      ctx.fill();
+
+      ctx.strokeStyle = colors.glow;
+      ctx.lineWidth = 1;
+      ctx.shadowColor = colors.glow;
+      ctx.shadowBlur = 6;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawParticleShape(ctx, shape, colors, progress) {
+      // Particles handled separately
+    }
+
+    function renderShapes(colors, formProgress) {
+      const drawFns = {
+        geometric: drawGeometricShape,
+        organic: drawOrganicShape,
+        abstract: drawAbstractShape,
+        particle: () => {}
+      };
+
+      // Current form
+      const curShapes = formShapes[currentForm];
+      const curDraw = drawFns[FORMS[currentForm].id];
+      curShapes.forEach(s => curDraw(ctx, s, colors, formProgress));
+
+      // Morphing to target form
+      if (targetForm !== currentForm && morphProgress > 0) {
+        const tgtShapes = formShapes[targetForm];
+        const tgtDraw = drawFns[FORMS[targetForm].id];
+        const mp = easeInOutCubic(morphProgress);
+        const maxLen = Math.max(curShapes.length, tgtShapes.length);
+        for (let i = 0; i < maxLen; i++) {
+          const s1 = curShapes[i % curShapes.length];
+          const s2 = tgtShapes[i % tgtShapes.length];
+          const merged = {
+            angle: lerp(s1.angle, s2.angle, mp),
+            radius: lerp(s1.radius, s2.radius, mp),
+            phase: lerp(s1.phase, s2.phase, mp),
+            speed: lerp(s1.speed, s2.speed, mp),
+            size: lerp(s1.size, s2.size, mp),
+          };
+          tgtDraw(ctx, merged, colors, mp);
+        }
+      }
+    }
+
+    function renderParticles(colors) {
+      particles.forEach(p => {
+        // Attract to center
+        const dx = CX - p.x, dy = CY - p.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 1) {
+          p.vx += dx * 0.0003;
+          p.vy += dy * 0.0003;
+        }
+        p.vx *= 0.985; p.vy *= 0.985;
+        p.x += p.vx; p.y += p.vy;
+        p.life -= p.decay;
+        if (p.life <= 0 || dist > 120) {
+          const angle = Math.random() * Math.PI * 2;
+          const r = 60 + Math.random() * 40;
+          p.x = CX + Math.cos(angle) * r;
+          p.y = CY + Math.sin(angle) * r;
+          p.life = 1;
+          p.vx = (Math.random() - 0.5) * 0.5;
+          p.vy = (Math.random() - 0.5) * 0.5;
+        }
+        const alpha = Math.max(0, Math.min(1, p.life * 1.5));
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fillStyle = `hsla(${p.hue}, 80%, 60%, ${alpha * 0.6})`;
+        ctx.shadowColor = colors.glow;
+        ctx.shadowBlur = 4;
+        ctx.fill();
+      });
+    }
+
+    function renderCore(colors) {
+      // Central core pulse
+      const pulse = 0.6 + 0.4 * Math.sin(time * 3);
+      const coreSize = 18 * pulse;
+      const grad = ctx.createRadialGradient(CX, CY, 0, CX, CY, coreSize * 2);
+      grad.addColorStop(0, colors.primary);
+      grad.addColorStop(0.5, colors.secondary + '88');
+      grad.addColorStop(1, 'transparent');
+      ctx.beginPath();
+      ctx.arc(CX, CY, coreSize, 0, Math.PI * 2);
+      ctx.fillStyle = grad;
+      ctx.shadowColor = colors.glow;
+      ctx.shadowBlur = 20 * pulse;
+      ctx.fill();
+    }
+
+    function renderRing(colors) {
+      // Outer orbiting ring
+      const ringRadius = 55 + 5 * Math.sin(time * 0.8);
+      ctx.beginPath();
+      ctx.arc(CX, CY, ringRadius, 0, Math.PI * 2);
+      ctx.strokeStyle = colors.glow + '44';
+      ctx.lineWidth = 1;
+      ctx.shadowColor = colors.glow;
+      ctx.shadowBlur = 8;
+      ctx.stroke();
+
+      // Orbiting accent dots
+      for (let i = 0; i < 3; i++) {
+        const a = time * 0.7 + i * Math.PI * 2 / 3;
+        const x = CX + Math.cos(a) * ringRadius;
+        const y = CY + Math.sin(a) * ringRadius;
+        ctx.beginPath();
+        ctx.arc(x, y, 3, 0, Math.PI * 2);
+        ctx.fillStyle = colors.glow;
+        ctx.shadowColor = colors.glow;
+        ctx.shadowBlur = 6;
+        ctx.fill();
+      }
+    }
+
+    function render() {
+      ctx.clearRect(0, 0, W, H);
+      time += 1/60;
+
+      // Morph progress
+      if (targetForm !== currentForm) {
+        morphProgress = Math.min(1, morphProgress + 0.02);
+        if (morphProgress >= 1) {
+          currentForm = targetForm;
+          morphProgress = 0;
+        }
+      } else {
+        morphProgress = Math.max(0, morphProgress - 0.02);
+      }
+
+      const colors = getStateColors();
+      const formProgress = Math.min(1, time * 0.5);
+
+      // State-specific rendering
+      if (state === 'particle' || FORMS[currentForm].id === 'particle') {
+        renderParticles(colors);
+        renderCore(colors);
+      } else {
+        renderShapes(colors, formProgress);
+        renderCore(colors);
+        renderRing(colors);
+      }
+
+      // State indicator pulse
+      if (state === 'thinking' || state === 'working') {
+        const t = Math.sin(time * 5) * 0.5 + 0.5;
+        ctx.beginPath();
+        ctx.arc(CX, CY, 50 + t * 8, 0, Math.PI * 2);
+        ctx.strokeStyle = colors.glow + Math.floor(t * 100).toString(16).padStart(2, '0');
+        ctx.lineWidth = 2;
+        ctx.shadowBlur = 0;
+        ctx.stroke();
+      }
+
+      // Success burst
+      if (state === 'success') {
+        const burst = Math.sin(time * 10) * 0.5 + 0.5;
+        ctx.beginPath();
+        ctx.arc(CX, CY, 40 + burst * 20, 0, Math.PI * 2);
+        ctx.strokeStyle = colors.glow + Math.floor(burst * 150).toString(16).padStart(2, '0');
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      }
+
+      // Error shake
+      if (state === 'error') {
+        const shake = Math.sin(time * 30) * 2;
+        ctx.translate(shake, 0);
+      }
+
+      requestAnimationFrame(render);
+    }
+
+    // Public API
+    window.HephaestusAvatar = {
+      setState(s) {
+        state = s;
+        document.getElementById('avatarLabel').textContent = s.charAt(0).toUpperCase() + s.slice(1);
+      },
+      setForm(idx) {
+        if (typeof idx === 'number' && idx >= 0 && idx < FORMS.length && idx !== targetForm) {
+          targetForm = idx;
+        }
+      },
+      getForm() { return FORMS[currentForm].id; },
+      triggerSuccess() {
+        const prev = state;
+        state = 'success';
+        setTimeout(() => { state = prev; }, 1500);
+      },
+      triggerError() {
+        const prev = state;
+        state = 'error';
+        setTimeout(() => { state = prev; }, 1000);
+      }
+    };
+
+    // Initialize
+    init();
+
+    // =======================
+    // Project Picker Logic
+    // =======================
+    const list = document.getElementById("list");
+    const err = document.getElementById("err");
+    const pathInput = document.getElementById("path");
+
+    // Avatar SSE connection
+    let avatarEventSource = null;
+
+    function connectAvatarSSE() {
+      if (avatarEventSource) avatarEventSource.close();
+      avatarEventSource = new EventSource("/api/avatar/stream");
+      avatarEventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.state) HephaestusAvatar.setState(data.state);
+          if (typeof data.form === 'number') HephaestusAvatar.setForm(data.form);
+        } catch (e) {}
+      };
+      avatarEventSource.onerror = () => {
+        setTimeout(connectAvatarSSE, 3000);
+      };
+    }
+
+    async function pollAvatarState() {
+      try {
+        const res = await fetch("/api/avatar/state");
+        const data = await res.json();
+        if (data.state) HephaestusAvatar.setState(data.state);
+        if (typeof data.form === 'number') HephaestusAvatar.setForm(data.form);
+      } catch {}
+      setTimeout(pollAvatarState, 800);
+    }
+
+    async function loadProjects() {
+      err.textContent = "";
+      HephaestusAvatar.setState('connecting');
+      try {
+        const res = await fetch("/api/projects");
+        const data = await res.json();
+        list.innerHTML = "";
+        for (const p of data.projects || []) {
+          const li = document.createElement("li");
+          li.innerHTML = `<div class="name">${p.name}</div><div class="path">${p.path}</div>`;
+          if (data.active && p.path === data.active) li.classList.add('active');
+          li.onclick = () => openProject(p.path);
+          list.appendChild(li);
+        }
+        if (data.active) pathInput.value = data.active;
+        HephaestusAvatar.setState(data.active ? 'active' : 'idle');
+      } catch (e) {
+        err.textContent = "Failed to load projects";
+        HephaestusAvatar.setState('error');
+      }
+    }
+
+    async function openProject(path) {
+      err.textContent = "";
+      HephaestusAvatar.setState('connecting');
+      HephaestusAvatar.triggerSuccess();
+      try {
+        const res = await fetch("/api/active", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path }),
+        });
+        const data = await res.json();
+        if (!data.ok) {
+          err.textContent = data.error || "Failed to open project";
+          HephaestusAvatar.setState('error');
+          HephaestusAvatar.triggerError();
+          return;
+        }
+        HephaestusAvatar.setState('active');
+        // Connect SSE before navigation so avatar persists across page load
+        connectAvatarSSE();
+        window.location.href = "/";
+      } catch (e) {
+        err.textContent = "Connection failed";
+        HephaestusAvatar.setState('error');
+        HephaestusAvatar.triggerError();
+      }
+    }
+
+    async function boot() {
+      await loadProjects();
+      connectAvatarSSE();
+      pollAvatarState();
+      pollState();
+    }
+
+    async function pollState() {
+      try {
+        const res = await fetch("/api/health");
+        const data = await res.json();
+        if (data.active_project && state === 'idle') {
+          HephaestusAvatar.setState('active');
+        }
+      } catch {}
+      setTimeout(pollState, 3000);
+    }
+
+    document.getElementById("add").onclick = () => {
+      const path = pathInput.value.trim();
+      if (!path) { err.textContent = "Enter a project path"; HephaestusAvatar.setState('error'); return; }
+      openProject(path);
+    };
+    document.getElementById("refresh").onclick = loadProjects;
+
+    boot();
+  </script>
+</body>
+</html>

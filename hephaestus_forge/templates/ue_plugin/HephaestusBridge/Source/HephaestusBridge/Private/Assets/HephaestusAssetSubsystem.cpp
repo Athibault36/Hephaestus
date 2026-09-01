@@ -7,6 +7,12 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Modules/ModuleManager.h"
 #include "UObject/SoftObjectPath.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/SkeletalMesh.h"
+#include "Animation/AnimSequence.h"
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 
 void UHephaestusAssetSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -111,4 +117,135 @@ TArray<UObject*> UHephaestusAssetSubsystem::GetAssetsInPath(const FString& Path,
 		Results.Add(Obj);
 	}
 	return Results;
+}
+
+bool UHephaestusAssetSubsystem::SearchAssetsJson(
+	const FString& Query,
+	const FString& AssetClass,
+	int32 Limit,
+	FString& OutJson) const
+{
+	OutJson.Reset();
+	if (Query.IsEmpty())
+	{
+		return false;
+	}
+
+	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+	FARFilter Filter;
+	Filter.PackagePaths.Add(TEXT("/Game"));
+	Filter.bRecursivePaths = true;
+	if (AssetClass.Equals(TEXT("StaticMesh"), ESearchCase::IgnoreCase))
+	{
+		Filter.ClassPaths.Add(UStaticMesh::StaticClass()->GetClassPathName());
+	}
+	else if (AssetClass.Equals(TEXT("SkeletalMesh"), ESearchCase::IgnoreCase))
+	{
+		Filter.ClassPaths.Add(USkeletalMesh::StaticClass()->GetClassPathName());
+	}
+	else if (AssetClass.Equals(TEXT("AnimSequence"), ESearchCase::IgnoreCase)
+		|| AssetClass.Equals(TEXT("Animation"), ESearchCase::IgnoreCase))
+	{
+		Filter.ClassPaths.Add(UAnimSequence::StaticClass()->GetClassPathName());
+	}
+	else
+	{
+		Filter.ClassPaths.Add(UStaticMesh::StaticClass()->GetClassPathName());
+		Filter.ClassPaths.Add(USkeletalMesh::StaticClass()->GetClassPathName());
+	}
+
+	TArray<FAssetData> Assets;
+	AssetRegistryModule.Get().GetAssets(Filter, Assets);
+
+	TArray<FString> Tokens;
+	Query.ParseIntoArray(Tokens, TEXT(" "), true);
+	if (Tokens.Num() == 0)
+	{
+		Tokens.Add(Query);
+	}
+
+	struct FScoredAsset
+	{
+		FString Path;
+		int32 Score = 0;
+	};
+	TArray<FScoredAsset> Scored;
+
+	auto AppendMatches = [&](const TArray<FAssetData>& SourceAssets)
+	{
+		for (const FAssetData& Asset : SourceAssets)
+		{
+			const FString NameLower = Asset.AssetName.ToString().ToLower();
+			const FString PathLower = Asset.GetObjectPathString().ToLower();
+			int32 Score = 0;
+			for (const FString& Token : Tokens)
+			{
+				const FString TokenLower = Token.ToLower();
+				if (TokenLower.IsEmpty())
+				{
+					continue;
+				}
+				if (NameLower == TokenLower)
+				{
+					Score += 100;
+				}
+				else if (NameLower.Contains(TokenLower))
+				{
+					Score += 50;
+				}
+				else if (PathLower.Contains(TokenLower))
+				{
+					Score += 25;
+				}
+			}
+			if (Score > 0)
+			{
+				Scored.Add({ Asset.GetObjectPathString(), Score });
+			}
+		}
+	};
+
+	AppendMatches(Assets);
+
+	if (Scored.Num() < FMath::Max(Limit, 1))
+	{
+		FARFilter EngineFilter = Filter;
+		EngineFilter.PackagePaths.Reset();
+		EngineFilter.PackagePaths.Add(TEXT("/Engine/BasicShapes"));
+		EngineFilter.bRecursivePaths = true;
+		TArray<FAssetData> EngineAssets;
+		AssetRegistryModule.Get().GetAssets(EngineFilter, EngineAssets);
+		AppendMatches(EngineAssets);
+	}
+
+	Scored.Sort([](const FScoredAsset& A, const FScoredAsset& B) { return A.Score > B.Score; });
+
+	TArray<FString> Matches;
+	TSet<FString> Seen;
+	for (const FScoredAsset& Item : Scored)
+	{
+		if (Seen.Contains(Item.Path))
+		{
+			continue;
+		}
+		Seen.Add(Item.Path);
+		Matches.Add(Item.Path);
+		if (Matches.Num() >= FMath::Max(Limit, 1))
+		{
+			break;
+		}
+	}
+
+	TSharedRef<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+	TArray<TSharedPtr<FJsonValue>> Arr;
+	for (const FString& Path : Matches)
+	{
+		Arr.Add(MakeShared<FJsonValueString>(Path));
+	}
+	ResultObj->SetArrayField(TEXT("assets"), Arr);
+	ResultObj->SetStringField(TEXT("query"), Query);
+	ResultObj->SetNumberField(TEXT("count"), Matches.Num());
+	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutJson);
+	FJsonSerializer::Serialize(ResultObj, Writer);
+	return true;
 }
