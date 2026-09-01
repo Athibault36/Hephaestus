@@ -513,4 +513,45 @@ bool UHephaestusWorldSubsystem::GetView(FVector& OutLocation, FRotator& OutRotat
     return false;
 }
 
+bool UHephaestusWorldSubsystem::GetActorInfo(const FString& ActorPath, FTransform& OutTransform, FString& OutMeshPath,
+    FVector& OutBoundsOrigin, FVector& OutBoundsExtent, bool& bOutVisible, FString& OutClassPath) const
+{
+    OutTransform = FTransform::Identity;
+    OutMeshPath.Empty();
+    OutBoundsOrigin = FVector::ZeroVector;
+    OutBoundsExtent = FVector::ZeroVector;
+    bOutVisible = false;
+    OutClassPath.Empty();
+
+    AActor* Actor = FindActorByPath(ActorPath);
+    if (!Actor)
+    {
+        UE_LOG(LogHephaestusBridge, Warning, TEXT("HephaestusWorldSubsystem: GetActorInfo actor not found: %s"), *ActorPath);
+        return false;
+    }
+
+    OutTransform = Actor->GetActorTransform();
+
+    // Static mesh asset path from the first StaticMeshComponent, if any
+    if (UStaticMeshComponent* MeshComp = Actor->FindComponentByClass<UStaticMeshComponent>())
+    {
+        if (UStaticMesh* Mesh = MeshComp->GetStaticMesh())
+        {
+            OutMeshPath = Mesh->GetPathName();
+        }
+    }
+
+    // World-space axis-aligned bounds (origin + half-extent)
+    Actor->GetActorBounds(false, OutBoundsOrigin, OutBoundsExtent);
+
+    bOutVisible = !Actor->IsHidden();
+
+    if (const UClass* Cls = Actor->GetClass())
+    {
+        OutClassPath = Cls->GetPathName();
+    }
+
+    return true;
+}
+
 #undef LOCTEXT_NAMESPACE

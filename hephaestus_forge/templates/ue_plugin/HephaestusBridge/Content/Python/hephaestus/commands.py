@@ -100,6 +100,14 @@ def build_list_actors_command(class_path: str = "") -> dict[str, Any]:
     return {"command": "world.list_actors", "params": params}
 
 
+def build_get_actor_command(actor_path: str) -> dict[str, Any]:
+    """Build a world.get_actor command dict (returns transform/mesh/bounds/visibility/class)."""
+    return {
+        "command": "world.get_actor",
+        "params": {"actor_path": actor_path},
+    }
+
+
 def build_capture_frame_command() -> dict[str, Any]:
     return {"command": "vision.capture_frame", "params": {}}
 
@@ -119,6 +127,10 @@ def destroy_actor_json(actor_path: str) -> str:
 
 def list_actors_json(class_path: str = "") -> str:
     return json.dumps(build_list_actors_command(class_path))
+
+
+def get_actor_json(actor_path: str) -> str:
+    return json.dumps(build_get_actor_command(actor_path))
 
 
 def capture_frame_json() -> str:

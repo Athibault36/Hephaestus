@@ -72,6 +72,21 @@ def validate_world_spawn_mesh(command_obj: dict[str, Any]) -> list[str]:
     return errors
 
 
+def validate_world_get_actor(command_obj: dict[str, Any]) -> list[str]:
+    """Return list of problems (empty = ok). Requires a non-empty actor_path."""
+    errors: list[str] = []
+    if command_obj.get("command") != "world.get_actor":
+        errors.append("command must be world.get_actor")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    actor_path = params.get("actor_path") or params.get("actor")
+    if not isinstance(actor_path, str) or not actor_path.strip():
+        errors.append("actor_path must be a non-empty string")
+    return errors
+
+
 def assert_uses_params_key(command_obj: dict[str, Any]) -> None:
     """Client builders should emit params (args is only a server-side alias)."""
     assert "params" in command_obj, "payload must include params for Remote API clients"

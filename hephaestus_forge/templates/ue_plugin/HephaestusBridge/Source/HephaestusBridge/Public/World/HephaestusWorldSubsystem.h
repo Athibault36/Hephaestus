@@ -69,6 +69,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
 	bool GetView(FVector& OutLocation, FRotator& OutRotation, FVector& OutForward) const;
 
+	/** Resolve an actor by path and read back transform, static mesh, world bounds, visibility, class */
+	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
+	bool GetActorInfo(const FString& ActorPath, FTransform& OutTransform, FString& OutMeshPath,
+		FVector& OutBoundsOrigin, FVector& OutBoundsExtent, bool& bOutVisible, FString& OutClassPath) const;
+
 	/** Native (non-UHT) asset registry access */
 	IAssetRegistry& GetAssetRegistry();
 

@@ -204,6 +204,7 @@ TArray<FString> UHephaestusCommandHandler::GetAvailableCommands() const
         TEXT("world.set_transform"),
         TEXT("world.set_light"),
         TEXT("world.get_view"),
+        TEXT("world.get_actor"),
         TEXT("world.batch_edit"),
         TEXT("world.query_spatial"),
         TEXT("asset.create_material"),
@@ -585,6 +586,42 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleWorldCommand(const FSt
             TEXT("{\"location\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},\"rotation\":{\"pitch\":%.3f,\"yaw\":%.3f,\"roll\":%.3f},\"forward\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f}}"),
             Loc.X, Loc.Y, Loc.Z, Rot.Pitch, Rot.Yaw, Rot.Roll, Forward.X, Forward.Y, Forward.Z);
         return MakeSuccessResult(TEXT(""), ResultJSON);
+    }
+    else if (Action == TEXT("get_actor"))
+    {
+        FString ActorPath;
+        if (Params.IsValid())
+        {
+            if (!Params->TryGetStringField(TEXT("actor_path"), ActorPath) || ActorPath.IsEmpty())
+            {
+                Params->TryGetStringField(TEXT("actor"), ActorPath);
+            }
+        }
+        if (ActorPath.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Missing actor_path for world.get_actor"));
+        }
+
+        FTransform Xf;
+        FString MeshPath, ClassPath;
+        FVector BoundsOrigin, BoundsExtent;
+        bool bVisible = false;
+        if (!WorldSubsystem->GetActorInfo(ActorPath, Xf, MeshPath, BoundsOrigin, BoundsExtent, bVisible, ClassPath))
+        {
+            return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Actor not found: %s"), *ActorPath));
+        }
+
+        const FVector Loc = Xf.GetLocation();
+        const FRotator Rot = Xf.Rotator();
+        const FVector Scale = Xf.GetScale3D();
+        const FString ResultJSON = FString::Printf(
+            TEXT("{\"actor_path\":\"%s\",\"class\":\"%s\",\"mesh_path\":\"%s\",\"visible\":%s,")
+            TEXT("\"transform\":{\"location\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},\"rotation\":{\"pitch\":%.3f,\"yaw\":%.3f,\"roll\":%.3f},\"scale\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f}},")
+            TEXT("\"bounds\":{\"origin\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},\"extent\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f}}}"),
+            *ActorPath, *ClassPath, *MeshPath, bVisible ? TEXT("true") : TEXT("false"),
+            Loc.X, Loc.Y, Loc.Z, Rot.Pitch, Rot.Yaw, Rot.Roll, Scale.X, Scale.Y, Scale.Z,
+            BoundsOrigin.X, BoundsOrigin.Y, BoundsOrigin.Z, BoundsExtent.X, BoundsExtent.Y, BoundsExtent.Z);
+        return MakeSuccessResult(TEXT(""), ResultJSON, {}, { ActorPath });
     }
     else if (Action == TEXT("list_actors"))
     {
