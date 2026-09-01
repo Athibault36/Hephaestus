@@ -64,6 +64,8 @@ The job runs `forge doctor` then `forge e2e` (live probes). It uploads `live-e2e
 ```powershell
 forge doctor C:\path\to\YourGame --api http://127.0.0.1:8765
 forge e2e C:\path\to\YourGame --api http://127.0.0.1:8765
+forge health C:\path\to\YourGame --json   # machine-readable preflight
+forge e2e C:\path\to\YourGame --json     # machine-readable E2E report
 ```
 
 ## 3. Mission Control

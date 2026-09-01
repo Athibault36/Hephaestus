@@ -17,13 +17,20 @@ from remote_command_schema import (  # noqa: E402
     resolve_params,
     validate_animation_play_montage,
     validate_animation_play_locomotion,
+    validate_animation_retarget,
     validate_asset_create_instance,
     validate_asset_create_material,
     validate_asset_export,
     validate_asset_import,
+    validate_asset_reimport,
     validate_asset_search,
     validate_audio_create_metasound,
     validate_audio_synthesize,
+    validate_blueprint_add_function,
+    validate_blueprint_set_property,
+    validate_pcg_mutate_graph,
+    validate_pcg_set_metadata,
+    validate_rendering_add_pass,
     validate_sequence_create_shot,
     validate_sequence_play,
     validate_world_apply_move_input,
@@ -165,6 +172,52 @@ def test_validate_audio_and_instance_commands():
         "command": "audio.synthesize",
         "params": {},
     })
+
+
+def test_validate_reimport_and_retarget():
+    assert validate_asset_reimport({
+        "command": "asset.reimport",
+        "params": {"asset_path": "/Game/Mesh.Mesh"},
+    }) == []
+    assert "missing asset_path" in validate_asset_reimport({
+        "command": "asset.reimport",
+        "params": {},
+    })
+    assert validate_animation_retarget({
+        "command": "animation.retarget",
+        "params": {"source_mesh": "/Game/A.A", "target_mesh": "/Game/B.B"},
+    }) == []
+    missing = validate_animation_retarget({"command": "animation.retarget", "params": {}})
+    assert "missing source_mesh" in missing
+    assert "missing target_mesh" in missing
+
+
+def test_validate_blueprint_mutations():
+    assert validate_blueprint_add_function({
+        "command": "blueprint.add_function",
+        "params": {"blueprint_path": "/Game/BP_Test.BP_Test", "function_name": "Foo"},
+    }) == []
+    missing = validate_blueprint_add_function({"command": "blueprint.add_function", "params": {}})
+    assert "missing blueprint_path" in missing
+    assert validate_blueprint_set_property({
+        "command": "blueprint.set_property",
+        "params": {"blueprint_path": "/Game/BP_Test.BP_Test", "property_name": "Speed", "value": "100"},
+    }) == []
+
+
+def test_validate_rendering_and_pcg_commands():
+    assert validate_rendering_add_pass({
+        "command": "rendering.add_pass",
+        "params": {"pass_name": "HephaestusProbe"},
+    }) == []
+    assert validate_pcg_mutate_graph({
+        "command": "pcg.mutate_graph",
+        "params": {"graph_path": "/Game/PCG/MyGraph.MyGraph"},
+    }) == []
+    assert validate_pcg_set_metadata({
+        "command": "pcg.set_metadata",
+        "params": {"component_path": "/Game/PCG/Comp.Comp", "metadata": {"seed": "1"}},
+    }) == []
 
 
 if __name__ == "__main__":

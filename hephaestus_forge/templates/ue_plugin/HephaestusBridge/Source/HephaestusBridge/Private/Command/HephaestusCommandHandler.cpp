@@ -375,7 +375,7 @@ FHephaestusCommandResult UHephaestusCommandHandler::RouteCommand(const TSharedPt
     }
     else if (Command.StartsWith(TEXT("rendering.")))
     {
-        return HandleRenderingCommand(Params);
+        return HandleRenderingCommand(Command, Params);
     }
     else if (Command.StartsWith(TEXT("pcg.")))
     {
@@ -971,8 +971,26 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleAssetCommand(const FSt
     }
     else if (Action == TEXT("reimport"))
     {
-        // Params: asset_path
-        return MakeSuccessResult(TEXT(""), TEXT("{}"));
+        FString AssetPath;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("asset_path"), AssetPath);
+        }
+        if (AssetPath.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("reimport requires asset_path"));
+        }
+        UObject* Asset = AssetSubsystem->FindAsset(AssetPath);
+        if (!Asset)
+        {
+            return MakeErrorResult(TEXT(""), TEXT("reimport: asset_path not found"));
+        }
+        const bool bOk = AssetSubsystem->ReimportAsset(Asset);
+        return bOk
+            ? MakeSuccessResult(
+                  TEXT(""),
+                  FString::Printf(TEXT("{\"asset_path\":\"%s\",\"validated\":true}"), *AssetPath))
+            : MakeErrorResult(TEXT(""), TEXT("reimport failed"));
     }
     else if (Action == TEXT("export"))
     {
@@ -1081,11 +1099,56 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleBlueprintCommand(const
     }
     else if (Action == TEXT("add_function"))
     {
-        return MakeSuccessResult(TEXT(""), TEXT("{}"));
+        FString BlueprintPath;
+        FString FunctionName;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("blueprint_path"), BlueprintPath);
+            Params->TryGetStringField(TEXT("function_name"), FunctionName);
+        }
+        if (BlueprintPath.IsEmpty() || FunctionName.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("add_function requires blueprint_path and function_name"));
+        }
+        UBlueprint* Blueprint = LoadObject<UBlueprint>(nullptr, *BlueprintPath);
+        if (!Blueprint)
+        {
+            return MakeErrorResult(
+                TEXT(""),
+                FString::Printf(TEXT("add_function: blueprint not found: %s"), *BlueprintPath));
+        }
+        return MakeErrorResult(
+            TEXT(""),
+            TEXT("add_function: graph editor pipeline not linked yet — blueprint validated"));
     }
     else if (Action == TEXT("set_property"))
     {
-        return MakeSuccessResult(TEXT(""), TEXT("{}"));
+        FString BlueprintPath;
+        FString PropertyName;
+        FString Value;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("blueprint_path"), BlueprintPath);
+            Params->TryGetStringField(TEXT("property_name"), PropertyName);
+            Params->TryGetStringField(TEXT("value"), Value);
+        }
+        if (BlueprintPath.IsEmpty() || PropertyName.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("set_property requires blueprint_path and property_name"));
+        }
+        UBlueprint* Blueprint = LoadObject<UBlueprint>(nullptr, *BlueprintPath);
+        if (!Blueprint)
+        {
+            return MakeErrorResult(
+                TEXT(""),
+                FString::Printf(TEXT("set_property: blueprint not found: %s"), *BlueprintPath));
+        }
+        return MakeErrorResult(
+            TEXT(""),
+            FString::Printf(
+                TEXT("set_property: editor property pipeline not linked yet (%s=%s)"),
+                *PropertyName,
+                *Value));
     }
     else if (Action == TEXT("diff"))
     {
@@ -1095,26 +1158,77 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleBlueprintCommand(const
     return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Unknown blueprint action: %s"), *Action));
 }
 
-FHephaestusCommandResult UHephaestusCommandHandler::HandleRenderingCommand(const TSharedPtr<FJsonObject>& Params)
+FHephaestusCommandResult UHephaestusCommandHandler::HandleRenderingCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params)
 {
     if (!RenderingSubsystem)
     {
         return MakeErrorResult(TEXT(""), TEXT("Rendering subsystem not available"));
     }
 
-    FString Action = Params->GetStringField(TEXT("action"));
+    FString Action;
+    if (Params.IsValid())
+    {
+        Params->TryGetStringField(TEXT("action"), Action);
+    }
+    if (Action.IsEmpty())
+    {
+        Command.Split(TEXT("."), nullptr, &Action, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
+    }
 
     if (Action == TEXT("add_pass"))
     {
-        return MakeSuccessResult(TEXT(""), TEXT("{}"));
+        FString PassName;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("pass_name"), PassName);
+        }
+        if (PassName.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("add_pass requires pass_name"));
+        }
+        FHephaestusRenderPassDesc Desc;
+        Desc.PassName = PassName;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("shader_path"), Desc.ShaderPath);
+        }
+        const bool bOk = RenderingSubsystem->AddRenderGraphPass(Desc);
+        return bOk
+            ? MakeSuccessResult(
+                  TEXT(""),
+                  FString::Printf(TEXT("{\"pass_name\":\"%s\",\"registered\":true}"), *PassName))
+            : MakeErrorResult(TEXT(""), TEXT("add_pass failed"));
     }
     else if (Action == TEXT("create_shader_params"))
     {
-        return MakeSuccessResult(TEXT(""), TEXT("{}"));
+        FString StructName;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("struct_name"), StructName);
+        }
+        if (StructName.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("create_shader_params requires struct_name"));
+        }
+        const FString Result = RenderingSubsystem->CreateShaderParameterStruct(StructName, TMap<FString, FString>{});
+        return MakeSuccessResult(TEXT(""), FString::Printf(TEXT("{\"struct_name\":\"%s\"}"), *Result));
     }
     else if (Action == TEXT("dispatch_compute"))
     {
-        return MakeSuccessResult(TEXT(""), TEXT("{}"));
+        FString ShaderPath;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("shader_path"), ShaderPath);
+        }
+        if (ShaderPath.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("dispatch_compute requires shader_path"));
+        }
+        FIntVector DispatchSize(1, 1, 1);
+        const bool bOk = RenderingSubsystem->ExecuteComputeShader(ShaderPath, DispatchSize, TMap<FString, FString>{});
+        return bOk
+            ? MakeSuccessResult(TEXT(""), FString::Printf(TEXT("{\"shader_path\":\"%s\",\"dispatched\":true}"), *ShaderPath))
+            : MakeErrorResult(TEXT(""), TEXT("dispatch_compute failed"));
     }
 
     return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Unknown rendering action: %s"), *Action));
@@ -1157,9 +1271,39 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandlePCGCommand(const FStri
     }
     else if (Action == TEXT("set_metadata"))
     {
+        FString ComponentPath;
         TMap<FString, FString> Meta;
-        PCGSubsystem->SetMetadataParams(nullptr, Meta);
-        return MakeSuccessResult(TEXT(""), TEXT("{\"metadata\":true}"));
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("component_path"), ComponentPath);
+            const TSharedPtr<FJsonObject>* MetaObj = nullptr;
+            if (Params->TryGetObjectField(TEXT("metadata"), MetaObj) && MetaObj && MetaObj->IsValid())
+            {
+                for (const auto& Pair : (*MetaObj)->Values)
+                {
+                    FString Val;
+                    if (Pair.Value->TryGetString(Val))
+                    {
+                        Meta.Add(Pair.Key, Val);
+                    }
+                }
+            }
+        }
+        if (ComponentPath.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("set_metadata requires component_path"));
+        }
+        UObject* Component = LoadObject<UObject>(nullptr, *ComponentPath);
+        if (!Component)
+        {
+            return MakeErrorResult(
+                TEXT(""),
+                FString::Printf(TEXT("set_metadata: component not found: %s"), *ComponentPath));
+        }
+        PCGSubsystem->SetMetadataParams(Component, Meta);
+        return MakeSuccessResult(
+            TEXT(""),
+            FString::Printf(TEXT("{\"component_path\":\"%s\",\"keys\":%d}"), *ComponentPath, Meta.Num()));
     }
     else if (Action == TEXT("query_spatial"))
     {
@@ -1228,7 +1372,20 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleAnimationCommand(const
     }
     else if (Action == TEXT("retarget"))
     {
-        return MakeSuccessResult(TEXT(""), TEXT("{\"stub\":true}"));
+        FString SourceMesh;
+        FString TargetMesh;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("source_mesh"), SourceMesh);
+            Params->TryGetStringField(TEXT("target_mesh"), TargetMesh);
+        }
+        if (SourceMesh.IsEmpty() || TargetMesh.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("retarget requires source_mesh and target_mesh"));
+        }
+        return MakeErrorResult(
+            TEXT(""),
+            TEXT("retarget: IK retarget pipeline not linked yet — meshes validated in request"));
     }
     else if (Action == TEXT("edit_sequence"))
     {

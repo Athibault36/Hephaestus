@@ -469,6 +469,26 @@ def decide_action(
             },
         )
 
+    if any(w in goal_l for w in ("sound", "audio", "music", "metasound", "quartz")):
+        return AgentAction(
+            kind="play_audio",
+            reason="Heuristic play test audio for audio goal",
+            command={
+                "command": "audio.play_quartz",
+                "params": {"clock": "test", "timeline": "default"},
+            },
+        )
+
+    if any(w in goal_l for w in ("material", "metallic", "shader", "instance")):
+        return AgentAction(
+            kind="create_material",
+            reason="Heuristic create material for material goal",
+            command={
+                "command": "asset.create_material",
+                "params": {"name": "HephaestusAgentMaterial"},
+            },
+        )
+
     return AgentAction(
         kind="noop",
         reason=f"Level seeded (lights={snapshot.lights}, meshes={snapshot.meshes}). Holding.",
@@ -495,6 +515,12 @@ def _maybe_repair_command(
         mode = infer_locomotion_mode(goal)
         if mode:
             params["mode"] = mode
+            repaired["params"] = params
+            return repaired
+    if command.get("command") == "audio.create_metasound" and not params.get("source_path"):
+        paths = re.findall(r"/Game/[^\s,;\"']+", goal or "")
+        if paths:
+            params["source_path"] = paths[-1]
             repaired["params"] = params
             return repaired
     return None

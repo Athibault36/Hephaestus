@@ -167,5 +167,24 @@ def run_e2e_check(
         except Exception as exc:
             steps.append(E2EStep("audio_create_metasound", False, str(exc)))
 
+        try:
+            reimport = _post_command(
+                remote_api,
+                {"command": "asset.reimport", "params": {"asset_path": "/Game/__HephaestusE2EProbe"}},
+            )
+            reimport_ok = bool(reimport.get("success")) or "not found" in str(reimport.get("error") or "").lower()
+            steps.append(E2EStep("asset_reimport", reimport_ok, reimport.get("error") or "registered"))
+        except Exception as exc:
+            steps.append(E2EStep("asset_reimport", False, str(exc)))
+
+        try:
+            pcg = _post_command(
+                remote_api,
+                {"command": "pcg.query_spatial", "params": {"min": {"x": -100, "y": -100, "z": 0}, "max": {"x": 100, "y": 100, "z": 200}}},
+            )
+            steps.append(E2EStep("pcg_query_spatial", bool(pcg.get("success")), pcg.get("error") or "ok"))
+        except Exception as exc:
+            steps.append(E2EStep("pcg_query_spatial", False, str(exc)))
+
     ok = all(s.ok for s in steps if s.name not in ("preflight_nim_api_key", "preflight_planner"))
     return E2EReport(ok=ok, steps=steps)

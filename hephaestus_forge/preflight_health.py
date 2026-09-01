@@ -206,6 +206,7 @@ def _probe_bridge_capabilities(remote_api: str) -> HealthCheck:
             "params": {"parent_material": "/Engine/EngineMaterials/DefaultMaterial.DefaultMaterial"},
         }),
         ("audio.create_metasound", {"command": "audio.create_metasound", "params": {"name": "HephaestusProbe"}}),
+        ("asset.reimport", {"command": "asset.reimport", "params": {"asset_path": "/Game/__HephaestusProbe"}}),
     ]
     missing: list[str] = []
     try:
@@ -220,6 +221,8 @@ def _probe_bridge_capabilities(remote_api: str) -> HealthCheck:
                 missing.append(label)
             elif label == "audio.create_metasound" and "create_metasound" in err:
                 pass  # missing source_path is ok — command exists
+            elif label == "asset.reimport" and "not found" in err:
+                pass  # probe asset missing is ok — command exists
         if missing:
             return HealthCheck(
                 "bridge_capabilities",

@@ -130,6 +130,21 @@ def validate_animation_play_locomotion(command_obj: dict[str, Any]) -> list[str]
     return errors
 
 
+def validate_animation_retarget(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "animation.retarget":
+        errors.append("command must be animation.retarget")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not params.get("source_mesh"):
+        errors.append("missing source_mesh")
+    if not params.get("target_mesh"):
+        errors.append("missing target_mesh")
+    return errors
+
+
 def validate_sequence_play(command_obj: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     if command_obj.get("command") != "sequence.play":
@@ -208,6 +223,19 @@ def validate_asset_import(command_obj: dict[str, Any]) -> list[str]:
     return errors
 
 
+def validate_asset_reimport(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "asset.reimport":
+        errors.append("command must be asset.reimport")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not params.get("asset_path"):
+        errors.append("missing asset_path")
+    return errors
+
+
 def validate_asset_create_instance(command_obj: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     if command_obj.get("command") != "asset.create_instance":
@@ -238,5 +266,74 @@ def validate_audio_synthesize(command_obj: dict[str, Any]) -> list[str]:
         return errors
     if not (params.get("sound_path") or params.get("path")):
         errors.append("missing sound_path")
+    return errors
+
+
+def validate_blueprint_add_function(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "blueprint.add_function":
+        errors.append("command must be blueprint.add_function")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not params.get("blueprint_path"):
+        errors.append("missing blueprint_path")
+    if not params.get("function_name"):
+        errors.append("missing function_name")
+    return errors
+
+
+def validate_blueprint_set_property(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "blueprint.set_property":
+        errors.append("command must be blueprint.set_property")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not params.get("blueprint_path"):
+        errors.append("missing blueprint_path")
+    if not params.get("property_name"):
+        errors.append("missing property_name")
+    return errors
+
+
+def validate_rendering_add_pass(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "rendering.add_pass":
+        errors.append("command must be rendering.add_pass")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not params.get("pass_name"):
+        errors.append("missing pass_name")
+    return errors
+
+
+def validate_pcg_mutate_graph(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "pcg.mutate_graph":
+        errors.append("command must be pcg.mutate_graph")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not (params.get("graph_path") or params.get("path")):
+        errors.append("missing graph_path")
+    return errors
+
+
+def validate_pcg_set_metadata(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "pcg.set_metadata":
+        errors.append("command must be pcg.set_metadata")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not params.get("component_path"):
+        errors.append("missing component_path")
     return errors
 
