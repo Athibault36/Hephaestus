@@ -28,6 +28,9 @@ from remote_command_schema import (  # noqa: E402
     validate_audio_synthesize,
     validate_blueprint_add_function,
     validate_blueprint_set_property,
+    validate_pcg_mutate_graph,
+    validate_pcg_set_metadata,
+    validate_rendering_add_pass,
     validate_sequence_create_shot,
     validate_sequence_play,
     validate_world_apply_move_input,
@@ -199,6 +202,21 @@ def test_validate_blueprint_mutations():
     assert validate_blueprint_set_property({
         "command": "blueprint.set_property",
         "params": {"blueprint_path": "/Game/BP_Test.BP_Test", "property_name": "Speed", "value": "100"},
+    }) == []
+
+
+def test_validate_rendering_and_pcg_commands():
+    assert validate_rendering_add_pass({
+        "command": "rendering.add_pass",
+        "params": {"pass_name": "HephaestusProbe"},
+    }) == []
+    assert validate_pcg_mutate_graph({
+        "command": "pcg.mutate_graph",
+        "params": {"graph_path": "/Game/PCG/MyGraph.MyGraph"},
+    }) == []
+    assert validate_pcg_set_metadata({
+        "command": "pcg.set_metadata",
+        "params": {"component_path": "/Game/PCG/Comp.Comp", "metadata": {"seed": "1"}},
     }) == []
 
 

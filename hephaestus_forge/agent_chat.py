@@ -8,7 +8,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from agent_asset import augment_goal_with_assets, spawn_asset_in_view
+from agent_asset import augment_goal_with_assets, search_project_assets, spawn_asset_in_view
 from agent_session import AgentSession, SessionStore
 from goal_grader import grade_goal
 from ue_agent_loop import ObserveActLoop, RemoteUeClient
@@ -25,6 +25,14 @@ from locomotion_fallback import infer_locomotion_mode
 
 _DIRECT_LOCOMOTION = re.compile(
     r"^play\s+(idle|walk|run)\s+(?:animation\s+)?on\s+(/Temp/\S+)\s*$",
+    re.IGNORECASE,
+)
+_DIRECT_AUDIO = re.compile(
+    r"^play\s+(?:test\s+)?audio(?:\s+clock\s+(\S+))?\s*$",
+    re.IGNORECASE,
+)
+_DIRECT_SEARCH = re.compile(
+    r"^search\s+assets?(?:\s+for)?\s+(.+)$",
     re.IGNORECASE,
 )
 
@@ -59,6 +67,75 @@ def _try_direct_locomotion(message: str, client: RemoteUeClient) -> Optional[dic
         "llm_error": "",
         "asset_matches": [],
         "asset_meta": {"direct_locomotion": mode, "actor_path": actor_path},
+        "thoughts": [],
+        "steps": [],
+    }
+
+
+def _try_direct_audio(message: str, client: RemoteUeClient) -> Optional[dict[str, Any]]:
+    match = _DIRECT_AUDIO.match((message or "").strip())
+    if not match:
+        return None
+    clock = (match.group(1) or "test").strip()
+    result = client.command({
+        "command": "audio.play_quartz",
+        "params": {"clock": clock, "timeline": "default"},
+    })
+    ok = bool(result.get("success"))
+    reply = (
+        f"Played test audio (clock={clock})."
+        if ok
+        else f"Audio command failed: {result.get('error', 'unknown')}"
+    )
+    return {
+        "ok": ok,
+        "reply": reply,
+        "grade": {
+            "met": ok,
+            "score": 1.0 if ok else 0.0,
+            "summary": reply,
+            "missing": [] if ok else ["audio not played"],
+        },
+        "planner": "direct_audio",
+        "llm_available": False,
+        "llm_error": "",
+        "asset_matches": [],
+        "asset_meta": {"direct_audio": clock},
+        "thoughts": [],
+        "steps": [],
+    }
+
+
+def _try_direct_search(message: str, client: RemoteUeClient) -> Optional[dict[str, Any]]:
+    match = _DIRECT_SEARCH.match((message or "").strip())
+    if not match:
+        return None
+    query = match.group(1).strip()
+    paths = search_project_assets(client, query, limit=12)
+    if paths:
+        reply = "Asset matches:\n" + "\n".join(f"- {p}" for p in paths)
+        ok = True
+        grade_met = True
+        missing: list[str] = []
+    else:
+        reply = f"No /Game assets matched '{query}'."
+        ok = False
+        grade_met = False
+        missing = ["named asset not spawned yet"]
+    return {
+        "ok": ok,
+        "reply": reply,
+        "grade": {
+            "met": grade_met,
+            "score": 1.0 if grade_met else 0.0,
+            "summary": reply,
+            "missing": missing,
+        },
+        "planner": "direct_search",
+        "llm_available": False,
+        "llm_error": "",
+        "asset_matches": paths,
+        "asset_meta": {"search_query": query},
         "thoughts": [],
         "steps": [],
     }
@@ -136,6 +213,21 @@ def run_chat(
             "goal": goal,
             "session": session.to_dict(),
         }
+
+    direct_audio = _try_direct_audio(message, client)
+    if direct_audio:
+        session.memory.append({"command": "audio.play_quartz", "ok": direct_audio["ok"]})
+        session.add_assistant(direct_audio["reply"])
+        session.last_grade = direct_audio["grade"]
+        store.save(session)
+        return {**direct_audio, "goal": goal, "session": session.to_dict()}
+
+    direct_search = _try_direct_search(message, client)
+    if direct_search:
+        session.add_assistant(direct_search["reply"])
+        session.last_grade = direct_search["grade"]
+        store.save(session)
+        return {**direct_search, "goal": goal, "session": session.to_dict()}
 
     if session.mode == "cinematic":
         goal = f"[cinematic mode] {goal}"

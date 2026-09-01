@@ -37,6 +37,7 @@ def _has_gradable_criteria(goal_l: str, min_lights: int, min_meshes: int, min_sk
         "idle", "hold", "done", "walk", "anim", "playing", "character", "skeletal",
         "jog", "run", "move", "forward", "pawn",
         "frame", "shot", "cinematic", "dog", "cat", "creature",
+        "material", "shader", "audio", "sound", "music",
     )
     return any(h in goal_l for h in hints)
 
@@ -223,6 +224,23 @@ def _audio_goal(goal_l: str) -> bool:
     return any(w in goal_l for w in ("sound", "audio", "music", "metasound", "quartz"))
 
 
+def _material_command_succeeded(memory: Optional[list[dict[str, Any]]]) -> bool:
+    material_cmds = frozenset({
+        "asset.create_material",
+        "asset.create_instance",
+    })
+    for step in memory or []:
+        if step.get("ok") and step.get("command") in material_cmds:
+            return True
+        if step.get("ok") and step.get("kind") in ("create_material", "create_instance"):
+            return True
+    return False
+
+
+def _material_goal(goal_l: str) -> bool:
+    return any(w in goal_l for w in ("material", "metallic", "shader", "mid", "instance"))
+
+
 def grade_goal(goal: str, snapshot: Any, memory: Optional[list[dict[str, Any]]] = None) -> GradeResult:
     """
     v0: census-based grading for seed-scene goals.
@@ -317,6 +335,9 @@ def grade_goal(goal: str, snapshot: Any, memory: Optional[list[dict[str, Any]]] 
 
     if _audio_goal(goal_l) and not _audio_command_succeeded(memory):
         missing.append("audio not played")
+
+    if _material_goal(goal_l) and not _material_command_succeeded(memory):
+        missing.append("material not created")
 
     if creatures and skeletal >= min_skeletal and not _scene_matches_goal_tokens(goal_l, snapshot):
         if not _asset_goal_satisfied(goal, snapshot, memory):

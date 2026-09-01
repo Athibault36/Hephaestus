@@ -26,3 +26,5 @@
 3. CI: pytest + Mission Control `npm run build`
 
 Live PIE checklist: [LIVE_E2E.md](LIVE_E2E.md)
+
+v0.3 chat + grading criteria: [OPERATOR_V0_3.md](OPERATOR_V0_3.md)

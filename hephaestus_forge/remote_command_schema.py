@@ -298,3 +298,42 @@ def validate_blueprint_set_property(command_obj: dict[str, Any]) -> list[str]:
         errors.append("missing property_name")
     return errors
 
+
+def validate_rendering_add_pass(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "rendering.add_pass":
+        errors.append("command must be rendering.add_pass")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not params.get("pass_name"):
+        errors.append("missing pass_name")
+    return errors
+
+
+def validate_pcg_mutate_graph(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "pcg.mutate_graph":
+        errors.append("command must be pcg.mutate_graph")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not (params.get("graph_path") or params.get("path")):
+        errors.append("missing graph_path")
+    return errors
+
+
+def validate_pcg_set_metadata(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "pcg.set_metadata":
+        errors.append("command must be pcg.set_metadata")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not params.get("component_path"):
+        errors.append("missing component_path")
+    return errors
+

@@ -79,6 +79,20 @@ def test_grade_audio_requires_play_command():
     assert "audio" not in " ".join(g2.missing)
 
 
+def test_grade_material_requires_create_command():
+    snap = WorldSnapshot(lights=1, meshes=1)
+    g = grade_goal("create a metallic material", snap, memory=[])
+    assert g.met is False
+    assert any("material" in m for m in g.missing)
+
+    g2 = grade_goal(
+        "create a metallic material",
+        snap,
+        memory=[{"command": "asset.create_material", "ok": True}],
+    )
+    assert "material" not in " ".join(g2.missing)
+
+
 def test_grade_idle_accepts_successful_play_locomotion_memory():
     actor = "/Temp/UEDPIE_0.PersistentLevel.SkeletalMeshActor_0"
     snap = WorldSnapshot(

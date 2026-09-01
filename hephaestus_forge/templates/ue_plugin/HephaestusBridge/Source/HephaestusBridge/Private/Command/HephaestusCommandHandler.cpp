@@ -375,7 +375,7 @@ FHephaestusCommandResult UHephaestusCommandHandler::RouteCommand(const TSharedPt
     }
     else if (Command.StartsWith(TEXT("rendering.")))
     {
-        return HandleRenderingCommand(Params);
+        return HandleRenderingCommand(Command, Params);
     }
     else if (Command.StartsWith(TEXT("pcg.")))
     {
@@ -1158,26 +1158,77 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleBlueprintCommand(const
     return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Unknown blueprint action: %s"), *Action));
 }
 
-FHephaestusCommandResult UHephaestusCommandHandler::HandleRenderingCommand(const TSharedPtr<FJsonObject>& Params)
+FHephaestusCommandResult UHephaestusCommandHandler::HandleRenderingCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params)
 {
     if (!RenderingSubsystem)
     {
         return MakeErrorResult(TEXT(""), TEXT("Rendering subsystem not available"));
     }
 
-    FString Action = Params->GetStringField(TEXT("action"));
+    FString Action;
+    if (Params.IsValid())
+    {
+        Params->TryGetStringField(TEXT("action"), Action);
+    }
+    if (Action.IsEmpty())
+    {
+        Command.Split(TEXT("."), nullptr, &Action, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
+    }
 
     if (Action == TEXT("add_pass"))
     {
-        return MakeSuccessResult(TEXT(""), TEXT("{}"));
+        FString PassName;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("pass_name"), PassName);
+        }
+        if (PassName.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("add_pass requires pass_name"));
+        }
+        FHephaestusRenderPassDesc Desc;
+        Desc.PassName = PassName;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("shader_path"), Desc.ShaderPath);
+        }
+        const bool bOk = RenderingSubsystem->AddRenderGraphPass(Desc);
+        return bOk
+            ? MakeSuccessResult(
+                  TEXT(""),
+                  FString::Printf(TEXT("{\"pass_name\":\"%s\",\"registered\":true}"), *PassName))
+            : MakeErrorResult(TEXT(""), TEXT("add_pass failed"));
     }
     else if (Action == TEXT("create_shader_params"))
     {
-        return MakeSuccessResult(TEXT(""), TEXT("{}"));
+        FString StructName;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("struct_name"), StructName);
+        }
+        if (StructName.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("create_shader_params requires struct_name"));
+        }
+        const FString Result = RenderingSubsystem->CreateShaderParameterStruct(StructName, TMap<FString, FString>{});
+        return MakeSuccessResult(TEXT(""), FString::Printf(TEXT("{\"struct_name\":\"%s\"}"), *Result));
     }
     else if (Action == TEXT("dispatch_compute"))
     {
-        return MakeSuccessResult(TEXT(""), TEXT("{}"));
+        FString ShaderPath;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("shader_path"), ShaderPath);
+        }
+        if (ShaderPath.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("dispatch_compute requires shader_path"));
+        }
+        FIntVector DispatchSize(1, 1, 1);
+        const bool bOk = RenderingSubsystem->ExecuteComputeShader(ShaderPath, DispatchSize, TMap<FString, FString>{});
+        return bOk
+            ? MakeSuccessResult(TEXT(""), FString::Printf(TEXT("{\"shader_path\":\"%s\",\"dispatched\":true}"), *ShaderPath))
+            : MakeErrorResult(TEXT(""), TEXT("dispatch_compute failed"));
     }
 
     return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Unknown rendering action: %s"), *Action));
@@ -1220,9 +1271,39 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandlePCGCommand(const FStri
     }
     else if (Action == TEXT("set_metadata"))
     {
+        FString ComponentPath;
         TMap<FString, FString> Meta;
-        PCGSubsystem->SetMetadataParams(nullptr, Meta);
-        return MakeSuccessResult(TEXT(""), TEXT("{\"metadata\":true}"));
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("component_path"), ComponentPath);
+            const TSharedPtr<FJsonObject>* MetaObj = nullptr;
+            if (Params->TryGetObjectField(TEXT("metadata"), MetaObj) && MetaObj && MetaObj->IsValid())
+            {
+                for (const auto& Pair : (*MetaObj)->Values)
+                {
+                    FString Val;
+                    if (Pair.Value->TryGetString(Val))
+                    {
+                        Meta.Add(Pair.Key, Val);
+                    }
+                }
+            }
+        }
+        if (ComponentPath.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("set_metadata requires component_path"));
+        }
+        UObject* Component = LoadObject<UObject>(nullptr, *ComponentPath);
+        if (!Component)
+        {
+            return MakeErrorResult(
+                TEXT(""),
+                FString::Printf(TEXT("set_metadata: component not found: %s"), *ComponentPath));
+        }
+        PCGSubsystem->SetMetadataParams(Component, Meta);
+        return MakeSuccessResult(
+            TEXT(""),
+            FString::Printf(TEXT("{\"component_path\":\"%s\",\"keys\":%d}"), *ComponentPath, Meta.Num()));
     }
     else if (Action == TEXT("query_spatial"))
     {
