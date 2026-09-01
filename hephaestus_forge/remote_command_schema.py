@@ -268,3 +268,33 @@ def validate_audio_synthesize(command_obj: dict[str, Any]) -> list[str]:
         errors.append("missing sound_path")
     return errors
 
+
+def validate_blueprint_add_function(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "blueprint.add_function":
+        errors.append("command must be blueprint.add_function")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not params.get("blueprint_path"):
+        errors.append("missing blueprint_path")
+    if not params.get("function_name"):
+        errors.append("missing function_name")
+    return errors
+
+
+def validate_blueprint_set_property(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "blueprint.set_property":
+        errors.append("command must be blueprint.set_property")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not params.get("blueprint_path"):
+        errors.append("missing blueprint_path")
+    if not params.get("property_name"):
+        errors.append("missing property_name")
+    return errors
+

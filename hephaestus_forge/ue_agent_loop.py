@@ -497,6 +497,12 @@ def _maybe_repair_command(
             params["mode"] = mode
             repaired["params"] = params
             return repaired
+    if command.get("command") == "audio.create_metasound" and not params.get("source_path"):
+        paths = re.findall(r"/Game/[^\s,;\"']+", goal or "")
+        if paths:
+            params["source_path"] = paths[-1]
+            repaired["params"] = params
+            return repaired
     return None
 
 

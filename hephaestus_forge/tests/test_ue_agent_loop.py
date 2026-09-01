@@ -87,7 +87,18 @@ def test_decide_play_locomotion_fallback_when_idle_no_hint():
     assert action.command["params"]["mode"] == "idle"
 
 
-if __name__ == "__main__":
+def test_maybe_repair_metasound_source_from_goal():
+    from ue_agent_loop import _maybe_repair_command
+
+    cmd = {"command": "audio.create_metasound", "params": {"name": "Probe"}}
+    repaired = _maybe_repair_command(
+        cmd,
+        WorldSnapshot(),
+        "Use /Game/Audio/MyMeta.MyMeta for ambience",
+        "create_metasound failed",
+    )
+    assert repaired is not None
+    assert repaired["params"]["source_path"] == "/Game/Audio/MyMeta.MyMeta"
     test_summarize_actors()
     test_decide_seeds_light_first()
     test_decide_seeds_cube_after_light()

@@ -1099,11 +1099,56 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleBlueprintCommand(const
     }
     else if (Action == TEXT("add_function"))
     {
-        return MakeSuccessResult(TEXT(""), TEXT("{}"));
+        FString BlueprintPath;
+        FString FunctionName;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("blueprint_path"), BlueprintPath);
+            Params->TryGetStringField(TEXT("function_name"), FunctionName);
+        }
+        if (BlueprintPath.IsEmpty() || FunctionName.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("add_function requires blueprint_path and function_name"));
+        }
+        UBlueprint* Blueprint = LoadObject<UBlueprint>(nullptr, *BlueprintPath);
+        if (!Blueprint)
+        {
+            return MakeErrorResult(
+                TEXT(""),
+                FString::Printf(TEXT("add_function: blueprint not found: %s"), *BlueprintPath));
+        }
+        return MakeErrorResult(
+            TEXT(""),
+            TEXT("add_function: graph editor pipeline not linked yet — blueprint validated"));
     }
     else if (Action == TEXT("set_property"))
     {
-        return MakeSuccessResult(TEXT(""), TEXT("{}"));
+        FString BlueprintPath;
+        FString PropertyName;
+        FString Value;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("blueprint_path"), BlueprintPath);
+            Params->TryGetStringField(TEXT("property_name"), PropertyName);
+            Params->TryGetStringField(TEXT("value"), Value);
+        }
+        if (BlueprintPath.IsEmpty() || PropertyName.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("set_property requires blueprint_path and property_name"));
+        }
+        UBlueprint* Blueprint = LoadObject<UBlueprint>(nullptr, *BlueprintPath);
+        if (!Blueprint)
+        {
+            return MakeErrorResult(
+                TEXT(""),
+                FString::Printf(TEXT("set_property: blueprint not found: %s"), *BlueprintPath));
+        }
+        return MakeErrorResult(
+            TEXT(""),
+            FString::Printf(
+                TEXT("set_property: editor property pipeline not linked yet (%s=%s)"),
+                *PropertyName,
+                *Value));
     }
     else if (Action == TEXT("diff"))
     {

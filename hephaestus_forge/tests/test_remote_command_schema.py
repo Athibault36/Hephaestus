@@ -26,6 +26,8 @@ from remote_command_schema import (  # noqa: E402
     validate_asset_search,
     validate_audio_create_metasound,
     validate_audio_synthesize,
+    validate_blueprint_add_function,
+    validate_blueprint_set_property,
     validate_sequence_create_shot,
     validate_sequence_play,
     validate_world_apply_move_input,
@@ -185,6 +187,19 @@ def test_validate_reimport_and_retarget():
     missing = validate_animation_retarget({"command": "animation.retarget", "params": {}})
     assert "missing source_mesh" in missing
     assert "missing target_mesh" in missing
+
+
+def test_validate_blueprint_mutations():
+    assert validate_blueprint_add_function({
+        "command": "blueprint.add_function",
+        "params": {"blueprint_path": "/Game/BP_Test.BP_Test", "function_name": "Foo"},
+    }) == []
+    missing = validate_blueprint_add_function({"command": "blueprint.add_function", "params": {}})
+    assert "missing blueprint_path" in missing
+    assert validate_blueprint_set_property({
+        "command": "blueprint.set_property",
+        "params": {"blueprint_path": "/Game/BP_Test.BP_Test", "property_name": "Speed", "value": "100"},
+    }) == []
 
 
 if __name__ == "__main__":

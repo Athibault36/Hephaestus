@@ -65,6 +65,20 @@ def test_grade_creature_requires_asset_match():
     assert g.met is False
 
 
+def test_grade_audio_requires_play_command():
+    snap = WorldSnapshot(lights=1, meshes=1)
+    g = grade_goal("play background music", snap, memory=[])
+    assert g.met is False
+    assert any("audio" in m for m in g.missing)
+
+    g2 = grade_goal(
+        "play background music",
+        snap,
+        memory=[{"command": "audio.play_quartz", "ok": True}],
+    )
+    assert "audio" not in " ".join(g2.missing)
+
+
 def test_grade_idle_accepts_successful_play_locomotion_memory():
     actor = "/Temp/UEDPIE_0.PersistentLevel.SkeletalMeshActor_0"
     snap = WorldSnapshot(
