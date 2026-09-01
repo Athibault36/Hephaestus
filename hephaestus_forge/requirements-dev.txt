@@ -1,0 +1,2 @@
+# HephaestusForge developer tooling (tests). Not required at agent runtime.
+pytest>=8.0

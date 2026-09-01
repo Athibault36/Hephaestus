@@ -22,6 +22,8 @@ fi
 . .venv/bin/activate
 python -m pip install --upgrade pip
 pip install -r hephaestus_forge/requirements.txt
+# Developer tooling (pytest) — canonical test runner per AGENTS.md.
+pip install -r hephaestus_forge/requirements-dev.txt
 
 # --- Frontend: Mission Control dashboard (React + Vite) ----------------------
 (
