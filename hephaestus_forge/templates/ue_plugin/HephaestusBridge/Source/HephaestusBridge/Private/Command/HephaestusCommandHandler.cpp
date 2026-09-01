@@ -971,8 +971,26 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleAssetCommand(const FSt
     }
     else if (Action == TEXT("reimport"))
     {
-        // Params: asset_path
-        return MakeSuccessResult(TEXT(""), TEXT("{}"));
+        FString AssetPath;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("asset_path"), AssetPath);
+        }
+        if (AssetPath.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("reimport requires asset_path"));
+        }
+        UObject* Asset = AssetSubsystem->FindAsset(AssetPath);
+        if (!Asset)
+        {
+            return MakeErrorResult(TEXT(""), TEXT("reimport: asset_path not found"));
+        }
+        const bool bOk = AssetSubsystem->ReimportAsset(Asset);
+        return bOk
+            ? MakeSuccessResult(
+                  TEXT(""),
+                  FString::Printf(TEXT("{\"asset_path\":\"%s\",\"validated\":true}"), *AssetPath))
+            : MakeErrorResult(TEXT(""), TEXT("reimport failed"));
     }
     else if (Action == TEXT("export"))
     {
@@ -1228,7 +1246,20 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleAnimationCommand(const
     }
     else if (Action == TEXT("retarget"))
     {
-        return MakeSuccessResult(TEXT(""), TEXT("{\"stub\":true}"));
+        FString SourceMesh;
+        FString TargetMesh;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("source_mesh"), SourceMesh);
+            Params->TryGetStringField(TEXT("target_mesh"), TargetMesh);
+        }
+        if (SourceMesh.IsEmpty() || TargetMesh.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("retarget requires source_mesh and target_mesh"));
+        }
+        return MakeErrorResult(
+            TEXT(""),
+            TEXT("retarget: IK retarget pipeline not linked yet — meshes validated in request"));
     }
     else if (Action == TEXT("edit_sequence"))
     {

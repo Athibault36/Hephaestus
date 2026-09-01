@@ -17,10 +17,12 @@ from remote_command_schema import (  # noqa: E402
     resolve_params,
     validate_animation_play_montage,
     validate_animation_play_locomotion,
+    validate_animation_retarget,
     validate_asset_create_instance,
     validate_asset_create_material,
     validate_asset_export,
     validate_asset_import,
+    validate_asset_reimport,
     validate_asset_search,
     validate_audio_create_metasound,
     validate_audio_synthesize,
@@ -165,6 +167,24 @@ def test_validate_audio_and_instance_commands():
         "command": "audio.synthesize",
         "params": {},
     })
+
+
+def test_validate_reimport_and_retarget():
+    assert validate_asset_reimport({
+        "command": "asset.reimport",
+        "params": {"asset_path": "/Game/Mesh.Mesh"},
+    }) == []
+    assert "missing asset_path" in validate_asset_reimport({
+        "command": "asset.reimport",
+        "params": {},
+    })
+    assert validate_animation_retarget({
+        "command": "animation.retarget",
+        "params": {"source_mesh": "/Game/A.A", "target_mesh": "/Game/B.B"},
+    }) == []
+    missing = validate_animation_retarget({"command": "animation.retarget", "params": {}})
+    assert "missing source_mesh" in missing
+    assert "missing target_mesh" in missing
 
 
 if __name__ == "__main__":

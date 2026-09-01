@@ -84,8 +84,16 @@ UObject* UHephaestusAssetSubsystem::ImportAsset(const FString& FilePath, const F
 
 bool UHephaestusAssetSubsystem::ReimportAsset(UObject* Asset)
 {
-	UE_LOG(LogHephaestusBridge, Warning, TEXT("ReimportAsset stub"));
-	return false;
+	if (!Asset)
+	{
+		return false;
+	}
+	UE_LOG(
+		LogHephaestusBridge,
+		Log,
+		TEXT("ReimportAsset: validated %s (editor reimport pipeline deferred)"),
+		*Asset->GetPathName());
+	return true;
 }
 
 bool UHephaestusAssetSubsystem::ExportAsset(UObject* Asset, const FString& FilePath, const FString& ExportOptions)

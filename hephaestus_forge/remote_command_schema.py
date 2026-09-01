@@ -130,6 +130,21 @@ def validate_animation_play_locomotion(command_obj: dict[str, Any]) -> list[str]
     return errors
 
 
+def validate_animation_retarget(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "animation.retarget":
+        errors.append("command must be animation.retarget")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not params.get("source_mesh"):
+        errors.append("missing source_mesh")
+    if not params.get("target_mesh"):
+        errors.append("missing target_mesh")
+    return errors
+
+
 def validate_sequence_play(command_obj: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     if command_obj.get("command") != "sequence.play":
@@ -205,6 +220,19 @@ def validate_asset_import(command_obj: dict[str, Any]) -> list[str]:
         errors.append("missing file_path")
     if not params.get("destination_path"):
         errors.append("missing destination_path")
+    return errors
+
+
+def validate_asset_reimport(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "asset.reimport":
+        errors.append("command must be asset.reimport")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not params.get("asset_path"):
+        errors.append("missing asset_path")
     return errors
 
 

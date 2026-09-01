@@ -11,6 +11,7 @@ from locomotion_fallback import fallback_paths_for_mode  # noqa: E402
 def test_rebuild_checklist_includes_sync():
     lines = rebuild_checklist(Path("C:/dev/MyGame"))
     assert any("sync-plugin" in line for line in lines)
+    assert any("MetaSound" in line for line in lines)
 
 
 def test_run_doctor_offline(tmp_path):
