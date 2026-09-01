@@ -87,6 +87,20 @@ def test_decide_play_locomotion_fallback_when_idle_no_hint():
     assert action.command["params"]["mode"] == "idle"
 
 
+def test_decide_audio_goal():
+    snap = WorldSnapshot(lights=2, meshes=3)
+    action = decide_action(snap, random.Random(0), goal="play background music")
+    assert action.kind == "play_audio"
+    assert action.command["command"] == "audio.play_quartz"
+
+
+def test_decide_material_goal():
+    snap = WorldSnapshot(lights=2, meshes=3)
+    action = decide_action(snap, random.Random(0), goal="create a metallic material")
+    assert action.kind == "create_material"
+    assert action.command["command"] == "asset.create_material"
+
+
 def test_maybe_repair_metasound_source_from_goal():
     from ue_agent_loop import _maybe_repair_command
 
@@ -99,6 +113,9 @@ def test_maybe_repair_metasound_source_from_goal():
     )
     assert repaired is not None
     assert repaired["params"]["source_path"] == "/Game/Audio/MyMeta.MyMeta"
+
+
+if __name__ == "__main__":
     test_summarize_actors()
     test_decide_seeds_light_first()
     test_decide_seeds_cube_after_light()

@@ -3779,6 +3779,7 @@ def version_cmd():
 def health(
     project_path: Annotated[Optional[Path], typer.Argument(help="Adopted UE project root")] = None,
     api: Annotated[str, typer.Option("--api", help="UE Remote API base URL")] = "http://127.0.0.1:8765",
+    json_out: Annotated[bool, typer.Option("--json", help="Emit preflight report as JSON")] = False,
 ):
     """Preflight check: UE PIE API, NIM key, planner, adopted project."""
     from preflight_health import run_preflight
@@ -3795,6 +3796,11 @@ def health(
             project_root = None
 
     report = run_preflight(api, project_root)
+    if json_out:
+        import json as _json
+
+        typer.echo(_json.dumps(report.to_dict(), indent=2))
+        raise typer.Exit(0 if report.ready else 1)
     for check in report.checks:
         style = "green" if check.ok else ("yellow" if not check.blocker else "red")
         label = "OK" if check.ok else ("WARN" if not check.blocker else "BLOCKED")
@@ -3808,12 +3814,18 @@ def e2e_check_cmd(
     api: Annotated[str, typer.Option("--api", help="UE Remote API base URL")] = "http://127.0.0.1:8765",
     sync: Annotated[bool, typer.Option("--sync", help="Run forge sync-plugin before checks")] = False,
     offline: Annotated[bool, typer.Option("--offline", help="Skip live PIE command probes")] = False,
+    json_out: Annotated[bool, typer.Option("--json", help="Emit E2E report as JSON")] = False,
 ):
     """Production operator E2E checklist (template sync + optional live PIE probes)."""
     from e2e_check import run_e2e_check
 
     project_root = (project_path or Path.cwd()).resolve()
     report = run_e2e_check(project_root, remote_api=api, sync=sync, live=not offline)
+    if json_out:
+        import json as _json
+
+        typer.echo(_json.dumps(report.to_dict(), indent=2))
+        raise typer.Exit(0 if report.ok else 2)
     for step in report.steps:
         style = "green" if step.ok else "red"
         console.print(f"[{style}]{'OK' if step.ok else 'FAIL'}[/] {step.name}: {step.detail}")
