@@ -122,6 +122,12 @@ def run_chat(
 
     direct_loco = _try_direct_locomotion(message, client)
     if direct_loco:
+        session.memory.append({
+            "kind": "play_locomotion",
+            "command": "animation.play_locomotion",
+            "actor_path": direct_loco["asset_meta"].get("actor_path"),
+            "ok": direct_loco["ok"],
+        })
         session.add_assistant(direct_loco["reply"])
         session.last_grade = direct_loco["grade"]
         store.save(session)

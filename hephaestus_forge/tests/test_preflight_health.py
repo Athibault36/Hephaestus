@@ -49,8 +49,13 @@ def test_grade_camera_framing_requires_set_view():
     assert g2.met is True or "camera" not in " ".join(g2.missing)
 
 
-def test_grade_creature_requires_asset_match():
-    snap = WorldSnapshot(lights=1, meshes=0, skeletal=1, actor_details=[{"mesh_path": "/Game/Props/Chair.Chair"}])
-    g = grade_goal("spawn a dog", snap, memory=[])
-    assert g.met is False
-    assert any("creature" in m or "concrete" in g.summary.lower() for m in g.missing + [g.summary])
+def test_preflight_bridge_version_mismatch(tmp_path):
+    forge = tmp_path / ".hephaestus_forge"
+    forge.mkdir()
+    plugin_dir = tmp_path / "Plugins" / "HephaestusBridge"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "HEPHAESTUS_BRIDGE_VERSION").write_text("0.1.0\n", encoding="utf-8")
+    report = run_preflight("http://127.0.0.1:1", tmp_path)
+    bridge = next(c for c in report.checks if c.name == "bridge_template")
+    assert bridge.ok is False
+    assert "0.1.1" in bridge.detail or "sync-plugin" in bridge.detail

@@ -2925,7 +2925,11 @@ def agent_loop_cmd(
 
     try:
         health = client.health()
-        console.print(f"[dim]health: {health}[/dim]")
+        plugin_v = health.get("plugin_version", "")
+        if plugin_v:
+            console.print(f"[dim]health: ok — plugin {plugin_v}[/dim]")
+        else:
+            console.print(f"[dim]health: {health}[/dim]")
     except Exception as exc:
         console.print(f"[red]✗ Remote API unreachable: {exc}[/red]")
         console.print("[yellow]Start Play (PIE) in UE first.[/yellow]")
