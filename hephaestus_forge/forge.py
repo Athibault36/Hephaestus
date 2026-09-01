@@ -1738,7 +1738,8 @@ _MISSION_CONTROL_HTML = r"""<!DOCTYPE html>
   #assetButtons button { font-size: 0.75rem; padding: 0.25rem 0.5rem; }
   .chat-row { display: flex; gap: 0.5rem; }
   #chatInput { flex: 1; min-height: 72px; resize: vertical; }
-  .actor { padding: 0.25rem 0; border-bottom: 1px solid #1c2530; color: var(--muted); }
+  .actor { padding: 0.25rem 0; border-bottom: 1px solid #1c2530; color: var(--muted); cursor: pointer; }
+  .actor.selected { color: var(--accent); font-weight: 600; }
   .hint { color: var(--muted); font-size: 0.8rem; margin-top: 0.5rem; }
   /* Avatar form selector */
   .avatar-form-selector {
@@ -1808,8 +1809,9 @@ _MISSION_CONTROL_HTML = r"""<!DOCTYPE html>
       <button id="btnList">List actors</button>
     </div>
     <div class="row">
-      <input id="actorPath" placeholder="actor path to destroy" style="flex:1;min-width:180px"/>
+      <input id="actorPath" placeholder="selected actor path" style="flex:1;min-width:180px"/>
       <button id="btnDestroy">Destroy</button>
+      <button id="btnPlayIdle">Play idle</button>
     </div>
     <h2 style="margin-top:1rem">Outliner</h2>
     <div id="actors"></div>
@@ -2353,6 +2355,12 @@ document.getElementById("btnDestroy").onclick = () => {
   if (!path) return;
   postCommand({ command: "world.destroy_actor", params: { actor_path: path } });
 };
+document.getElementById("btnPlayIdle").onclick = () => {
+  const path = document.getElementById("actorPath").value.trim();
+  if (!path) { showToast("Select an actor in the outliner first"); return; }
+  document.getElementById("chatInput").value = `play idle animation on ${path}`;
+  sendChat(false);
+};
 
 function countWorld(paths) {
   let lights = 0, meshes = 0;
@@ -2392,9 +2400,16 @@ async function listPaths() {
   const r = await postCommand({ command: "world.list_actors", params: {} });
   let paths = r.actor_paths || [];
   try { const inner = JSON.parse(r.result_json || "{}"); if (inner.actors) paths = inner.actors; } catch (_) {}
-  actorsEl.innerHTML = paths.map(p => `<div class="actor" data-path="${p.replace(/"/g, '&quot;')}" title="Click to select for destroy">${p}</div>`).join("") || "<div class='actor'>(empty)</div>";
+  actorsEl.innerHTML = paths.map(p => `<div class="actor" data-path="${p.replace(/"/g, '&quot;')}" title="Click to select — destroy or play idle">${p}</div>`).join("") || "<div class='actor'>(empty)</div>";
+  const selected = document.getElementById("actorPath").value.trim();
   actorsEl.querySelectorAll(".actor[data-path]").forEach(el => {
-    el.onclick = () => { document.getElementById("actorPath").value = el.getAttribute("data-path") || ""; };
+    const path = el.getAttribute("data-path") || "";
+    if (path === selected) el.classList.add("selected");
+    el.onclick = () => {
+      document.getElementById("actorPath").value = path;
+      actorsEl.querySelectorAll(".actor.selected").forEach(a => a.classList.remove("selected"));
+      el.classList.add("selected");
+    };
   });
   return paths;
 }

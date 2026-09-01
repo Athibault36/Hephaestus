@@ -189,6 +189,33 @@ def _pick_asset_path(goal: str, asset_hints: Optional[list[str]]) -> Optional[st
     return ordered[0] if ordered else None
 
 
+def _pick_skeletal_path(snapshot: WorldSnapshot) -> Optional[str]:
+    for path in snapshot.actor_paths:
+        if any(tag in path for tag in ("SkeletalMeshActor", "SimAgentCharacter", "Character")):
+            return path
+    return None
+
+
+def _pick_anim_path(goal: str, asset_hints: Optional[list[str]]) -> Optional[str]:
+    goal_l = (goal or "").lower()
+    want: list[str] = []
+    if "run" in goal_l:
+        want.append("run")
+    if "walk" in goal_l:
+        want.append("walk")
+    if "idle" in goal_l:
+        want.append("idle")
+    if not want:
+        return None
+    hints = list(asset_hints or [])
+    for token in want:
+        for path in hints:
+            blob = path.lower()
+            if token in blob and ("anim" in blob or "montage" in blob):
+                return path
+    return None
+
+
 def decide_action(
     snapshot: WorldSnapshot,
     rng: random.Random,
@@ -256,6 +283,28 @@ def decide_action(
                 },
             )
 
+    goal_l = (goal or "").lower()
+    skel_path = _pick_skeletal_path(snapshot)
+    anim_path = _pick_anim_path(goal, asset_hints)
+    if skel_path and anim_path and any(w in goal_l for w in ("walk", "run", "idle", "anim", "playing")):
+        if "montage" in anim_path.lower():
+            return AgentAction(
+                kind="play_montage",
+                reason=f"Heuristic play montage {anim_path} on {skel_path}",
+                command={
+                    "command": "animation.play_montage",
+                    "params": {"actor_path": skel_path, "montage_path": anim_path, "loop": True},
+                },
+            )
+        return AgentAction(
+            kind="play_anim",
+            reason=f"Heuristic play anim {anim_path} on {skel_path}",
+            command={
+                "command": "animation.play_sequence",
+                "params": {"actor_path": skel_path, "anim_path": anim_path, "loop": True},
+            },
+        )
+
     if snapshot.lights < 1:
         return AgentAction(
             kind="spawn_light",
@@ -290,7 +339,6 @@ def decide_action(
             },
         )
 
-    goal_l = (goal or "").lower()
     if any(w in goal_l for w in ("jog", "run forward", "walk forward", "move forward")):
         return AgentAction(
             kind="apply_move",

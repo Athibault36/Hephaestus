@@ -62,6 +62,19 @@ def test_decide_frame_goal():
     assert action.command["command"] == "sequence.create_shot"
 
 
+def test_decide_play_anim_when_skeletal_and_hint():
+    skel = "/Temp/UEDPIE.PersistentLevel.SkeletalMeshActor_0"
+    snap = WorldSnapshot(lights=2, meshes=1, skeletal=1, actor_paths=[skel])
+    action = decide_action(
+        snap,
+        random.Random(0),
+        goal="play run cycle on the dog",
+        asset_hints=["/Game/Anims/Dog_Run.Dog_Run"],
+    )
+    assert action.kind == "play_anim"
+    assert action.command["params"]["anim_path"] == "/Game/Anims/Dog_Run.Dog_Run"
+
+
 if __name__ == "__main__":
     test_summarize_actors()
     test_decide_seeds_light_first()
