@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useMissionControlStore } from '../store/missionControlStore';
 import { AssetInfo } from '../store/missionControlStore';
 

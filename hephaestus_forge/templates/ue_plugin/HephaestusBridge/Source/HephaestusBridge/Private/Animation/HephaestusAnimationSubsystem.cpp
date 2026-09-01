@@ -15,6 +15,7 @@
 #include "GameFramework/Character.h"
 #include "TimerManager.h"
 #include "Misc/Paths.h"
+#include "UObject/Package.h"
 
 namespace
 {
@@ -94,6 +95,36 @@ bool UHephaestusAnimationSubsystem::LiveLinkConnect(const FString& SubjectName, 
 	return false;
 }
 
+static FString InferAnimBlueprintPath(const FString& MeshPath)
+{
+	if (MeshPath.IsEmpty())
+	{
+		return FString();
+	}
+	FString PackagePath = MeshPath;
+	int32 DotIndex = INDEX_NONE;
+	if (PackagePath.FindLastChar(TEXT('.'), DotIndex))
+	{
+		PackagePath = PackagePath.Left(DotIndex);
+	}
+	const FString BaseName = FPaths::GetBaseFilename(PackagePath);
+	const FString Dir = FPackageName::GetLongPackagePath(PackagePath);
+	const TArray<FString> Candidates = {
+		FString::Printf(TEXT("%s/%s_ABP.%s_ABP"), *Dir, *BaseName, *BaseName),
+		FString::Printf(TEXT("%s/ABP_%s.ABP_%s"), *Dir, *BaseName, *BaseName),
+		FString::Printf(TEXT("%s/%s_AnimBP.%s_AnimBP"), *Dir, *BaseName, *BaseName),
+		FString::Printf(TEXT("%s/%s_BP.%s_BP"), *Dir, *BaseName, *BaseName),
+	};
+	for (const FString& Candidate : Candidates)
+	{
+		if (LoadClass<UAnimInstance>(nullptr, *Candidate))
+		{
+			return Candidate;
+		}
+	}
+	return FString();
+}
+
 static void ApplyAnimBlueprint(USkeletalMeshComponent* Comp, const FString& AnimBlueprintPath)
 {
 	if (!Comp || AnimBlueprintPath.IsEmpty())
@@ -137,7 +168,12 @@ AActor* UHephaestusAnimationSubsystem::SpawnSkeletalMeshActor(
 		if (USkeletalMeshComponent* Comp = Actor->GetSkeletalMeshComponent())
 		{
 			Comp->SetSkeletalMesh(Mesh);
-			ApplyAnimBlueprint(Comp, AnimBlueprintPath);
+			FString AnimBP = AnimBlueprintPath;
+			if (AnimBP.IsEmpty())
+			{
+				AnimBP = InferAnimBlueprintPath(ResolvedPath);
+			}
+			ApplyAnimBlueprint(Comp, AnimBP);
 		}
 	}
 	else if (!ResolvedPath.Contains(TEXT(".")))
@@ -148,7 +184,12 @@ AActor* UHephaestusAnimationSubsystem::SpawnSkeletalMeshActor(
 			if (USkeletalMeshComponent* Comp = Actor->GetSkeletalMeshComponent())
 			{
 				Comp->SetSkeletalMesh(Mesh);
-				ApplyAnimBlueprint(Comp, AnimBlueprintPath);
+				FString AnimBP = AnimBlueprintPath;
+				if (AnimBP.IsEmpty())
+				{
+					AnimBP = InferAnimBlueprintPath(WithSuffix);
+				}
+				ApplyAnimBlueprint(Comp, AnimBP);
 			}
 		}
 		else
@@ -230,7 +271,12 @@ AActor* UHephaestusAnimationSubsystem::SpawnLocomotionCharacter(
 		}
 		Comp->SetRelativeLocation(FVector(0.f, 0.f, -90.f));
 		Comp->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
-		ApplyAnimBlueprint(Comp, AnimBlueprintPath);
+		FString AnimBP = AnimBlueprintPath;
+		if (AnimBP.IsEmpty() && Mesh)
+		{
+			AnimBP = InferAnimBlueprintPath(ResolvedPath);
+		}
+		ApplyAnimBlueprint(Comp, AnimBP);
 	}
 
 	return Character;

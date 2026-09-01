@@ -171,6 +171,14 @@ def run_chat(
     _thought("plan", f"Starting: {goal[:200]}", {"mode": session.mode})
     step_budget = max(max_steps, 16) if asset_matches else max_steps
     results, grade = loop.run_until_goal(max_steps=step_budget)
+    try:
+        from agent_repair import maybe_repair_after_grade
+
+        extra_results, grade = maybe_repair_after_grade(loop, grade, goal)
+        if extra_results:
+            results.extend(extra_results)
+    except ImportError:
+        pass
     session.memory = loop.memory
     session.last_grade = {
         "met": grade.met,

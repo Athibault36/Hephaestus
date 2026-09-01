@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMissionControlStore } from '../store/missionControlStore';
 
 export function VoiceConsole() {
@@ -7,7 +7,6 @@ export function VoiceConsole() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const animationFrameRef = useRef<number>();
 
   const canRecord = isConnected && agentState !== 'speaking' && agentState !== 'error';
 
@@ -16,7 +15,7 @@ export function VoiceConsole() {
     if (isRecording) {
       // In real implementation, this would come from actual microphone input
       const interval = setInterval(() => {
-        setLocalAudioLevel(Math.random() * 0.8 + 0.2);
+        setLocalAudioLevel(Math.max(audioLevel, Math.random() * 0.8 + 0.2));
       }, 50);
       return () => clearInterval(interval);
     } else {

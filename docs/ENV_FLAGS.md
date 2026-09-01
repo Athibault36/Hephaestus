@@ -7,6 +7,7 @@
 | `HEPHAESTUS_PLANNER_VISION` | off | `1` / `true` to caption viewport before planning |
 | `HEPHAESTUS_VISION_MODEL` | Nemotron vision default | Caption model when vision planner is on |
 | `HEPHAESTUS_HOME` | `~/.hephaestus` | Session store when no project root is bound |
+| `HEPHAESTUS_NIM_REPAIR` | off | `1` to run a short repair loop when grading fails |
 
 ## NIM model IDs (planner)
 

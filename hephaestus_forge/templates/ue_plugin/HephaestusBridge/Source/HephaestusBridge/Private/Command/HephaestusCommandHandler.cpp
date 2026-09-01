@@ -367,7 +367,7 @@ FHephaestusCommandResult UHephaestusCommandHandler::RouteCommand(const TSharedPt
     }
     else if (Command.StartsWith(TEXT("blueprint.")))
     {
-        return HandleBlueprintCommand(Params);
+        return HandleBlueprintCommand(Command, Params);
     }
     else if (Command.StartsWith(TEXT("rendering.")))
     {
@@ -387,7 +387,7 @@ FHephaestusCommandResult UHephaestusCommandHandler::RouteCommand(const TSharedPt
     }
     else if (Command.StartsWith(TEXT("audio.")))
     {
-        return HandleAudioCommand(Params);
+        return HandleAudioCommand(Command, Params);
     }
     else if (Command.StartsWith(TEXT("vision.")))
     {
@@ -928,18 +928,41 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleAssetCommand(const FSt
     return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Unknown asset action: %s"), *Action));
 }
 
-FHephaestusCommandResult UHephaestusCommandHandler::HandleBlueprintCommand(const TSharedPtr<FJsonObject>& Params)
+FHephaestusCommandResult UHephaestusCommandHandler::HandleBlueprintCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params)
 {
     if (!BlueprintSubsystem)
     {
         return MakeErrorResult(TEXT(""), TEXT("Blueprint subsystem not available"));
     }
 
-    FString Action = Params->GetStringField(TEXT("action"));
+    FString Action;
+    if (Params.IsValid())
+    {
+        Params->TryGetStringField(TEXT("action"), Action);
+    }
+    if (Action.IsEmpty())
+    {
+        Command.Split(TEXT("."), nullptr, &Action, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
+    }
 
     if (Action == TEXT("compile"))
     {
-        return MakeSuccessResult(TEXT(""), TEXT("{}"));
+        FString BlueprintPath;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("blueprint_path"), BlueprintPath);
+            if (BlueprintPath.IsEmpty())
+            {
+                Params->TryGetStringField(TEXT("path"), BlueprintPath);
+            }
+        }
+        UBlueprint* Blueprint = BlueprintPath.IsEmpty()
+            ? nullptr
+            : LoadObject<UBlueprint>(nullptr, *BlueprintPath);
+        const bool bOk = BlueprintSubsystem->CompileBlueprint(Blueprint);
+        return bOk
+            ? MakeSuccessResult(TEXT(""), FString::Printf(TEXT("{\"compiled\":true,\"path\":\"%s\"}"), *BlueprintPath))
+            : MakeErrorResult(TEXT(""), TEXT("Blueprint compile failed — check blueprint_path and editor build"));
     }
     else if (Action == TEXT("add_function"))
     {
@@ -1479,14 +1502,22 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleSequenceCommand(
     return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Unknown sequence action: %s"), *Action));
 }
 
-FHephaestusCommandResult UHephaestusCommandHandler::HandleAudioCommand(const TSharedPtr<FJsonObject>& Params)
+FHephaestusCommandResult UHephaestusCommandHandler::HandleAudioCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params)
 {
     if (!AudioSubsystem)
     {
         return MakeErrorResult(TEXT(""), TEXT("Audio subsystem not available"));
     }
 
-    FString Action = Params->GetStringField(TEXT("action"));
+    FString Action;
+    if (Params.IsValid())
+    {
+        Params->TryGetStringField(TEXT("action"), Action);
+    }
+    if (Action.IsEmpty())
+    {
+        Command.Split(TEXT("."), nullptr, &Action, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
+    }
 
     if (Action == TEXT("create_metasound"))
     {
@@ -1494,7 +1525,15 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleAudioCommand(const TSh
     }
     else if (Action == TEXT("play_quartz"))
     {
-        return MakeSuccessResult(TEXT(""), TEXT("{}"));
+        FString ClockHandle;
+        FString Timeline;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("clock"), ClockHandle);
+            Params->TryGetStringField(TEXT("timeline"), Timeline);
+        }
+        AudioSubsystem->PlayQuartzClock(ClockHandle, Timeline);
+        return MakeSuccessResult(TEXT(""), TEXT("{\"played\":true,\"cue\":\"test\"}"));
     }
     else if (Action == TEXT("synthesize"))
     {

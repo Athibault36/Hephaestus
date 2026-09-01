@@ -1,4 +1,3 @@
-import React from 'react';
 import { useMissionControlStore } from '../store/missionControlStore';
 
 export function ActorActions() {
