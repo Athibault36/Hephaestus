@@ -1608,6 +1608,9 @@ def adopt(
         "[bold]Next:[/bold] Rebuild HephaestusBridge in UE → Play (PIE) → "
         f"[cyan]forge observe {project_root}[/cyan]"
     )
+    console.print(
+        "[dim]Bridge v0.1.1+ adds animation.play_locomotion — sync + rebuild if upgrading.[/dim]"
+    )
     from preflight_health import run_preflight
 
     report = run_preflight("http://127.0.0.1:8765", project_root)

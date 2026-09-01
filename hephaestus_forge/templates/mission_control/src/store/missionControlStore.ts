@@ -78,6 +78,9 @@ interface MissionControlState {
   selectedActor: string | null;
   setActors: (actors: ActorInfo[]) => void;
   selectActor: (path: string | null) => void;
+  playLocomotion: (mode: 'idle' | 'walk' | 'run') => Promise<void>;
+  frameActor: () => Promise<void>;
+  destroyActor: () => Promise<void>;
 
   assets: AssetInfo[];
   setAssets: (assets: AssetInfo[]) => void;
@@ -139,7 +142,7 @@ export const useMissionControlStore = create<MissionControlState>((set, get) => 
       actors: paths.map((path) => ({
         path,
         name: path.split('.').pop() || path,
-        class: 'Actor',
+        class: /SkeletalMeshActor|Character|SimAgent/.test(path) ? 'SkeletalMeshActor' : 'Actor',
         location: [0, 0, 0],
         rotation: [0, 0, 0],
         scale: [1, 1, 1],
@@ -172,6 +175,45 @@ export const useMissionControlStore = create<MissionControlState>((set, get) => 
   selectedActor: null,
   setActors: (actors) => set({ actors }),
   selectActor: (path) => set({ selectedActor: path }),
+
+  playLocomotion: async (mode) => {
+    const path = get().selectedActor;
+    if (!path) return;
+    await get().sendCommand({
+      command: 'animation.play_locomotion',
+      params: { actor_path: path, mode, loop: true },
+    });
+    await get().refreshActors();
+  },
+
+  frameActor: async () => {
+    const path = get().selectedActor;
+    if (!path) return;
+    const detail = await get().sendCommand({ command: 'world.get_actor', params: { actor_path: path } });
+    let loc = { x: 0, y: 0, z: 200 };
+    try {
+      const inner = JSON.parse(detail.result_json || '{}');
+      if (inner.location) loc = inner.location;
+    } catch {
+      /* ignore */
+    }
+    await get().sendCommand({
+      command: 'sequence.create_shot',
+      params: {
+        location: { x: loc.x - 280, y: loc.y + 120, z: loc.z + 90 },
+        rotation: { pitch: -12, yaw: 25, roll: 0 },
+        duration: 2.5,
+      },
+    });
+  },
+
+  destroyActor: async () => {
+    const path = get().selectedActor;
+    if (!path) return;
+    await get().sendCommand({ command: 'world.destroy_actor', params: { actor_path: path } });
+    set({ selectedActor: null });
+    await get().refreshActors();
+  },
 
   assets: [],
   setAssets: (assets) => set({ assets }),

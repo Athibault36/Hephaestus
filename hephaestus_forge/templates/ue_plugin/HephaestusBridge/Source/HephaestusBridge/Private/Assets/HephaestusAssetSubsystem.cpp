@@ -10,6 +10,7 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/SkeletalMesh.h"
 #include "Animation/AnimSequence.h"
+#include "Animation/AnimMontage.h"
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
@@ -147,6 +148,11 @@ bool UHephaestusAssetSubsystem::SearchAssetsJson(
 		|| AssetClass.Equals(TEXT("Animation"), ESearchCase::IgnoreCase))
 	{
 		Filter.ClassPaths.Add(UAnimSequence::StaticClass()->GetClassPathName());
+	}
+	else if (AssetClass.Equals(TEXT("AnimMontage"), ESearchCase::IgnoreCase)
+		|| AssetClass.Equals(TEXT("Montage"), ESearchCase::IgnoreCase))
+	{
+		Filter.ClassPaths.Add(UAnimMontage::StaticClass()->GetClassPathName());
 	}
 	else
 	{

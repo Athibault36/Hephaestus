@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { ViewportStream } from './components/ViewportStream';
 import { ChainOfThought } from './components/ChainOfThought';
 import { WorldOutliner } from './components/WorldOutliner';
+import { ActorActions } from './components/ActorActions';
 import { AssetBrowser } from './components/AssetBrowser';
 import { VoiceConsole } from './components/VoiceConsole';
 import { PerformanceMonitor } from './components/PerformanceMonitor';
@@ -62,6 +63,7 @@ export function MissionControl() {
           <section className="panel world-outliner-panel" data-panel="worldOutliner">
             <PanelHeader title="World Outliner" icon="🌍" />
             <WorldOutliner />
+            <ActorActions />
           </section>
         )}
 
