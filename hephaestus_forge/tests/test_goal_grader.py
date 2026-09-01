@@ -64,3 +64,21 @@ def test_grade_creature_requires_asset_match():
     g = grade_goal("spawn a dog", snap, memory=[])
     assert g.met is False
 
+
+def test_grade_idle_accepts_successful_play_locomotion_memory():
+    actor = "/Temp/UEDPIE_0.PersistentLevel.SkeletalMeshActor_0"
+    snap = WorldSnapshot(
+        lights=1,
+        meshes=0,
+        skeletal=1,
+        actor_details=[{"actor_path": actor, "anim_playing": False}],
+    )
+    memory = [{
+        "kind": "play_locomotion",
+        "command": "animation.play_locomotion",
+        "actor_path": actor,
+        "ok": True,
+    }]
+    g = grade_goal(f"play idle animation on {actor}", snap, memory=memory)
+    assert g.met is True
+

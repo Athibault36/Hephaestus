@@ -48,7 +48,7 @@ def test_remote_client_retries_then_succeeds():
 
 
 def test_mock_observe_act_one_step():
-    health = {"ok": True, "service": "hephaestus-remote", "plugin_version": "0.1.0"}
+    health = {"ok": True, "service": "hephaestus-remote", "plugin_version": "0.1.1"}
     capture = {
         "success": True,
         "result_json": json.dumps({"width": 640, "height": 360, "path": "/tmp/frame.png"}),

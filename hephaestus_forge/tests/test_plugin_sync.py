@@ -20,6 +20,7 @@ def test_sync_plugin_copies_template(tmp_path):
     text = handler.read_text(encoding="utf-8")
     assert "world.apply_move_input" in text
     assert "animation.play_montage" in text
+    assert "animation.play_locomotion" in text
     assert (dest / "HEPHAESTUS_BRIDGE_VERSION").is_file()
 
 

@@ -578,6 +578,7 @@ class ObserveActLoop:
                 "reason": action.reason,
                 "ok": ok,
                 "command": action.command.get("command"),
+                "actor_path": (action.command.get("params") or {}).get("actor_path"),
                 "lights_before": before.lights,
                 "meshes_before": before.meshes,
                 "mesh_path": (action.command.get("params") or {}).get("mesh_path"),

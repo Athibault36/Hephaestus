@@ -1812,6 +1812,8 @@ _MISSION_CONTROL_HTML = r"""<!DOCTYPE html>
       <input id="actorPath" placeholder="selected actor path" style="flex:1;min-width:180px"/>
       <button id="btnDestroy">Destroy</button>
       <button id="btnPlayIdle">Play idle</button>
+      <button id="btnPlayWalk">Play walk</button>
+      <button id="btnFrameActor">Frame actor</button>
     </div>
     <h2 style="margin-top:1rem">Outliner</h2>
     <div id="actors"></div>
@@ -2355,12 +2357,38 @@ document.getElementById("btnDestroy").onclick = () => {
   if (!path) return;
   postCommand({ command: "world.destroy_actor", params: { actor_path: path } });
 };
-document.getElementById("btnPlayIdle").onclick = () => {
+async function playLocomotionOnSelected(mode) {
   const path = document.getElementById("actorPath").value.trim();
   if (!path) { showToast("Select an actor in the outliner first"); return; }
-  document.getElementById("chatInput").value = `play idle animation on ${path}`;
-  sendChat(false);
-};
+  const r = await postCommand({
+    command: "animation.play_locomotion",
+    params: { actor_path: path, mode, loop: true },
+  });
+  showToast(r.success ? `Playing ${mode}` : (r.error || "Locomotion failed"));
+  if (r.success) await listPaths();
+}
+document.getElementById("btnPlayIdle").onclick = () => playLocomotionOnSelected("idle");
+document.getElementById("btnPlayWalk").onclick = () => playLocomotionOnSelected("walk");
+async function frameSelectedActor() {
+  const path = document.getElementById("actorPath").value.trim();
+  if (!path) { showToast("Select an actor in the outliner first"); return; }
+  const detail = await postCommand({ command: "world.get_actor", params: { actor_path: path } });
+  let loc = { x: 0, y: 0, z: 200 };
+  try {
+    const inner = JSON.parse(detail.result_json || "{}");
+    if (inner.location) loc = inner.location;
+  } catch (_) {}
+  const r = await postCommand({
+    command: "sequence.create_shot",
+    params: {
+      location: { x: loc.x - 280, y: loc.y + 120, z: loc.z + 90 },
+      rotation: { pitch: -12, yaw: 25, roll: 0 },
+      duration: 2.5,
+    },
+  });
+  showToast(r.success ? "Framing shot on actor" : (r.error || "Shot failed"));
+}
+document.getElementById("btnFrameActor").onclick = () => frameSelectedActor();
 
 function countWorld(paths) {
   let lights = 0, meshes = 0;
@@ -2400,7 +2428,11 @@ async function listPaths() {
   const r = await postCommand({ command: "world.list_actors", params: {} });
   let paths = r.actor_paths || [];
   try { const inner = JSON.parse(r.result_json || "{}"); if (inner.actors) paths = inner.actors; } catch (_) {}
-  actorsEl.innerHTML = paths.map(p => `<div class="actor" data-path="${p.replace(/"/g, '&quot;')}" title="Click to select — destroy or play idle">${p}</div>`).join("") || "<div class='actor'>(empty)</div>";
+  actorsEl.innerHTML = paths.map(p => {
+    const skel = /SkeletalMeshActor|Character|SimAgent/.test(p);
+    const label = (skel ? "🦴 " : "") + p;
+    return `<div class="actor" data-path="${p.replace(/"/g, '&quot;')}" title="Click to select — destroy, animate, or frame">${label}</div>`;
+  }).join("") || "<div class='actor'>(empty)</div>";
   const selected = document.getElementById("actorPath").value.trim();
   actorsEl.querySelectorAll(".actor[data-path]").forEach(el => {
     const path = el.getAttribute("data-path") || "";

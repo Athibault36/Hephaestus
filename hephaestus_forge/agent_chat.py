@@ -21,6 +21,49 @@ ThoughtFn = Callable[[str, str, dict[str, Any]], None]
 _STORES: dict[str, SessionStore] = {}
 
 
+from locomotion_fallback import infer_locomotion_mode
+
+_DIRECT_LOCOMOTION = re.compile(
+    r"^play\s+(idle|walk|run)\s+(?:animation\s+)?on\s+(/Temp/\S+)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _try_direct_locomotion(message: str, client: RemoteUeClient) -> Optional[dict[str, Any]]:
+    match = _DIRECT_LOCOMOTION.match((message or "").strip())
+    if not match:
+        return None
+    mode = match.group(1).lower()
+    actor_path = match.group(2)
+    result = client.command({
+        "command": "animation.play_locomotion",
+        "params": {"actor_path": actor_path, "mode": mode, "loop": True},
+    })
+    ok = bool(result.get("success"))
+    reply = (
+        f"Playing {mode} on {actor_path}."
+        if ok
+        else f"Could not play {mode} on {actor_path}: {result.get('error', 'command failed')}"
+    )
+    return {
+        "ok": ok,
+        "reply": reply,
+        "grade": {
+            "met": ok,
+            "score": 1.0 if ok else 0.0,
+            "summary": reply,
+            "missing": [] if ok else ["animation not playing"],
+        },
+        "planner": "direct_locomotion",
+        "llm_available": False,
+        "llm_error": "",
+        "asset_matches": [],
+        "asset_meta": {"direct_locomotion": mode, "actor_path": actor_path},
+        "thoughts": [],
+        "steps": [],
+    }
+
+
 def get_store(project_root: Optional[Path] = None) -> SessionStore:
     key = str(project_root.resolve()) if project_root else ""
     if key not in _STORES:
@@ -75,6 +118,17 @@ def run_chat(
             "session": session.to_dict(),
             "thoughts": [],
             "steps": [],
+        }
+
+    direct_loco = _try_direct_locomotion(message, client)
+    if direct_loco:
+        session.add_assistant(direct_loco["reply"])
+        session.last_grade = direct_loco["grade"]
+        store.save(session)
+        return {
+            **direct_loco,
+            "goal": goal,
+            "session": session.to_dict(),
         }
 
     if session.mode == "cinematic":

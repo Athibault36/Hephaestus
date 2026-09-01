@@ -56,6 +56,29 @@ def _anim_playing_for_actor(details: list[Any], actor_path: str) -> bool:
     return False
 
 
+def _animation_command_succeeded(
+    memory: Optional[list[dict[str, Any]]],
+    actor_path: str = "",
+) -> bool:
+    anim_kinds = frozenset({"play_anim", "play_montage", "play_locomotion"})
+    anim_cmds = frozenset({
+        "animation.play_sequence",
+        "animation.play_montage",
+        "animation.play_locomotion",
+    })
+    for step in memory or []:
+        if not step.get("ok"):
+            continue
+        if step.get("kind") not in anim_kinds and step.get("command") not in anim_cmds:
+            continue
+        if actor_path:
+            step_actor = str(step.get("actor_path") or "")
+            if step_actor and actor_path not in step_actor and step_actor not in actor_path:
+                continue
+        return True
+    return False
+
+
 def _extract_game_paths(text: str) -> list[str]:
     return re.findall(r"/Game/[^\s,;\"']+", text or "")
 
@@ -191,8 +214,12 @@ def grade_goal(goal: str, snapshot: Any, memory: Optional[list[dict[str, Any]]] 
         target_actor = _actor_path_from_goal(goal)
         if target_actor and ("idle" in goal_l or "anim" in goal_l):
             anim_playing = _anim_playing_for_actor(details, target_actor)
+            if not anim_playing and _animation_command_succeeded(memory, target_actor):
+                anim_playing = True
         else:
             anim_playing = any(bool(d.get("anim_playing")) for d in details if isinstance(d, dict))
+            if not anim_playing and _animation_command_succeeded(memory):
+                anim_playing = True
 
     missing: list[str] = []
     if lights < min_lights:
