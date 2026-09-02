@@ -313,7 +313,25 @@ def make_handler(
 
                     goal, asset_matches, _asset_meta = augment_goal_with_assets(client, goal)
                     llm = VisionLLMPlanner(goal=goal, asset_hints=asset_matches)
+                    require_nim = body.get("require_nim", True)
+                    if isinstance(require_nim, str):
+                        require_nim = require_nim.lower() not in ("0", "false", "no")
                     use_llm = llm.available
+                    if require_nim and not use_llm:
+                        err = llm.last_error or (
+                            "NVIDIA_API_KEY or HEPHAESTUS_LLM_API_KEY required for autonomous operator"
+                        )
+                        self._json_response(503, {
+                            "ok": False,
+                            "planner": "",
+                            "llm_available": False,
+                            "llm_error": err,
+                            "goal": goal,
+                            "grade": {"met": False, "summary": err, "missing": ["nim_planner"]},
+                            "thoughts": [],
+                            "steps": [],
+                        })
+                        return True
                     thoughts: list[dict] = []
 
                     def on_thought(kind: str, content: str, metadata: dict) -> None:
@@ -338,6 +356,7 @@ def make_handler(
                                 planner=(llm.decide if use_llm else None),
                                 goal=goal,
                                 asset_hints=asset_matches,
+                                require_nim=bool(require_nim),
                             )
                             if path.endswith("/step"):
                                 results = loop.run(steps=1, max_steps=1)
@@ -349,7 +368,11 @@ def make_handler(
                                 grade_summary = grade.summary
                             planner_label = llm.model if use_llm else "heuristic"
                             llm_error = llm.last_error
-                            if not use_llm and not llm_error:
+                            if require_nim and not use_llm:
+                                llm_error = llm_error or (
+                                    "NVIDIA_API_KEY or HEPHAESTUS_LLM_API_KEY required for autonomous operator"
+                                )
+                            elif not use_llm and not llm_error:
                                 llm_error = (
                                     "DeepSeek planner unavailable: set NVIDIA_API_KEY or "
                                     "HEPHAESTUS_LLM_API_KEY (heuristic fallback was used)"

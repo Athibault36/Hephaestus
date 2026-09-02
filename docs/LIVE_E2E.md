@@ -79,7 +79,12 @@ Open `http://127.0.0.1:3000` — preflight banner should be green when plugin ve
 
 ## 4. Acceptance scenarios
 
-See [OPERATOR_V0_2.md](OPERATOR_V0_2.md) for spawn→walk grading, cinematic shots, and packaging.
+See [OPERATOR_V1.md](OPERATOR_V1.md) for autonomous scenarios A–G and [OPERATOR_V0_9.md](OPERATOR_V0_9.md) for the production gate.
+
+```powershell
+forge gate C:\path\to\YourGame --json
+forge autonomous-suite C:\path\to\YourGame --json
+```
 
 ## CI vs live
 

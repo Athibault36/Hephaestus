@@ -3105,29 +3105,9 @@ def evolve(
     with open(manifest_path) as f:
         manifest = json.load(f)
     
-    if file:
-        # Inject code snippet
-        console.print(f"[dim]Injecting code from {file}[/dim]")
-        snippet = file.read_text()
-        
-        # Determine if Python or C++ based on extension
-        if file.suffix == ".py":
-            console.print("[green]Python skill injection not yet implemented[/green]")
-        elif file.suffix in [".cpp", ".h", ".hpp"]:
-            console.print("[green]C++ skill injection not yet implemented[/green]")
-        else:
-            console.print("[yellow]Unknown file type[/yellow]")
-    
-    if skill:
-        # Update skill manifest
-        console.print(f"[dim]Updating skill: {skill}[/dim]")
-        # Would modify manifest and regenerate C++ headers
-    
-    # Recompile
-    console.print("[dim]Triggering recompile...[/dim]")
-    # Would call compile with hot_reload=True
-    
-    console.print("[green]✓ Evolution complete (stub)[/green]")
+    console.print("[red]✗ forge evolve is not implemented in v1.0 (experimental)[/red]")
+    console.print("[dim]Use forge sync-plugin + UE rebuild for bridge changes.[/dim]")
+    raise typer.Exit(1)
 
 
 @app.command("nim-parallel")

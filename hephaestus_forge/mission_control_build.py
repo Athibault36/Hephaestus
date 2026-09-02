@@ -80,11 +80,13 @@ def prepare_mission_control_dist(
     *,
     force_static: bool,
     write_fallback: Callable[[Path, str], None],
+    auto_build: bool = True,
 ) -> Path:
     """
     Return dist directory for observe/desktop.
 
     Prefers .hephaestus_forge/MissionControl/dist, then project MissionControl/dist.
+    When ``auto_build`` is True and npm is available, runs ``build_mission_control``.
     """
     forge_dist = project_root / ".hephaestus_forge" / "MissionControl" / "dist"
     if not force_static and is_vite_build(forge_dist):
@@ -92,5 +94,16 @@ def prepare_mission_control_dist(
     dist_dir = project_root / mission_control_dir / "dist"
     if not force_static and is_vite_build(dist_dir):
         return dist_dir
+    if not force_static and auto_build:
+        npm = "npm.cmd" if shutil.which("npm.cmd") else "npm"
+        if shutil.which(npm):
+            try:
+                build_mission_control(project_root, mission_control_dir=mission_control_dir)
+                if is_vite_build(forge_dist):
+                    return forge_dist
+                if is_vite_build(dist_dir):
+                    return dist_dir
+            except Exception:
+                pass
     write_fallback(dist_dir, "")
     return dist_dir

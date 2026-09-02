@@ -57,6 +57,12 @@ jobs:
           forge autonomous-suite '${{ inputs.project_root }}' --offline --json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Production gate
+        shell: pwsh
+        run: |
+          forge gate '${{ inputs.project_root }}' --api '${{ inputs.api }}' --json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Write E2E JSON report
         if: always()
         shell: pwsh

@@ -149,6 +149,7 @@ def run_autonomous_goal(
         planner=llm.decide if llm.available else None,
         goal=augmented_goal,
         asset_hints=asset_matches,
+        require_nim=require_nim,
     )
     if session_memory:
         loop.memory = list(session_memory)

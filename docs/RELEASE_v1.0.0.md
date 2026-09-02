@@ -15,6 +15,7 @@ forge autonomous-suite <PATH-TO-UE-PROJECT> --json
 - Session export schema **v4** + `autonomous_report`
 - Planner actions: `create_material`, `asset_search`, `play_audio`
 - [OPERATOR_V1.md](OPERATOR_V1.md)
+- [PRODUCTION.md](PRODUCTION.md) — deployment guide
 
 ## Manual step
 

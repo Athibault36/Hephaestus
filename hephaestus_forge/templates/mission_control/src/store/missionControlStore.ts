@@ -147,13 +147,26 @@ export const useMissionControlStore = create<MissionControlState>((set, get) => 
   connect: () => {
     const tick = async () => {
       try {
+        const t0 = performance.now();
         const res = await fetch(`${API_BASE}/v1/health`);
+        const pingMs = Math.round(performance.now() - t0);
         const json = await res.json();
         const online = !!json.ok;
         set({ isConnected: online });
         if (online) {
           await get().refreshActors();
         }
+        const actorCount = get().actors.length;
+        get().updateMetrics({
+          fps: online ? 60 : 0,
+          frameTime: pingMs,
+          gpuTime: 0,
+          cpuTime: 0,
+          drawCalls: actorCount,
+          triangles: 0,
+          textureMemory: 0,
+          latency: { stt: 0, llm: 0, tool: pingMs, tts: 0, total: pingMs },
+        });
       } catch {
         set({ isConnected: false });
       }
@@ -223,25 +236,41 @@ export const useMissionControlStore = create<MissionControlState>((set, get) => 
   },
 
   refreshActors: async () => {
-    const result = await get().sendCommand({ command: 'world.list_actors', params: {} });
+    const result = await get().sendCommand({
+      command: 'world.list_actors',
+      params: { include_details: true, detail_limit: 40 },
+    });
     let paths: string[] = (result.actor_paths as string[]) ?? [];
+    const detailsByPath = new Map<string, Record<string, unknown>>();
     try {
       const inner = JSON.parse(String(result.result_json || '{}'));
       if (Array.isArray(inner.actors)) paths = inner.actors;
+      if (Array.isArray(inner.actor_details)) {
+        for (const row of inner.actor_details) {
+          const path = String((row as { path?: string }).path || '');
+          if (path) detailsByPath.set(path, row as Record<string, unknown>);
+        }
+      }
     } catch {
       /* ignore */
     }
     set({
-      actors: paths.map((path) => ({
-        path,
-        name: path.split('.').pop() || path,
-        class: /SkeletalMeshActor|Character|SimAgent/.test(path) ? 'SkeletalMeshActor' : 'Actor',
-        location: [0, 0, 0],
-        rotation: [0, 0, 0],
-        scale: [1, 1, 1],
-        isSelected: false,
-        components: [],
-      })),
+      actors: paths.map((path) => {
+        const detail = detailsByPath.get(path);
+        const loc = (detail?.location as { x?: number; y?: number; z?: number }) || {};
+        const rot = (detail?.rotation as { pitch?: number; yaw?: number; roll?: number }) || {};
+        const scl = (detail?.scale as { x?: number; y?: number; z?: number }) || {};
+        return {
+          path,
+          name: path.split('.').pop() || path,
+          class: String(detail?.class || (/SkeletalMeshActor|Character|SimAgent/.test(path) ? 'SkeletalMeshActor' : 'Actor')),
+          location: [loc.x ?? 0, loc.y ?? 0, loc.z ?? 0],
+          rotation: [rot.pitch ?? 0, rot.yaw ?? 0, rot.roll ?? 0],
+          scale: [scl.x ?? 1, scl.y ?? 1, scl.z ?? 1],
+          isSelected: false,
+          components: [],
+        };
+      }),
     });
   },
 
@@ -321,7 +350,7 @@ export const useMissionControlStore = create<MissionControlState>((set, get) => 
         preflightHint: String(bridgeTemplate?.detail || data.bridge_capabilities || ''),
         bridgeCapabilitiesOk: data.bridge_capabilities_ok !== false,
         forgeVersion: String(data.forge_version || ''),
-        operatorMilestone: String(data.operator_milestone || 'v0.9'),
+        operatorMilestone: String(data.operator_milestone || 'v1.0'),
       });
     } catch {
       set({ preflightReady: false, plannerAvailable: false });

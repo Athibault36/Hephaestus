@@ -74,10 +74,10 @@ export function PerformanceMonitor() {
         'Budget: 8 GB'
       )}
       {renderMetricCard(
-        'Total Latency',
-        `${metrics.latency.total} ms`,
+        'Bridge RTT',
+        `${metrics.latency.tool} ms`,
         latencyStatus,
-        'Target: <300ms'
+        'Health endpoint round-trip'
       )}
 
       <div className="perf-card" style={{ gridColumn: '1 / -1' }}>

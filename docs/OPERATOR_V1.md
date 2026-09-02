@@ -32,10 +32,24 @@ Mission Control chat uses the same autonomous runner (repair on by default).
 
 ## Policy
 
-- **NIM required** — no silent heuristic fallback on autonomous paths
+- **NIM required** — no silent heuristic fallback on autonomous paths (`forge run`, `forge autonomous-suite`, MC chat, `/agent/loop`)
 - **Repair loop** — forced on autonomous path when grade fails
 - Session export **schema v4** includes `autonomous_report`
 
+## Failure modes
+
+| Symptom | Meaning | Action |
+|---------|---------|--------|
+| `llm_error` in JSON | No API key or NIM unreachable | Set `NVIDIA_API_KEY`, retry |
+| Gate `preflight_ue_pie` fail | PIE not running | Play in UE |
+| `plugin_version` mismatch | Stale DLL or header | `forge sync-plugin`, rebuild, restart editor |
+| `mission_control_dist` fail | No Vite build | `forge observe` (auto-build) or `forge build-mc` |
+| Grade `missing: ["nim_planner"]` | Autonomous path without NIM | Expected — not a bug |
+
+## Heuristic planner (dev only)
+
+`forge loop --planner heuristic` or `--planner auto` without API key uses local heuristics. **Not** used for production acceptance.
+
 ## Live checklist
 
-[docs/LIVE_E2E.md](LIVE_E2E.md)
+[docs/LIVE_E2E.md](LIVE_E2E.md) · [docs/PRODUCTION.md](PRODUCTION.md)

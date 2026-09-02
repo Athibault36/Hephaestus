@@ -536,6 +536,7 @@ class ObserveActLoop:
         planner: Optional[Callable[..., AgentAction]] = None,
         goal: str = "",
         asset_hints: Optional[list[str]] = None,
+        require_nim: bool = False,
     ):
         self.client = client or RemoteUeClient()
         self.rng = random.Random(seed)
@@ -544,6 +545,7 @@ class ObserveActLoop:
         self.planner = planner
         self.goal = goal
         self.asset_hints = list(asset_hints or [])
+        self.require_nim = require_nim
         self.memory: list[dict[str, Any]] = []
         self._observe_count = 0
 
@@ -558,6 +560,9 @@ class ObserveActLoop:
             except TypeError:
                 action = self.planner(snapshot)
             if action.kind == "llm_error":
+                if self.require_nim:
+                    self._thought("error", action.reason, {"kind": "llm_error"})
+                    return action
                 fallback = decide_action(
                     snapshot, self.rng, goal=self.goal, asset_hints=self.asset_hints,
                 )
