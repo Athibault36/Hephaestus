@@ -7,6 +7,7 @@ sys.path.insert(0, str(ROOT))
 
 from e2e_check import run_e2e_check  # noqa: E402
 from preflight_health import run_preflight  # noqa: E402
+from doctor import run_doctor  # noqa: E402
 
 
 def test_preflight_report_json_roundtrip(tmp_path):
@@ -25,3 +26,12 @@ def test_e2e_report_json_roundtrip(tmp_path):
     loaded = json.loads(json.dumps(report.to_dict()))
     assert "steps" in loaded
     assert any(s["name"] == "factory_template" for s in loaded["steps"])
+
+
+def test_doctor_report_json_roundtrip(tmp_path):
+    forge = tmp_path / ".hephaestus_forge"
+    forge.mkdir()
+    report = run_doctor(tmp_path, live=False)
+    loaded = json.loads(json.dumps(report.to_dict()))
+    assert "checklist" in loaded
+    assert loaded["forge_version"] == loaded["bridge_version"]

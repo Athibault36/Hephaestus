@@ -3838,6 +3838,7 @@ def doctor(
     api: Annotated[str, typer.Option("--api", help="UE Remote API base URL")] = "http://127.0.0.1:8765",
     sync: Annotated[bool, typer.Option("--sync", help="Run forge sync-plugin before checks")] = False,
     offline: Annotated[bool, typer.Option("--offline", help="Skip live PIE command probes")] = False,
+    json_out: Annotated[bool, typer.Option("--json", help="Emit doctor report as JSON")] = False,
 ):
     """Operator doctor: rebuild checklist + offline e2e + preflight."""
     try:
@@ -3856,6 +3857,11 @@ def doctor(
         except Exception:
             project_root = None
     report = run_doctor(project_root, remote_api=api, sync=sync, live=not offline)
+    if json_out:
+        import json as _json
+
+        typer.echo(_json.dumps(report.to_dict(), indent=2))
+        raise typer.Exit(0 if report.ok else 1)
     console.print("[bold]Rebuild checklist[/bold]")
     for line in report.checklist:
         console.print(f"  • {line}")

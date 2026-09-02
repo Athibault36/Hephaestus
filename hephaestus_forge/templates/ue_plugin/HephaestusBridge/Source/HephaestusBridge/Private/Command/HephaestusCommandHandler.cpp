@@ -8,6 +8,7 @@
 #include "Rendering/HephaestusRenderingSubsystem.h"
 #include "PCG/HephaestusPCGSubsystem.h"
 #include "Animation/HephaestusAnimationSubsystem.h"
+#include "Animation/AnimSequence.h"
 #include "Audio/HephaestusAudioSubsystem.h"
 #include "Sequence/HephaestusSequenceSubsystem.h"
 #include "Vision/HephaestusVisionSubsystem.h"
@@ -15,6 +16,7 @@
 #include "Async/Async.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
+#include "Engine/SkeletalMesh.h"
 #include "Engine/World.h"
 #include "Json.h"
 #include "JsonObjectConverter.h"
@@ -1152,7 +1154,47 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleBlueprintCommand(const
     }
     else if (Action == TEXT("diff"))
     {
-        return MakeSuccessResult(TEXT(""), TEXT("{\"diff\":\"\"}"));
+        FString BlueprintPathA;
+        FString BlueprintPathB;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("blueprint_path_a"), BlueprintPathA);
+            Params->TryGetStringField(TEXT("blueprint_path_b"), BlueprintPathB);
+            if (BlueprintPathA.IsEmpty())
+            {
+                Params->TryGetStringField(TEXT("path_a"), BlueprintPathA);
+            }
+            if (BlueprintPathB.IsEmpty())
+            {
+                Params->TryGetStringField(TEXT("path_b"), BlueprintPathB);
+            }
+        }
+        if (BlueprintPathA.IsEmpty() || BlueprintPathB.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("diff requires blueprint_path_a and blueprint_path_b"));
+        }
+        UBlueprint* BlueprintA = LoadObject<UBlueprint>(nullptr, *BlueprintPathA);
+        UBlueprint* BlueprintB = LoadObject<UBlueprint>(nullptr, *BlueprintPathB);
+        if (!BlueprintA)
+        {
+            return MakeErrorResult(
+                TEXT(""),
+                FString::Printf(TEXT("diff: blueprint_path_a not found: %s"), *BlueprintPathA));
+        }
+        if (!BlueprintB)
+        {
+            return MakeErrorResult(
+                TEXT(""),
+                FString::Printf(TEXT("diff: blueprint_path_b not found: %s"), *BlueprintPathB));
+        }
+        const FHephaestusDiffResult Diff = BlueprintSubsystem->DiffBlueprints(BlueprintA, BlueprintB);
+        return MakeSuccessResult(
+            TEXT(""),
+            FString::Printf(
+                TEXT("{\"identical\":%s,\"path_a\":\"%s\",\"path_b\":\"%s\"}"),
+                Diff.bIdentical ? TEXT("true") : TEXT("false"),
+                *BlueprintPathA,
+                *BlueprintPathB));
     }
 
     return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Unknown blueprint action: %s"), *Action));
@@ -1382,6 +1424,38 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleAnimationCommand(const
         if (SourceMesh.IsEmpty() || TargetMesh.IsEmpty())
         {
             return MakeErrorResult(TEXT(""), TEXT("retarget requires source_mesh and target_mesh"));
+        }
+        USkeletalMesh* Source = LoadObject<USkeletalMesh>(nullptr, *SourceMesh);
+        USkeletalMesh* Target = LoadObject<USkeletalMesh>(nullptr, *TargetMesh);
+        if (!Source)
+        {
+            return MakeErrorResult(
+                TEXT(""),
+                FString::Printf(TEXT("retarget: source_mesh not found: %s"), *SourceMesh));
+        }
+        if (!Target)
+        {
+            return MakeErrorResult(
+                TEXT(""),
+                FString::Printf(TEXT("retarget: target_mesh not found: %s"), *TargetMesh));
+        }
+        FString AnimPath;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("anim_path"), AnimPath);
+        }
+        UAnimSequence* SourceAnim = AnimPath.IsEmpty()
+            ? nullptr
+            : LoadObject<UAnimSequence>(nullptr, *AnimPath);
+        if (!AnimPath.IsEmpty() && !SourceAnim)
+        {
+            return MakeErrorResult(
+                TEXT(""),
+                FString::Printf(TEXT("retarget: anim_path not found: %s"), *AnimPath));
+        }
+        if (SourceAnim)
+        {
+            AnimationSubsystem->RetargetAnimation(SourceAnim, Target, nullptr);
         }
         return MakeErrorResult(
             TEXT(""),

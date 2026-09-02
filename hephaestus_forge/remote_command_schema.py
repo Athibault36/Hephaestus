@@ -284,6 +284,21 @@ def validate_blueprint_add_function(command_obj: dict[str, Any]) -> list[str]:
     return errors
 
 
+def validate_blueprint_diff(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "blueprint.diff":
+        errors.append("command must be blueprint.diff")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not (params.get("blueprint_path_a") or params.get("path_a")):
+        errors.append("missing blueprint_path_a")
+    if not (params.get("blueprint_path_b") or params.get("path_b")):
+        errors.append("missing blueprint_path_b")
+    return errors
+
+
 def validate_blueprint_set_property(command_obj: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     if command_obj.get("command") != "blueprint.set_property":
