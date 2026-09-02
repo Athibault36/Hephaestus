@@ -33,6 +33,20 @@ def sync_plugin(project_root: Path, dest: Path | None = None) -> Path:
         from version import BRIDGE_VERSION
 
         (target / "HEPHAESTUS_BRIDGE_VERSION").write_text(f"{BRIDGE_VERSION}\n", encoding="utf-8")
+        version_header = (
+            target / "Source" / "HephaestusBridge" / "Public" / "HephaestusVersion.h"
+        )
+        if version_header.is_file():
+            text = version_header.read_text(encoding="utf-8")
+            import re
+
+            text = re.sub(
+                r'#define HEPHAESTUS_BRIDGE_VERSION TEXT\("[^"]+"\)',
+                f'#define HEPHAESTUS_BRIDGE_VERSION TEXT("{BRIDGE_VERSION}")',
+                text,
+                count=1,
+            )
+            version_header.write_text(text, encoding="utf-8")
     except Exception:
         pass
     return target
