@@ -44,7 +44,7 @@ You receive a viewport census (and optional prior step memory). Choose exactly O
 
 Allowed JSON (no markdown):
 {
-  "action": "spawn_light" | "spawn_cube" | "spawn_mesh" | "spawn_character" | "play_anim" | "play_locomotion" | "play_montage" | "stop_anim" | "move_actor" | "apply_move" | "set_transform" | "set_light" | "set_view" | "create_shot" | "play_level_sequence" | "set_mesh_color" | "destroy" | "noop",
+  "action": "spawn_light" | "spawn_cube" | "spawn_mesh" | "spawn_character" | "play_anim" | "play_locomotion" | "play_montage" | "stop_anim" | "move_actor" | "apply_move" | "set_transform" | "set_light" | "set_view" | "create_shot" | "play_level_sequence" | "set_mesh_color" | "create_material" | "asset_search" | "play_audio" | "destroy" | "noop",
   "reason": "short why",
   "x": number, "y": number, "z": number,
   "yaw": number,
@@ -80,6 +80,9 @@ Rules:
 - apply_move applies forward/right input to the possessed pawn (gameplay jog/walk).
 - play_montage plays montage_path on a listed character/skeletal actor.
 - spawn_mesh uses mesh_path when spawning a static mesh (not only cubes).
+- create_material creates a material asset (name, optional parent_path).
+- asset_search runs asset.search with query string.
+- play_audio plays test audio via audio.play_quartz (clock optional).
 - noop when goal is met (e.g. >=1 light and >=3 cubes IN VIEW for a basic seed goal).
 - Use memory so you do not repeat the same failed or redundant spawn.
 """
@@ -468,6 +471,43 @@ def plan_dict_to_action(plan: dict[str, Any], snapshot: WorldSnapshot) -> AgentA
             kind="destroy",
             reason=reason,
             command={"command": "world.destroy_actor", "params": {"actor_path": path}},
+        )
+
+    if action in ("create_material", "material"):
+        name = str(plan.get("name") or plan.get("material_name") or "AgentMaterial")
+        parent = str(plan.get("parent_path") or "/Engine/BasicShapes/BasicShapeMaterial")
+        return AgentAction(
+            kind="create_material",
+            reason=reason,
+            command={
+                "command": "asset.create_material",
+                "params": {"name": name, "parent_path": parent},
+            },
+        )
+
+    if action in ("asset_search", "search_assets", "search"):
+        query = str(plan.get("query") or plan.get("search") or "")
+        if not query:
+            return AgentAction(
+                kind="noop",
+                reason="Rejected asset_search — query required",
+                command={"command": "world.list_actors", "params": {}},
+            )
+        return AgentAction(
+            kind="asset_search",
+            reason=reason,
+            command={"command": "asset.search", "params": {"query": query, "limit": int(plan.get("limit", 12))}},
+        )
+
+    if action in ("play_audio", "audio", "play_quartz"):
+        clock = str(plan.get("clock") or "test")
+        return AgentAction(
+            kind="play_audio",
+            reason=reason,
+            command={
+                "command": "audio.play_quartz",
+                "params": {"clock": clock, "timeline": str(plan.get("timeline") or "default")},
+            },
         )
 
     return AgentAction(

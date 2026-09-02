@@ -18,6 +18,15 @@ forge gate <PATH-TO-UE-PROJECT>
 forge gate <PATH-TO-UE-PROJECT> --json
 ```
 
+## Autonomous operator (v1.0)
+
+```powershell
+forge run <PATH-TO-UE-PROJECT> "spawn a dog and walk"
+forge autonomous-suite <PATH-TO-UE-PROJECT> --json
+```
+
+Requires `NVIDIA_API_KEY`. Repair loop is on by default for `forge run` and MC chat.
+
 ## Audio / MetaSound commands
 
 | Command | Params | Notes |

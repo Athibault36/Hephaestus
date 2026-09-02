@@ -39,3 +39,14 @@ def test_maybe_repair_heuristic_without_nim(monkeypatch):
     extra, out = maybe_repair_after_grade(loop, grade, "walk the dog")
     assert out.met is True
     loop.run_until_goal.assert_called_once()
+
+
+def test_maybe_repair_force_without_env(monkeypatch):
+    monkeypatch.delenv("HEPHAESTUS_NIM_REPAIR", raising=False)
+    monkeypatch.delenv("HEPHAESTUS_HEURISTIC_REPAIR", raising=False)
+    loop = MagicMock()
+    loop.run_until_goal.return_value = ([], GradeResult(met=True, score=1.0, summary="ok", missing=[]))
+    grade = GradeResult(met=False, score=0.0, summary="x", missing=["walk"])
+    extra, out = maybe_repair_after_grade(loop, grade, "walk the dog", force=True)
+    assert out.met is True
+    loop.run_until_goal.assert_called_once()
