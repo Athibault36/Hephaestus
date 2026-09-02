@@ -11,6 +11,14 @@ from typing import Callable, Optional
 FACTORY_TEMPLATE = Path(__file__).resolve().parent / "templates" / "mission_control"
 
 
+def mc_dist_path(project_root: Path, mission_control_dir: str = "MissionControl") -> Path:
+    """Preferred Mission Control dist for a target project."""
+    forge_dist = project_root / ".hephaestus_forge" / "MissionControl" / "dist"
+    if forge_dist.is_dir():
+        return forge_dist
+    return project_root / mission_control_dir / "dist"
+
+
 def is_vite_build(dist_dir: Path) -> bool:
     """True when dist looks like a Vite production build (not inline fallback HTML)."""
     index = dist_dir / "index.html"

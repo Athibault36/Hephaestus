@@ -26,7 +26,9 @@ def test_preflight_online_ue_with_key(tmp_path):
     (plugin_dir / "HEPHAESTUS_BRIDGE_VERSION").write_text(f"{BRIDGE_VERSION}\n", encoding="utf-8")
     fake_resp = MagicMock()
     fake_resp.status = 200
-    fake_resp.read.return_value = b'{"ok":true,"service":"hephaestus-remote","port":8765,"plugin_version":"0.1.3"}'
+    fake_resp.read.return_value = (
+        f'{{"ok":true,"service":"hephaestus-remote","port":8765,"plugin_version":"{BRIDGE_VERSION}"}}'
+    ).encode()
     fake_resp.__enter__ = lambda s: s
     fake_resp.__exit__ = MagicMock(return_value=False)
     with patch.dict("os.environ", {"NVIDIA_API_KEY": "nvapi-test"}):

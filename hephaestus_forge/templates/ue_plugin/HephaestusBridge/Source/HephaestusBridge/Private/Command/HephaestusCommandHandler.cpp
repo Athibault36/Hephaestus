@@ -251,6 +251,7 @@ TArray<FString> UHephaestusCommandHandler::GetAvailableCommands() const
         TEXT("sequence.stop"),
         TEXT("sequence.create_shot"),
         TEXT("audio.create_metasound"),
+        TEXT("audio.play_metasound"),
         TEXT("audio.play_quartz"),
         TEXT("audio.synthesize"),
         TEXT("vision.capture_frame"),
@@ -1306,10 +1307,36 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandlePCGCommand(const FStri
         }
         UObject* Graph = GraphPath.IsEmpty() ? nullptr : LoadObject<UObject>(nullptr, *GraphPath);
         TArray<FHephaestusPCGMutation> Mutations;
+        if (Params.IsValid())
+        {
+            const TArray<TSharedPtr<FJsonValue>>* MutArr = nullptr;
+            if (Params->TryGetArrayField(TEXT("mutations"), MutArr) && MutArr)
+            {
+                for (const TSharedPtr<FJsonValue>& Val : *MutArr)
+                {
+                    if (!Val.IsValid() || Val->Type != EJson::Object)
+                    {
+                        continue;
+                    }
+                    const TSharedPtr<FJsonObject> Obj = Val->AsObject();
+                    FHephaestusPCGMutation Mutation;
+                    if (Obj->TryGetStringField(TEXT("type"), Mutation.MutationType))
+                    {
+                        Mutations.Add(Mutation);
+                    }
+                }
+            }
+        }
+        if (!Graph)
+        {
+            return MakeErrorResult(TEXT(""), TEXT("mutate_graph failed — provide graph_path to an existing PCG graph asset"));
+        }
         const bool bOk = PCGSubsystem->MutatePCGGraph(Graph, Mutations);
         return bOk
-            ? MakeSuccessResult(TEXT(""), FString::Printf(TEXT("{\"graph_path\":\"%s\",\"mutations\":0}"), *GraphPath))
-            : MakeErrorResult(TEXT(""), TEXT("mutate_graph failed — provide graph_path to an existing PCG graph asset"));
+            ? MakeSuccessResult(
+                  TEXT(""),
+                  FString::Printf(TEXT("{\"graph_path\":\"%s\",\"mutations\":%d}"), *GraphPath, Mutations.Num()))
+            : MakeErrorResult(TEXT(""), TEXT("mutate_graph failed"));
     }
     else if (Action == TEXT("set_metadata"))
     {
@@ -1944,7 +1971,7 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleAudioCommand(const FSt
         Command.Split(TEXT("."), nullptr, &Action, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
     }
 
-    if (Action == TEXT("create_metasound"))
+    if (Action == TEXT("create_metasound") || Action == TEXT("play_metasound"))
     {
         FHephaestusMetaSoundDesc Desc;
         if (Params.IsValid())

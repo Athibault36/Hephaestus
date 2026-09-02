@@ -53,7 +53,8 @@ def maybe_repair_after_grade(
     if grade.met:
         return [], grade
     if not os.environ.get("HEPHAESTUS_NIM_REPAIR", "").strip().lower() in ("1", "true", "yes"):
-        return [], grade
+        if not os.environ.get("HEPHAESTUS_HEURISTIC_REPAIR", "").strip().lower() in ("1", "true", "yes"):
+            return [], grade
     if not grade.missing:
         return [], grade
 

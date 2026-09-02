@@ -9,6 +9,14 @@
 | `HEPHAESTUS_HOME` | `~/.hephaestus` | Session store when no project root is bound |
 | `HEPHAESTUS_NIM_REPAIR` | off | `1` to run a short repair loop when grading fails |
 | `HEPHAESTUS_NIM_PARALLEL_REPAIR` | off | `1` to fetch a NIM parallel hint before repair loop |
+| `HEPHAESTUS_HEURISTIC_REPAIR` | off | `1` to run repair loop without requiring NIM (heuristic follow-up) |
+
+## Operator gate (v0.9)
+
+```powershell
+forge gate <PATH-TO-UE-PROJECT>
+forge gate <PATH-TO-UE-PROJECT> --json
+```
 
 ## Audio / MetaSound commands
 

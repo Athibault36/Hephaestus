@@ -28,3 +28,14 @@ def test_maybe_repair_runs_when_enabled(monkeypatch):
     extra, out = maybe_repair_after_grade(loop, grade, "walk the dog")
     assert out.met is True
     loop.run_until_goal.assert_called_once()
+
+
+def test_maybe_repair_heuristic_without_nim(monkeypatch):
+    monkeypatch.delenv("HEPHAESTUS_NIM_REPAIR", raising=False)
+    monkeypatch.setenv("HEPHAESTUS_HEURISTIC_REPAIR", "1")
+    loop = MagicMock()
+    loop.run_until_goal.return_value = ([], GradeResult(met=True, score=1.0, summary="ok", missing=[]))
+    grade = GradeResult(met=False, score=0.0, summary="x", missing=["walk"])
+    extra, out = maybe_repair_after_grade(loop, grade, "walk the dog")
+    assert out.met is True
+    loop.run_until_goal.assert_called_once()

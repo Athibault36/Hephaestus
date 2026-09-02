@@ -20,7 +20,7 @@
 void UHephaestusAssetSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
-	UE_LOG(LogHephaestusBridge, Log, TEXT("HephaestusAssetSubsystem: Initialized (stub)"));
+	UE_LOG(LogHephaestusBridge, Log, TEXT("HephaestusAssetSubsystem: Initialized"));
 }
 
 void UHephaestusAssetSubsystem::Deinitialize()

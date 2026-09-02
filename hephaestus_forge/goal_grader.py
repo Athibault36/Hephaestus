@@ -208,6 +208,7 @@ def _audio_command_succeeded(memory: Optional[list[dict[str, Any]]]) -> bool:
     audio_cmds = frozenset({
         "audio.play_quartz",
         "audio.create_metasound",
+        "audio.play_metasound",
         "audio.synthesize",
     })
     for step in memory or []:
@@ -235,6 +236,24 @@ def _material_command_succeeded(memory: Optional[list[dict[str, Any]]]) -> bool:
         if step.get("ok") and step.get("kind") in ("create_material", "create_instance"):
             return True
     return False
+
+
+def _displacement_command_succeeded(memory: Optional[list[dict[str, Any]]]) -> bool:
+    for step in memory or []:
+        if not step.get("ok"):
+            continue
+        if step.get("kind") in ("apply_move", "move_actor"):
+            return True
+        if step.get("command") in ("world.apply_move_input", "world.move_actor"):
+            return True
+    return False
+
+
+def _displacement_goal(goal_l: str) -> bool:
+    return any(
+        phrase in goal_l
+        for phrase in ("displacement", "moved forward", "walk forward", "move forward", "walked")
+    )
 
 
 def _material_goal(goal_l: str) -> bool:
@@ -338,6 +357,12 @@ def grade_goal(goal: str, snapshot: Any, memory: Optional[list[dict[str, Any]]] 
 
     if _material_goal(goal_l) and not _material_command_succeeded(memory):
         missing.append("material not created")
+
+    if _displacement_goal(goal_l) and not _displacement_command_succeeded(memory):
+        pawn_state = getattr(snapshot, "pawn_state", None) or {}
+        pawn_speed = float(pawn_state.get("speed") or 0.0) if isinstance(pawn_state, dict) else 0.0
+        if pawn_speed < 10.0:
+            missing.append("displacement not observed")
 
     if creatures and skeletal >= min_skeletal and not _scene_matches_goal_tokens(goal_l, snapshot):
         if not _asset_goal_satisfied(goal, snapshot, memory):
