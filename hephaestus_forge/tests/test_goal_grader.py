@@ -93,6 +93,20 @@ def test_grade_material_requires_create_command():
     assert "material" not in " ".join(g2.missing)
 
 
+def test_grade_displacement_requires_move_or_speed():
+    snap = WorldSnapshot(pawn_state={"speed": 0.0})
+    g = grade_goal("verify displacement after walk forward", snap, memory=[])
+    assert g.met is False
+    assert any("displacement" in m for m in g.missing)
+
+    g2 = grade_goal(
+        "verify displacement after walk forward",
+        snap,
+        memory=[{"kind": "apply_move", "ok": True}],
+    )
+    assert "displacement" not in " ".join(g2.missing)
+
+
 def test_grade_idle_accepts_successful_play_locomotion_memory():
     actor = "/Temp/UEDPIE_0.PersistentLevel.SkeletalMeshActor_0"
     snap = WorldSnapshot(

@@ -13,10 +13,10 @@ from typing import Any, Optional
 
 try:
     from hephaestus_forge.cloud.nim_client import DEFAULT_PLANNER_MODEL, DEFAULT_VISION_MODEL
-    from hephaestus_forge.version import BRIDGE_VERSION, FORGE_VERSION
+    from hephaestus_forge.version import BRIDGE_VERSION, FORGE_VERSION, OPERATOR_MILESTONE
 except ImportError:
     from cloud.nim_client import DEFAULT_PLANNER_MODEL, DEFAULT_VISION_MODEL  # type: ignore
-    from version import BRIDGE_VERSION, FORGE_VERSION  # type: ignore
+    from version import BRIDGE_VERSION, FORGE_VERSION, OPERATOR_MILESTONE  # type: ignore
 
 
 @dataclass
@@ -41,6 +41,7 @@ class PreflightReport:
             "ready": self.ready,
             "forge_version": FORGE_VERSION,
             "bridge_version": BRIDGE_VERSION,
+            "operator_milestone": OPERATOR_MILESTONE,
             "ue_api": self.ue_api,
             "planner_model": self.planner_model,
             "project_root": self.project_root,

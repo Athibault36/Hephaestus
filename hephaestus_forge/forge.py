@@ -3876,6 +3876,49 @@ def doctor(
     raise typer.Exit(0 if report.ok else 1)
 
 
+@app.command()
+def gate(
+    project_path: Annotated[Optional[Path], typer.Argument(help="Adopted UE project root")] = None,
+    api: Annotated[str, typer.Option("--api", help="UE Remote API base URL")] = "http://127.0.0.1:8765",
+    sync: Annotated[bool, typer.Option("--sync", help="Run forge sync-plugin before checks")] = False,
+    offline: Annotated[bool, typer.Option("--offline", help="Skip live PIE command probes")] = False,
+    json_out: Annotated[bool, typer.Option("--json", help="Emit operator gate report as JSON")] = False,
+):
+    """Production operator gate (v0.9): doctor + packaging checks."""
+    try:
+        from operator_gate import run_operator_gate
+    except ImportError:
+        from hephaestus_forge.operator_gate import run_operator_gate
+
+    project_root = project_path
+    if project_root is None:
+        try:
+            from project_registry import ProjectRegistry
+
+            reg = ProjectRegistry()
+            if reg.active_path:
+                project_root = Path(reg.active_path)
+        except Exception:
+            project_root = None
+    report = run_operator_gate(
+        project_root,
+        remote_api=api,
+        sync=sync,
+        live=not offline,
+    )
+    if json_out:
+        import json as _json
+
+        typer.echo(_json.dumps(report.to_dict(), indent=2))
+        raise typer.Exit(0 if report.ok else 1)
+    console.print(f"[bold]Operator gate {report.milestone}[/bold] (forge {report.to_dict()['forge_version']})")
+    for step in report.steps:
+        style = "green" if step.ok else ("yellow" if not step.blocker else "red")
+        label = "OK" if step.ok else ("WARN" if not step.blocker else "FAIL")
+        console.print(f"[{style}]{label}[/] {step.name}: {step.detail}")
+    raise typer.Exit(0 if report.ok else 1)
+
+
 def app_entry() -> None:
     app()
 

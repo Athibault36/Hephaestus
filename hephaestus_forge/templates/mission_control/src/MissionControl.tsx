@@ -28,7 +28,7 @@ export function MissionControl() {
     performance: true,
   });
 
-  const { connect, disconnect, isConnected, preflightReady, preflightHint, bridgeCapabilitiesOk } = useMissionControlStore();
+  const { connect, disconnect, isConnected, preflightReady, preflightHint, bridgeCapabilitiesOk, forgeVersion, operatorMilestone } = useMissionControlStore();
 
   useEffect(() => {
     connect();
@@ -40,6 +40,11 @@ export function MissionControl() {
       <header className="header">
         <div className="header-left">
           <h1>HEPHAESTUS Mission Control</h1>
+          {forgeVersion ? (
+            <span className="forge-version-pill" title="Factory version">
+              forge {forgeVersion} · {operatorMilestone || 'v0.9'}
+            </span>
+          ) : null}
           <ConnectionStatus isConnected={isConnected} />
         </div>
         <div className="header-center">

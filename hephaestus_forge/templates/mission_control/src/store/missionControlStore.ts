@@ -103,6 +103,8 @@ interface MissionControlState {
   plannerAvailable: boolean;
   preflightHint: string;
   bridgeCapabilitiesOk: boolean;
+  forgeVersion: string;
+  operatorMilestone: string;
   assetMatches: string[];
   connectThoughtStream: () => void;
   exportSession: () => Promise<void>;
@@ -259,6 +261,8 @@ export const useMissionControlStore = create<MissionControlState>((set, get) => 
   plannerAvailable: false,
   preflightHint: '',
   bridgeCapabilitiesOk: true,
+  forgeVersion: '',
+  operatorMilestone: '',
 
   assetMatches: [],
   connectThoughtStream: () => {
@@ -316,6 +320,8 @@ export const useMissionControlStore = create<MissionControlState>((set, get) => 
         plannerAvailable: !!data.llm_available,
         preflightHint: String(bridgeTemplate?.detail || data.bridge_capabilities || ''),
         bridgeCapabilitiesOk: data.bridge_capabilities_ok !== false,
+        forgeVersion: String(data.forge_version || ''),
+        operatorMilestone: String(data.operator_milestone || 'v0.9'),
       });
     } catch {
       set({ preflightReady: false, plannerAvailable: false });

@@ -497,6 +497,15 @@
   color: #c9d1d9;
 }
 
+.forge-version-pill {
+  font-size: 0.75rem;
+  color: #8b9cb3;
+  border: 1px solid var(--line, #2a3544);
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  margin-left: 0.5rem;
+}
+
 .outliner-context-menu {
   position: fixed;
   z-index: 1000;
