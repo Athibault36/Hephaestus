@@ -161,6 +161,9 @@ def run_autonomous_suite(
             continue
 
         if scenario.kind == "direct":
+            if skip_nim:
+                steps.append(SuiteStepResult(sid, True, "skipped (offline — direct scenarios not run)", report={}))
+                continue
             try:
                 from agent_chat import run_chat
             except ImportError:

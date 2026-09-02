@@ -251,6 +251,7 @@ def run_chat(
     )
     session.memory = report.memory
     session.last_grade = report.grade
+    session.last_autonomous_report = report.to_dict()
 
     if report.ok:
         reply = f"Done. {report.grade.get('summary', '')}"

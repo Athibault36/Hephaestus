@@ -29,3 +29,11 @@ def test_session_export_bundle(tmp_path):
     assert bundle["operator_milestone"] == "v1.0"
     assert bundle["thoughts"][0]["content"] == "test"
     assert "command_transcript" in bundle
+
+
+def test_session_export_includes_autonomous_report(tmp_path):
+    store = SessionStore(project_root=tmp_path)
+    s = store.reset(goal="walk")
+    s.last_autonomous_report = {"ok": True, "goal": "walk"}
+    bundle = s.export_bundle()
+    assert bundle["autonomous_report"]["ok"] is True

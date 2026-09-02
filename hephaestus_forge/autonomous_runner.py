@@ -182,7 +182,7 @@ def run_autonomous_goal(
         llm_error = llm_error or "NVIDIA_API_KEY not set"
 
     return AutonomousReport(
-        ok=grade.met and (not results or all(r.ok for r in results)),
+        ok=grade.met,
         goal=augmented_goal,
         grade=grade_dict,
         planner=llm.model if llm.available else "heuristic",

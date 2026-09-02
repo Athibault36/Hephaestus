@@ -29,6 +29,7 @@ class AgentSession:
     messages: list[ChatMessage] = field(default_factory=list)
     memory: list[dict[str, Any]] = field(default_factory=list)
     last_grade: dict[str, Any] = field(default_factory=dict)
+    last_autonomous_report: dict[str, Any] = field(default_factory=dict)
     project_path: str = ""
 
     def add_user(self, text: str) -> None:
@@ -50,6 +51,7 @@ class AgentSession:
             "messages": [asdict(m) for m in self.messages[-80:]],
             "memory": self.memory[-40:],
             "last_grade": self.last_grade,
+            "last_autonomous_report": self.last_autonomous_report,
             "project_path": self.project_path,
         }
 
@@ -79,6 +81,8 @@ class AgentSession:
         }
         if autonomous_report:
             bundle["autonomous_report"] = autonomous_report
+        elif self.last_autonomous_report:
+            bundle["autonomous_report"] = self.last_autonomous_report
         return bundle
 
 
@@ -135,6 +139,7 @@ class SessionStore:
                 messages=msgs,
                 memory=raw.get("memory", []),
                 last_grade=raw.get("last_grade", {}),
+                last_autonomous_report=raw.get("last_autonomous_report", {}),
                 project_path=raw.get("project_path", ""),
             )
         except (json.JSONDecodeError, OSError, TypeError):

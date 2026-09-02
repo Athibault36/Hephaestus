@@ -36,6 +36,14 @@ def test_suite_scenarios_cover_a_through_g():
     assert any(i.startswith("G") for i in ids)
 
 
+def test_autonomous_suite_offline_skips_direct(tmp_path):
+    report = run_autonomous_suite(tmp_path, live=False, skip_nim=True, scenario_filter=["E3"])
+    assert len(report.steps) == 1
+    assert report.steps[0].scenario_id == "E3"
+    assert report.steps[0].ok is True
+    assert "skipped" in report.steps[0].detail.lower()
+
+
 def test_autonomous_suite_offline_infra(tmp_path):
     forge = tmp_path / ".hephaestus_forge"
     forge.mkdir()
