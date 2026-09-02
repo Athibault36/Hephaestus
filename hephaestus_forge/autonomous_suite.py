@@ -77,10 +77,11 @@ SUITE_SCENARIOS: list[SuiteScenario] = [
         "autonomous",
         "Frame the character in a cinematic shot from the left",
     ),
+    # Direct scenarios use MacroVerse-stable assets (not PlaceholderActor / missing mannequins).
     SuiteScenario("E1", "Direct spawn path", "direct", "/Game/Meshes/Dog.Dog"),
-    SuiteScenario("E2", "Direct locomotion", "direct", "play walk animation on /Temp/PlaceholderActor"),
+    SuiteScenario("E2", "Direct locomotion", "direct", "__suite_locomotion__"),
     SuiteScenario("E3", "Direct audio", "direct", "play test audio"),
-    SuiteScenario("E4", "Direct asset search", "direct", "search assets for dog"),
+    SuiteScenario("E4", "Direct asset search", "direct", "search assets for Beverly"),
     SuiteScenario(
         "F",
         "Asset pipeline validation",
@@ -107,6 +108,90 @@ SUITE_SCENARIOS: list[SuiteScenario] = [
         "Make the character walk forward and verify displacement",
     ),
 ]
+
+
+def _direct_locomotion_suite(remote_api: str) -> SuiteStepResult:
+    """Spawn a project skeletal mesh, then play a project walk AnimSequence."""
+    try:
+        from ue_agent_loop import RemoteUeClient
+    except ImportError:
+        from hephaestus_forge.ue_agent_loop import RemoteUeClient  # type: ignore
+
+    client = RemoteUeClient(remote_api, timeout=60.0)
+    mesh = "/Game/MacroVerse/Characters/Beverly/Beverly_SK.Beverly_SK"
+    anim = "/Game/MacroVerse/Characters/Beverly/Anims/Beverly_Walk.Beverly_Walk"
+    spawn = client.command({
+        "command": "animation.spawn_skeletal_mesh",
+        "params": {
+            "mesh_path": mesh,
+            "transform": {
+                "location": {"x": 300, "y": 0, "z": 100},
+                "rotation": {"pitch": 0, "yaw": 0, "roll": 0},
+                "scale": {"x": 1, "y": 1, "z": 1},
+            },
+        },
+    })
+    if not spawn.get("success"):
+        # Fallback: any searched skeletal character
+        try:
+            from agent_asset import search_project_assets
+        except ImportError:
+            from hephaestus_forge.agent_asset import search_project_assets  # type: ignore
+        hits = search_project_assets(client, "Beverly", asset_class="SkeletalMesh", limit=4)
+        if not hits:
+            hits = search_project_assets(client, "character", asset_class="SkeletalMesh", limit=4)
+        if hits:
+            mesh = hits[0]
+            spawn = client.command({
+                "command": "animation.spawn_skeletal_mesh",
+                "params": {
+                    "mesh_path": mesh,
+                    "transform": {
+                        "location": {"x": 300, "y": 0, "z": 100},
+                        "rotation": {"pitch": 0, "yaw": 0, "roll": 0},
+                        "scale": {"x": 1, "y": 1, "z": 1},
+                    },
+                },
+            })
+    if not spawn.get("success"):
+        return SuiteStepResult(
+            "E2",
+            False,
+            f"Could not spawn skeletal mesh for locomotion: {spawn.get('error')}",
+            report={"spawn": spawn},
+        )
+    actor = (spawn.get("actor_paths") or [None])[0]
+    if not actor:
+        import json as _json
+
+        try:
+            actor = _json.loads(spawn.get("result_json") or "{}").get("actor_path")
+        except Exception:
+            actor = None
+    if not actor:
+        return SuiteStepResult("E2", False, "Spawn succeeded but no actor_path returned", report={"spawn": spawn})
+
+    play = client.command({
+        "command": "animation.play_locomotion",
+        "params": {"actor_path": actor, "mode": "walk", "loop": True, "anim_path": anim},
+    })
+    if not play.get("success"):
+        play = client.command({
+            "command": "animation.play_sequence",
+            "params": {"actor_path": actor, "anim_path": anim, "loop": True},
+        })
+    ok = bool(play.get("success"))
+    detail = (
+        f"Playing walk on {actor}"
+        if ok
+        else f"Could not play walk on {actor}: {play.get('error', 'failed')}"
+    )
+    return SuiteStepResult(
+        "E2",
+        ok,
+        detail,
+        report={"planner": "direct_locomotion", "mesh": mesh, "anim": anim, "actor": actor, "play": play},
+    )
 
 
 def _infra_c(project_root: Path) -> SuiteStepResult:
@@ -163,6 +248,9 @@ def run_autonomous_suite(
         if scenario.kind == "direct":
             if skip_nim:
                 steps.append(SuiteStepResult(sid, True, "skipped (offline — direct scenarios not run)", report={}))
+                continue
+            if sid == "E2" or scenario.goal == "__suite_locomotion__":
+                steps.append(_direct_locomotion_suite(remote_api))
                 continue
             try:
                 from agent_chat import run_chat

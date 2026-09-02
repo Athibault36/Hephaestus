@@ -1720,11 +1720,25 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleAnimationCommand(const
             Params->TryGetStringField(TEXT("locomotion"), Mode);
         }
         Params->TryGetBoolField(TEXT("loop"), bLoop);
+        FString AnimOverride;
+        Params->TryGetStringField(TEXT("anim_path"), AnimOverride);
+        if (AnimOverride.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("animation"), AnimOverride);
+        }
         if (ActorPath.IsEmpty())
         {
             return MakeErrorResult(TEXT(""), TEXT("actor_path required"));
         }
-        const bool bOk = AnimationSubsystem->PlayLocomotionFallback(ActorPath, Mode, bLoop);
+        bool bOk = false;
+        if (!AnimOverride.IsEmpty())
+        {
+            bOk = AnimationSubsystem->PlayAnimSequence(ActorPath, AnimOverride, bLoop);
+        }
+        if (!bOk)
+        {
+            bOk = AnimationSubsystem->PlayLocomotionFallback(ActorPath, Mode, bLoop);
+        }
         return bOk
             ? MakeSuccessResult(
                   TEXT(""),

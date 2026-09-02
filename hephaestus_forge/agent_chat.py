@@ -41,10 +41,29 @@ def _try_direct_locomotion(message: str, client: RemoteUeClient) -> Optional[dic
         return None
     mode = match.group(1).lower()
     actor_path = match.group(2)
+    params: dict[str, Any] = {"actor_path": actor_path, "mode": mode, "loop": True}
+    # Prefer a project walk/idle/run AnimSequence when mannequin fallbacks are missing.
+    anim_hits = search_project_assets(client, mode, asset_class="AnimSequence", limit=8)
+    if not anim_hits:
+        anim_hits = [
+            p for p in search_project_assets(client, mode, limit=12)
+            if "anim" in p.lower() or p.lower().endswith(f"_{mode}.{mode}") or f"_{mode}." in p.lower()
+        ]
+    if anim_hits:
+        params["anim_path"] = anim_hits[0]
     result = client.command({
         "command": "animation.play_locomotion",
-        "params": {"actor_path": actor_path, "mode": mode, "loop": True},
+        "params": params,
     })
+    if not result.get("success") and params.get("anim_path"):
+        result = client.command({
+            "command": "animation.play_sequence",
+            "params": {
+                "actor_path": actor_path,
+                "anim_path": params["anim_path"],
+                "loop": True,
+            },
+        })
     ok = bool(result.get("success"))
     reply = (
         f"Playing {mode} on {actor_path}."
@@ -64,7 +83,11 @@ def _try_direct_locomotion(message: str, client: RemoteUeClient) -> Optional[dic
         "llm_available": False,
         "llm_error": "",
         "asset_matches": [],
-        "asset_meta": {"direct_locomotion": mode, "actor_path": actor_path},
+        "asset_meta": {
+            "direct_locomotion": mode,
+            "actor_path": actor_path,
+            "anim_path": params.get("anim_path", ""),
+        },
         "thoughts": [],
         "steps": [],
     }

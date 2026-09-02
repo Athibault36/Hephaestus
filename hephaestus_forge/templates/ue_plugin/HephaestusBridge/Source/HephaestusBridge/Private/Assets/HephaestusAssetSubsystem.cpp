@@ -9,6 +9,7 @@
 #include "UObject/SoftObjectPath.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/Blueprint.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/AnimMontage.h"
 #include "Dom/JsonObject.h"
@@ -219,6 +220,8 @@ bool UHephaestusAssetSubsystem::SearchAssetsJson(
 	{
 		Filter.ClassPaths.Add(UStaticMesh::StaticClass()->GetClassPathName());
 		Filter.ClassPaths.Add(USkeletalMesh::StaticClass()->GetClassPathName());
+		Filter.ClassPaths.Add(UAnimSequence::StaticClass()->GetClassPathName());
+		Filter.ClassPaths.Add(UBlueprint::StaticClass()->GetClassPathName());
 	}
 
 	TArray<FAssetData> Assets;
