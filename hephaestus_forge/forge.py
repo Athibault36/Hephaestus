@@ -3749,7 +3749,10 @@ async def _wait_for_deployment(ip: str, budget_mgr: BudgetManager, timeout: int 
 @app.command("version")
 def version_cmd():
     """Print HephaestusForge and bridge template versions."""
-    from version import BRIDGE_VERSION, FORGE_VERSION
+    try:
+        from version import BRIDGE_VERSION, FORGE_VERSION
+    except ImportError:
+        from hephaestus_forge.version import BRIDGE_VERSION, FORGE_VERSION
 
     console.print(f"HephaestusForge [cyan]{FORGE_VERSION}[/cyan]")
     console.print(f"HephaestusBridge template [cyan]{BRIDGE_VERSION}[/cyan]")
@@ -3762,12 +3765,18 @@ def health(
     json_out: Annotated[bool, typer.Option("--json", help="Emit preflight report as JSON")] = False,
 ):
     """Preflight check: UE PIE API, NIM key, planner, adopted project."""
-    from preflight_health import run_preflight
+    try:
+        from preflight_health import run_preflight
+    except ImportError:
+        from hephaestus_forge.preflight_health import run_preflight
 
     project_root = project_path
     if project_root is None:
         try:
-            from project_registry import ProjectRegistry
+            try:
+                from project_registry import ProjectRegistry
+            except ImportError:
+                from hephaestus_forge.project_registry import ProjectRegistry
 
             reg = ProjectRegistry()
             if reg.active_path:
@@ -3797,7 +3806,10 @@ def e2e_check_cmd(
     json_out: Annotated[bool, typer.Option("--json", help="Emit E2E report as JSON")] = False,
 ):
     """Production operator E2E checklist (template sync + optional live PIE probes)."""
-    from e2e_check import run_e2e_check
+    try:
+        from e2e_check import run_e2e_check
+    except ImportError:
+        from hephaestus_forge.e2e_check import run_e2e_check
 
     project_root = (project_path or Path.cwd()).resolve()
     report = run_e2e_check(project_root, remote_api=api, sync=sync, live=not offline)
@@ -3970,8 +3982,17 @@ def gate(
 
 
 def app_entry() -> None:
+    """Console-script entry: ensure package dir is importable for flat modules."""
+    import hephaestus_forge  # noqa: F401 — boots sys.path for sibling modules
+
+    _pkg = str(Path(__file__).resolve().parent)
+    if _pkg not in sys.path:
+        sys.path.insert(0, _pkg)
     app()
 
 
 if __name__ == "__main__":
+    _pkg = str(Path(__file__).resolve().parent)
+    if _pkg not in sys.path:
+        sys.path.insert(0, _pkg)
     app()

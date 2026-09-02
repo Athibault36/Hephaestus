@@ -60,7 +60,8 @@ def run_doctor(
     checklist = rebuild_checklist(root)
     e2e_report = run_e2e_check(root or Path.cwd(), remote_api=remote_api, sync=sync, live=live and root is not None)
     preflight = run_preflight(remote_api, root)
-    ok = e2e_report.ok and preflight.ready
+    # Offline doctor: packaging/template only. Live doctor also requires PIE ready.
+    ok = e2e_report.ok if not live else (e2e_report.ok and preflight.ready)
     return DoctorReport(
         ok=ok,
         checklist=checklist,

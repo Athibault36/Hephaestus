@@ -29,3 +29,9 @@ forge = "hephaestus_forge.forge:app_entry"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["hephaestus_forge*"]
+
+[tool.setuptools.package-data]
+hephaestus_forge = [
+  "templates/**/*",
+  "forge_config/**/*",
+]

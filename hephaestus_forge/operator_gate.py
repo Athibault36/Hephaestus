@@ -108,8 +108,10 @@ def run_operator_gate(
             )
         )
     blockers_failed = any(s.blocker and not s.ok for s in steps)
+    # Offline gate ignores doctor.ok when live PIE was not requested.
+    gate_ok = (not blockers_failed) if not live else (doctor_report.ok and not blockers_failed)
     return OperatorGateReport(
-        ok=doctor_report.ok and not blockers_failed,
+        ok=gate_ok,
         steps=steps,
         doctor=doctor_report.to_dict(),
     )

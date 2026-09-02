@@ -7,10 +7,25 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from agent_asset import augment_goal_with_assets, spawn_asset_in_view
-from goal_grader import GradeResult
-from ue_agent_loop import ObserveActLoop, RemoteUeClient, StepResult
-from ue_vision_planner import VisionLLMPlanner
+try:
+    from ue_agent_loop import ObserveActLoop, RemoteUeClient, StepResult
+except ImportError:
+    from hephaestus_forge.ue_agent_loop import ObserveActLoop, RemoteUeClient, StepResult  # type: ignore
+
+try:
+    from agent_asset import augment_goal_with_assets, spawn_asset_in_view
+except ImportError:
+    from hephaestus_forge.agent_asset import augment_goal_with_assets, spawn_asset_in_view  # type: ignore
+
+try:
+    from goal_grader import GradeResult
+except ImportError:
+    from hephaestus_forge.goal_grader import GradeResult  # type: ignore
+
+try:
+    from ue_vision_planner import VisionLLMPlanner
+except ImportError:
+    from hephaestus_forge.ue_vision_planner import VisionLLMPlanner  # type: ignore
 
 ThoughtFn = Callable[[str, str, dict[str, Any]], None]
 AvatarFn = Callable[[str, Optional[int], Optional[str]], None]

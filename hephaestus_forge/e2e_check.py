@@ -105,7 +105,9 @@ def run_e2e_check(
 
     preflight = run_preflight(remote_api, root)
     for check in preflight.checks:
-        if check.name in ("ue_pie", "bridge_capabilities", "bridge_template"):
+        if check.name == "bridge_template":
+            steps.append(E2EStep(f"preflight_{check.name}", check.ok, check.detail))
+        elif live and check.name in ("ue_pie", "bridge_capabilities"):
             steps.append(E2EStep(f"preflight_{check.name}", check.ok, check.detail))
 
     if live and preflight.ready:

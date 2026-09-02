@@ -7,7 +7,10 @@ import json
 import re
 from typing import Any
 
-from ue_agent_loop import RemoteUeClient
+try:
+    from ue_agent_loop import RemoteUeClient
+except ImportError:
+    from hephaestus_forge.ue_agent_loop import RemoteUeClient  # type: ignore
 
 _STOP = frozenset({
     "the", "and", "with", "for", "from", "into", "front", "camera", "scene",

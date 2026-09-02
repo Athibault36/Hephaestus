@@ -21,7 +21,10 @@ import urllib.error
 import urllib.request
 from typing import Any, Optional
 
-from ue_agent_loop import AgentAction, WorldSnapshot, decide_action
+try:
+    from ue_agent_loop import AgentAction, WorldSnapshot, decide_action
+except ImportError:
+    from hephaestus_forge.ue_agent_loop import AgentAction, WorldSnapshot, decide_action  # type: ignore
 
 try:
     from hephaestus_forge.cloud.nim_client import (
