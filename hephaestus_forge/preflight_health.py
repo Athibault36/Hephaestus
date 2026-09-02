@@ -81,6 +81,8 @@ def _probe_ue(remote_api: str, timeout: float = 2.0) -> HealthCheck:
                         detail + f" — rebuild required (factory template v{BRIDGE_VERSION})",
                         blocker=True,
                     )
+            else:
+                detail += f" — no plugin_version in health (rebuild HephaestusBridge v{BRIDGE_VERSION})"
             detail += ")"
             return HealthCheck("ue_pie", True, detail, blocker=True)
     except Exception as exc:
@@ -109,7 +111,10 @@ def _probe_nim_key() -> HealthCheck:
 
 def _probe_planner() -> HealthCheck:
     try:
-        from ue_vision_planner import VisionLLMPlanner
+        try:
+            from ue_vision_planner import VisionLLMPlanner
+        except ImportError:
+            from hephaestus_forge.ue_vision_planner import VisionLLMPlanner  # type: ignore
 
         llm = VisionLLMPlanner()
         if llm.available:
@@ -187,8 +192,15 @@ def _post_command(remote_api: str, payload: dict, timeout: float = 3.0) -> dict:
         method="POST",
         headers={"Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode("utf-8") or "{}")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8") or "{}")
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        try:
+            return json.loads(body or "{}")
+        except json.JSONDecodeError:
+            return {"success": False, "error": body or str(exc)}
 
 
 def _probe_bridge_capabilities(remote_api: str) -> HealthCheck:
