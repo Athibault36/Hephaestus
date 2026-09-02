@@ -208,11 +208,11 @@ AActor* UHephaestusAnimationSubsystem::SpawnSkeletalMeshActor(
 	else if (!ResolvedPath.Contains(TEXT(".")))
 	{
 		const FString WithSuffix = ResolvedPath + TEXT(".") + FPaths::GetCleanFilename(ResolvedPath);
-		if (USkeletalMesh* Mesh = LoadObject<USkeletalMesh>(nullptr, *WithSuffix))
+		if (USkeletalMesh* FallbackMesh = LoadObject<USkeletalMesh>(nullptr, *WithSuffix))
 		{
 			if (USkeletalMeshComponent* Comp = Actor->GetSkeletalMeshComponent())
 			{
-				Comp->SetSkeletalMesh(Mesh);
+				Comp->SetSkeletalMesh(FallbackMesh);
 				FString AnimBP = AnimBlueprintPath;
 				if (AnimBP.IsEmpty())
 				{

@@ -921,7 +921,7 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleAssetCommand(const FSt
                     FString Val;
                     if (Pair.Value->TryGetString(Val))
                     {
-                        Desc.Parameters.Add(Pair.Key, Val);
+                        Desc.Parameters.Add(FString(Pair.Key), Val);
                     }
                 }
             }
@@ -1035,7 +1035,7 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleAssetCommand(const FSt
                     FString Val;
                     if (Pair.Value->TryGetString(Val))
                     {
-                        ParameterMap.Add(Pair.Key, Val);
+                        ParameterMap.Add(FString(Pair.Key), Val);
                     }
                 }
             }
@@ -1353,7 +1353,7 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandlePCGCommand(const FStri
                     FString Val;
                     if (Pair.Value->TryGetString(Val))
                     {
-                        Meta.Add(Pair.Key, Val);
+                        Meta.Add(FString(Pair.Key), Val);
                     }
                 }
             }

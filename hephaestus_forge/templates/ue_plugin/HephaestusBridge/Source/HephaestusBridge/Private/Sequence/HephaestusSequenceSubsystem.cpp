@@ -6,6 +6,7 @@
 #include "HephaestusBridge.h"
 
 #include "Engine/World.h"
+#include "Engine/Level.h"
 #include "Engine/GameInstance.h"
 #include "LevelSequence.h"
 #include "LevelSequenceActor.h"
@@ -77,7 +78,8 @@ bool UHephaestusSequenceSubsystem::PlayLevelSequence(const FString& SequencePath
 	FMovieSceneSequencePlaybackSettings Settings;
 	Settings.bAutoPlay = false;
 	Settings.LoopCount.Value = bLoop ? -1 : 0;
-	Player->Initialize(Sequence, World, Settings);
+	ULevel* Level = World->GetCurrentLevel();
+	Player->Initialize(Sequence, Level, Settings);
 	Player->Play();
 	ActiveSequenceActor = SeqActor;
 	return true;

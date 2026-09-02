@@ -659,7 +659,7 @@ bool UHephaestusWorldSubsystem::AnimateViewTo(
 			}
 			Job->Elapsed += 0.016f;
 			const float Alpha = FMath::Clamp(Job->Elapsed / Job->Duration, 0.f, 1.f);
-			const float T = Job->bEaseInOut ? FMath::InterpEaseInOut(0.f, 1.f, Alpha) : Alpha;
+			const float T = Job->bEaseInOut ? FMath::InterpEaseInOut(0.f, 1.f, Alpha, 2.f) : Alpha;
 			const FVector Loc = FMath::Lerp(Job->StartLocation, Job->EndLocation, T);
 			const FRotator Rot = FMath::Lerp(Job->StartRotation, Job->EndRotation, T);
 			SetView(Loc, Rot);

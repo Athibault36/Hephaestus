@@ -41,7 +41,7 @@ bool FHephaestusFrameEncoder::EncodeFrame(const TArray64<uint8>& InData, int32 W
 	{
 		return false;
 	}
-	if (!Wrapper->SetRaw(InData.GetData(), InData.Num(), ERGBFormat::BGRA, 8))
+	if (!Wrapper->SetRaw(InData.GetData(), InData.Num(), Width, Height, ERGBFormat::BGRA, 8))
 	{
 		return false;
 	}
