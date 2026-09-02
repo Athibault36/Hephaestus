@@ -207,6 +207,10 @@ def _probe_bridge_capabilities(remote_api: str) -> HealthCheck:
         }),
         ("audio.create_metasound", {"command": "audio.create_metasound", "params": {"name": "HephaestusProbe"}}),
         ("asset.reimport", {"command": "asset.reimport", "params": {"asset_path": "/Game/__HephaestusProbe"}}),
+        ("pcg.query_spatial", {
+            "command": "pcg.query_spatial",
+            "params": {"min": {"x": -1, "y": -1, "z": 0}, "max": {"x": 1, "y": 1, "z": 1}},
+        }),
     ]
     missing: list[str] = []
     try:

@@ -31,6 +31,8 @@ def test_probe_bridge_capabilities_ok():
             payload = {"success": False, "error": "create_metasound failed — provide source_path to an existing MetaSound asset"}
         elif cmd == "asset.reimport":
             payload = {"success": False, "error": "reimport: asset_path not found"}
+        elif cmd == "pcg.query_spatial":
+            payload = {"success": True, "result_json": "{\"points\":1}"}
         else:
             payload = {"success": True, "result_json": "{}"}
         resp = MagicMock()

@@ -27,6 +27,7 @@ from remote_command_schema import (  # noqa: E402
     validate_audio_create_metasound,
     validate_audio_synthesize,
     validate_blueprint_add_function,
+    validate_blueprint_diff,
     validate_blueprint_set_property,
     validate_pcg_mutate_graph,
     validate_pcg_set_metadata,
@@ -202,6 +203,10 @@ def test_validate_blueprint_mutations():
     assert validate_blueprint_set_property({
         "command": "blueprint.set_property",
         "params": {"blueprint_path": "/Game/BP_Test.BP_Test", "property_name": "Speed", "value": "100"},
+    }) == []
+    assert validate_blueprint_diff({
+        "command": "blueprint.diff",
+        "params": {"blueprint_path_a": "/Game/A.A", "blueprint_path_b": "/Game/B.B"},
     }) == []
 
 
