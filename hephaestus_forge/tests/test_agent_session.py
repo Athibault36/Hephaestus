@@ -25,7 +25,7 @@ def test_session_export_bundle(tmp_path):
     s = store.reset(goal="frame shot", mode="cinematic")
     bundle = s.export_bundle(thoughts=[{"kind": "plan", "content": "test"}])
     assert bundle["session"]["goal"] == "frame shot"
-    assert bundle["schema_version"] == 3
-    assert bundle["operator_milestone"] == "v0.9"
+    assert bundle["schema_version"] == 4
+    assert bundle["operator_milestone"] == "v1.0"
     assert bundle["thoughts"][0]["content"] == "test"
     assert "command_transcript" in bundle

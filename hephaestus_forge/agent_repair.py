@@ -45,16 +45,20 @@ def maybe_repair_after_grade(
     *,
     max_extra_steps: int = 6,
     on_thought: Optional[ThoughtFn] = None,
+    force: bool = False,
 ) -> tuple[list[Any], GradeResult]:
     """
     When HEPHAESTUS_NIM_REPAIR=1 and grade failed with actionable missing items,
     run a short follow-up loop with an augmented goal.
+
+    ``force=True`` (autonomous v1 path) runs repair even when env flags are unset.
     """
     if grade.met:
         return [], grade
-    if not os.environ.get("HEPHAESTUS_NIM_REPAIR", "").strip().lower() in ("1", "true", "yes"):
-        if not os.environ.get("HEPHAESTUS_HEURISTIC_REPAIR", "").strip().lower() in ("1", "true", "yes"):
-            return [], grade
+    if not force:
+        if not os.environ.get("HEPHAESTUS_NIM_REPAIR", "").strip().lower() in ("1", "true", "yes"):
+            if not os.environ.get("HEPHAESTUS_HEURISTIC_REPAIR", "").strip().lower() in ("1", "true", "yes"):
+                return [], grade
     if not grade.missing:
         return [], grade
 

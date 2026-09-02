@@ -8,11 +8,9 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from agent_asset import augment_goal_with_assets, search_project_assets, spawn_asset_in_view
+from agent_asset import search_project_assets, spawn_asset_in_view
 from agent_session import AgentSession, SessionStore
-from goal_grader import grade_goal
-from ue_agent_loop import ObserveActLoop, RemoteUeClient
-from ue_vision_planner import VisionLLMPlanner
+from ue_agent_loop import RemoteUeClient
 
 AvatarFn = Callable[[str, Optional[int], Optional[str]], None]
 ThoughtFn = Callable[[str, str, dict[str, Any]], None]
@@ -234,100 +232,63 @@ def run_chat(
     elif session.mode == "gameplay":
         goal = f"[gameplay mode] {goal}"
 
-    goal, asset_matches, asset_meta = augment_goal_with_assets(client, goal)
-    if len(asset_matches) == 1 and "direct_spawn" not in asset_meta:
-        try:
-            spawn_asset_in_view(client, asset_matches[0])
-            asset_meta["prefetch_spawn"] = asset_matches[0]
-        except Exception:
-            pass
-    thoughts: list[dict[str, Any]] = []
-
-    def _thought(kind: str, content: str, metadata: dict[str, Any]) -> None:
-        thoughts.append({"kind": kind, "content": content, "metadata": metadata})
-        if on_thought:
-            on_thought(kind, content, metadata)
-
-    llm = VisionLLMPlanner(goal=goal, asset_hints=asset_matches)
-    use_llm = llm.available
-    loop = ObserveActLoop(
-        client=client,
-        on_thought=_thought,
-        on_avatar=on_avatar or (lambda *a, **k: None),
-        planner=(llm.decide if use_llm else None),
-        goal=goal,
-        asset_hints=asset_matches,
-    )
-    loop.memory = list(session.memory)
-
-    _thought("plan", f"Starting: {goal[:200]}", {"mode": session.mode})
-    step_budget = max(max_steps, 16) if asset_matches else max_steps
-    results, grade = loop.run_until_goal(max_steps=step_budget)
     try:
-        from agent_repair import maybe_repair_after_grade
-
-        extra_results, grade = maybe_repair_after_grade(loop, grade, goal, on_thought=_thought)
-        if extra_results:
-            results.extend(extra_results)
+        from autonomous_runner import run_autonomous_goal
     except ImportError:
-        pass
-    session.memory = loop.memory
-    session.last_grade = {
-        "met": grade.met,
-        "score": grade.score,
-        "summary": grade.summary,
-        "missing": grade.missing,
-    }
+        from hephaestus_forge.autonomous_runner import run_autonomous_goal  # type: ignore
 
-    if grade.met:
-        reply = f"Done. {grade.summary}"
-    elif grade.missing and "needs concrete criteria or asset path" in grade.missing:
-        if asset_matches:
+    report = run_autonomous_goal(
+        goal,
+        project_root=project_root,
+        remote_api=remote_api,
+        max_steps=max_steps,
+        repair=True,
+        mode="auto",
+        require_nim=True,
+        session_memory=list(session.memory),
+        on_thought=on_thought,
+        on_avatar=on_avatar,
+    )
+    session.memory = report.memory
+    session.last_grade = report.grade
+
+    if report.ok:
+        reply = f"Done. {report.grade.get('summary', '')}"
+    elif report.grade.get("missing") and "needs concrete criteria or asset path" in report.grade.get("missing", []):
+        if report.asset_matches:
             reply = (
-                f"I found assets in your project that might match, but need a pick or clearer ask:\n"
-                + "\n".join(f"- {p}" for p in asset_matches[:8])
-                + f"\n\n{grade.summary}"
+                "I found assets in your project that might match, but need a pick or clearer ask:\n"
+                + "\n".join(f"- {p}" for p in report.asset_matches[:8])
+                + f"\n\n{report.grade.get('summary', '')}"
             )
         else:
             reply = (
                 f"I can't deliver '{session.goal or message}' yet — no matching /Game asset found. "
-                f"{grade.summary}"
+                f"{report.grade.get('summary', '')}"
             )
-    elif not use_llm:
-        reply = (
-            f"I used the offline heuristic (DeepSeek unavailable — set NVIDIA_API_KEY). "
-            f"{grade.summary}"
-        )
-    elif llm.last_error:
-        reply = f"Hit an LLM error: {llm.last_error}. {grade.summary}"
+    elif not report.llm_available:
+        reply = f"NIM planner required: {report.llm_error}. {report.grade.get('summary', '')}"
+    elif report.llm_error:
+        reply = f"Hit an LLM error: {report.llm_error}. {report.grade.get('summary', '')}"
     else:
-        reply = f"Still working toward your goal. {grade.summary}"
+        reply = f"Still working toward your goal. {report.grade.get('summary', '')}"
 
     session.add_assistant(reply)
     store.save(session)
 
     return {
-        "ok": grade.met and all(r.ok for r in results) if results else False,
+        "ok": report.ok,
         "reply": reply,
-        "goal": goal,
+        "goal": report.goal,
         "grade": session.last_grade,
-        "planner": llm.model if use_llm else "heuristic",
-        "llm_available": use_llm,
-        "llm_error": llm.last_error or ("" if use_llm else "NVIDIA_API_KEY not set"),
-        "vision_caption": llm.last_vision_caption or "",
-        "asset_matches": asset_matches,
-        "asset_meta": asset_meta,
+        "planner": report.planner,
+        "llm_available": report.llm_available,
+        "llm_error": report.llm_error,
+        "vision_caption": "",
+        "asset_matches": report.asset_matches,
+        "asset_meta": report.asset_meta,
         "session": session.to_dict(),
-        "thoughts": thoughts[-40:],
-        "steps": [
-            {
-                "step": r.step,
-                "kind": r.action.kind,
-                "reason": r.action.reason,
-                "ok": r.ok,
-                "lights": r.reobservation.lights,
-                "meshes": r.reobservation.meshes,
-            }
-            for r in results
-        ],
+        "thoughts": report.thoughts,
+        "steps": report.steps,
+        "autonomous_report": report.to_dict(),
     }

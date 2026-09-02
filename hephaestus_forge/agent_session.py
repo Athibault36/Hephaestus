@@ -58,15 +58,16 @@ class AgentSession:
         *,
         thoughts: Optional[list[dict[str, Any]]] = None,
         grade_history: Optional[list[dict[str, Any]]] = None,
+        autonomous_report: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
-        """Full session export for observability / replay (schema v2)."""
+        """Full session export for observability / replay (schema v4)."""
         from version import BRIDGE_VERSION, FORGE_VERSION, OPERATOR_MILESTONE
 
         grades = list(grade_history or [])
         if self.last_grade and self.last_grade not in grades:
             grades.append(self.last_grade)
-        return {
-            "schema_version": 3,
+        bundle: dict[str, Any] = {
+            "schema_version": 4,
             "operator_milestone": OPERATOR_MILESTONE,
             "forge_version": FORGE_VERSION,
             "bridge_version": BRIDGE_VERSION,
@@ -76,6 +77,9 @@ class AgentSession:
             "grade_history": grades,
             "command_transcript": self.memory,
         }
+        if autonomous_report:
+            bundle["autonomous_report"] = autonomous_report
+        return bundle
 
 
 def _sessions_dir(project_root: Optional[Path] = None) -> Path:

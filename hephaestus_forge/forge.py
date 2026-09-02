@@ -3876,6 +3876,76 @@ def doctor(
     raise typer.Exit(0 if report.ok else 1)
 
 
+@app.command("run")
+def autonomous_run(
+    project_path: Annotated[Path, typer.Argument(help="Adopted UE project root")],
+    goal: Annotated[str, typer.Argument(help="Natural-language goal")],
+    api: Annotated[str, typer.Option("--api", help="UE Remote API base URL")] = "http://127.0.0.1:8765",
+    max_steps: Annotated[int, typer.Option("--max-steps", help="Max observe-act steps")] = 24,
+    repair: Annotated[bool, typer.Option("--repair/--no-repair", help="Run repair loop on grade failure")] = True,
+    json_out: Annotated[bool, typer.Option("--json", help="Emit autonomous report as JSON")] = False,
+    mode: Annotated[str, typer.Option("--mode", help="auto | cinematic | gameplay")] = "auto",
+):
+    """Run a single autonomous goal with NIM planner (operator v1)."""
+    try:
+        from autonomous_runner import run_autonomous_goal
+    except ImportError:
+        from hephaestus_forge.autonomous_runner import run_autonomous_goal
+
+    report = run_autonomous_goal(
+        goal,
+        project_root=project_path,
+        remote_api=api,
+        max_steps=max_steps,
+        repair=repair,
+        mode=mode if mode in ("cinematic", "gameplay", "auto") else "auto",
+        require_nim=True,
+    )
+    if json_out:
+        import json as _json
+
+        typer.echo(_json.dumps(report.to_dict(), indent=2))
+        raise typer.Exit(0 if report.ok else 1)
+    console.print(f"[bold]Autonomous[/bold] planner={report.planner} ok={report.ok}")
+    console.print(report.grade.get("summary", ""))
+    if report.llm_error:
+        console.print(f"[yellow]llm_error: {report.llm_error}[/yellow]")
+    raise typer.Exit(0 if report.ok else 1)
+
+
+@app.command("autonomous-suite")
+def autonomous_suite_cmd(
+    project_path: Annotated[Path, typer.Argument(help="Adopted UE project root")],
+    api: Annotated[str, typer.Option("--api", help="UE Remote API base URL")] = "http://127.0.0.1:8765",
+    scenario: Annotated[Optional[list[str]], typer.Option("--scenario", help="Run subset (A, B, E1, ...)")] = None,
+    offline: Annotated[bool, typer.Option("--offline", help="Skip live NIM autonomous goals")] = False,
+    json_out: Annotated[bool, typer.Option("--json", help="Emit suite report as JSON")] = False,
+):
+    """Run operator A–G autonomous acceptance suite (v1)."""
+    try:
+        from autonomous_suite import run_autonomous_suite
+    except ImportError:
+        from hephaestus_forge.autonomous_suite import run_autonomous_suite
+
+    report = run_autonomous_suite(
+        project_path,
+        remote_api=api,
+        scenario_filter=scenario,
+        live=not offline,
+        skip_nim=offline,
+    )
+    if json_out:
+        import json as _json
+
+        typer.echo(_json.dumps(report.to_dict(), indent=2))
+        raise typer.Exit(0 if report.ok else 1)
+    console.print(f"[bold]Autonomous suite {report.milestone}[/bold] ok={report.ok}")
+    for step in report.steps:
+        style = "green" if step.ok else "red"
+        console.print(f"[{style}]{'OK' if step.ok else 'FAIL'}[/] {step.scenario_id}: {step.detail[:120]}")
+    raise typer.Exit(0 if report.ok else 1)
+
+
 @app.command()
 def gate(
     project_path: Annotated[Optional[Path], typer.Argument(help="Adopted UE project root")] = None,

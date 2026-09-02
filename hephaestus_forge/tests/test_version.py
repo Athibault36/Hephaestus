@@ -10,4 +10,4 @@ from version import BRIDGE_VERSION, FORGE_VERSION, OPERATOR_MILESTONE  # noqa: E
 def test_version_constants():
     assert FORGE_VERSION == BRIDGE_VERSION
     assert FORGE_VERSION.count(".") == 2
-    assert OPERATOR_MILESTONE == "v0.9"
+    assert OPERATOR_MILESTONE == "v1.0"

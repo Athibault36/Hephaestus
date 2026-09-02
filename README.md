@@ -25,6 +25,7 @@ forge observe C:\path\to\YourGame
 - [docs/OPERATOR_V0_2.md](docs/OPERATOR_V0_2.md) — acceptance scenarios (v0.2)
 - [docs/OPERATOR_V0_3.md](docs/OPERATOR_V0_3.md) — chat shortcuts + grading (v0.3)
 - [docs/OPERATOR_V0_9.md](docs/OPERATOR_V0_9.md) — **production gate (v0.9)**
+- [docs/OPERATOR_V1.md](docs/OPERATOR_V1.md) — **autonomous operator (v1.0)**
 - [docs/LIVE_E2E.md](docs/LIVE_E2E.md) — live PIE checklist + self-hosted CI
 
 ## Remote API (PIE)
