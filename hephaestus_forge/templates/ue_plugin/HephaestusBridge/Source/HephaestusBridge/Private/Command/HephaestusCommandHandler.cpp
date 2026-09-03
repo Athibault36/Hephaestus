@@ -1071,6 +1071,15 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleAssetCommand(const FSt
                     *DestinationPath,
                     *DestinationName));
         }
+        // ImportAsset refuses during PIE; surface that clearly to remote clients.
+        if (GIsPlayInEditorWorld)
+        {
+            return MakeErrorResult(
+                TEXT(""),
+                FString::Printf(
+                    TEXT("import: file validated (%s) but AssetTools import is disabled during PIE — stop Play and retry"),
+                    *FilePath));
+        }
         return MakeErrorResult(
             TEXT(""),
             TEXT("import: AssetTools import produced no assets (check FBX path and editor permissions)"));

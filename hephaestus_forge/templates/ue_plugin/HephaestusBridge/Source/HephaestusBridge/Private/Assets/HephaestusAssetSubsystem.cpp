@@ -21,6 +21,7 @@
 #if WITH_EDITOR
 #include "AssetImportTask.h"
 #include "AssetToolsModule.h"
+#include "AutomatedAssetImportData.h"
 #include "IAssetTools.h"
 #endif
 
@@ -82,37 +83,67 @@ UObject* UHephaestusAssetSubsystem::ImportAsset(const FString& FilePath, const F
 	}
 
 #if WITH_EDITOR
-	UAssetImportTask* ImportTask = NewObject<UAssetImportTask>();
-	ImportTask->Filename = FilePath;
-	ImportTask->DestinationPath = DestinationPath;
-	ImportTask->bAutomated = true;
-	ImportTask->bSave = true;
-	ImportTask->bReplaceExisting = true;
-	ImportTask->bReplaceExistingSettings = true;
+	// AssetTools FBX import from the remote-API game-thread callback is unsafe during PIE:
+	// it can reset the HTTP listener / stall the editor. Validate only; import offline or
+	// via editor Python (asset.import_fbx when not playing).
+	const bool bInPIE = GIsPlayInEditorWorld;
+	if (bInPIE)
+	{
+		UE_LOG(
+			LogHephaestusBridge,
+			Warning,
+			TEXT("ImportAsset: refused during PIE (file ok: %s -> %s). Stop Play and retry, or use editor import."),
+			*FilePath,
+			*DestinationPath);
+		return nullptr;
+	}
 
-	TArray<UAssetImportTask*> Tasks;
-	Tasks.Add(ImportTask);
+	UAutomatedAssetImportData* ImportData = NewObject<UAutomatedAssetImportData>();
+	ImportData->Filenames.Add(FilePath);
+	ImportData->DestinationPath = DestinationPath;
+	ImportData->bReplaceExisting = true;
+	ImportData->bSkipReadOnly = true;
+	ImportData->GroupName = TEXT("HephaestusImport");
 
 	FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools");
-	AssetToolsModule.Get().ImportAssetTasks(Tasks);
+	TArray<UObject*> Imported = AssetToolsModule.Get().ImportAssetsAutomated(ImportData);
 
-	if (ImportTask->ImportedObjectPaths.Num() > 0)
+	if (Imported.Num() == 0)
 	{
-		const FString ImportedPath = ImportTask->ImportedObjectPaths[0];
-		UObject* Imported = FSoftObjectPath(ImportedPath).TryLoad();
+		UAssetImportTask* ImportTask = NewObject<UAssetImportTask>();
+		ImportTask->Filename = FilePath;
+		ImportTask->DestinationPath = DestinationPath;
+		ImportTask->bAutomated = true;
+		ImportTask->bSave = true;
+		ImportTask->bReplaceExisting = true;
+		ImportTask->bReplaceExistingSettings = true;
+		TArray<UAssetImportTask*> Tasks;
+		Tasks.Add(ImportTask);
+		AssetToolsModule.Get().ImportAssetTasks(Tasks);
+		for (const FString& Path : ImportTask->ImportedObjectPaths)
+		{
+			if (UObject* Obj = FSoftObjectPath(Path).TryLoad())
+			{
+				Imported.Add(Obj);
+			}
+		}
+	}
+
+	if (Imported.Num() > 0)
+	{
+		UObject* Primary = Imported[0];
 		UE_LOG(
 			LogHephaestusBridge,
 			Log,
-			TEXT("ImportAsset: imported %s -> %s (options scale=%.3f materials=%d textures=%d)"),
+			TEXT("ImportAsset: imported %s -> %s (count=%d, scale=%.3f)"),
 			*FilePath,
-			*ImportedPath,
-			Options.UniformScale,
-			Options.bImportMaterials ? 1 : 0,
-			Options.bImportTextures ? 1 : 0);
-		return Imported;
+			*Primary->GetPathName(),
+			Imported.Num(),
+			Options.UniformScale);
+		return Primary;
 	}
 
-	UE_LOG(LogHephaestusBridge, Warning, TEXT("ImportAsset: AssetTools returned no objects for %s"), *FilePath);
+	UE_LOG(LogHephaestusBridge, Warning, TEXT("ImportAsset: no assets produced for %s"), *FilePath);
 	return nullptr;
 #else
 	UE_LOG(
