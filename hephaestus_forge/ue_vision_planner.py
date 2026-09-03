@@ -2,7 +2,7 @@
 """
 LLM planner for the UE observe→act loop (NVIDIA NIM OpenAI-compatible API).
 
-Default model: deepseek-ai/deepseek-v4-pro-0813 @ https://integrate.api.nvidia.com/v1
+Default model: nvidia/nemotron-3-ultra-550b-a55b @ https://integrate.api.nvidia.com/v1
 Auth: NVIDIA_API_KEY or HEPHAESTUS_LLM_API_KEY
 
 Planner uses text over frame census + step memory by default. When

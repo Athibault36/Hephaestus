@@ -84,7 +84,7 @@ class SystemScanResult(BaseModel):
 
 class ModelConfig(BaseModel):
     planner: dict = Field(default_factory=lambda: {
-        "model_id": "deepseek-ai/deepseek-v4-pro-0813",
+        "model_id": "nvidia/nemotron-3-ultra-550b-a55b",
         "base_url": "https://integrate.api.nvidia.com/v1",
     })
     nemotron: dict = Field(default_factory=lambda: {
@@ -1276,7 +1276,7 @@ def deploy(
     no_agent: Annotated[bool, typer.Option("--no-agent", help="Launch UE without agent runtime")] = False,
     # NIM API options
     use_nim: Annotated[bool, typer.Option("--use-nim", help="Use NVIDIA NIM API instead of local llama-server")] = False,
-    nim_model: Annotated[str, typer.Option("--nim-model", help="NIM model to use")] = "deepseek-ai/deepseek-v4-pro-0813",
+    nim_model: Annotated[str, typer.Option("--nim-model", help="NIM model to use")] = "nvidia/nemotron-3-ultra-550b-a55b",
 ):
     """
     Deploy and launch UE5.8 with the Hephaestus agent.
@@ -1895,7 +1895,7 @@ _MISSION_CONTROL_HTML = r"""<!DOCTYPE html>
         <button id="btnExportSession">Export session</button>
       </div>
     </div>
-    <p class="hint">DeepSeek V4 Pro operates UE until your goal is met (or reports what's blocking). Set HEPHAESTUS_PLANNER_VISION=1 for viewport captions. Requires NVIDIA_API_KEY on the forge process.</p>
+    <p class="hint">Nemotron-3 Ultra operates UE until your goal is met (or reports what's blocking). Set HEPHAESTUS_PLANNER_VISION=1 for viewport captions. Requires NVIDIA_API_KEY on the forge process.</p>
   </section>
   <section style="grid-column: 1 / -1">
     <h2>Command log</h2>
@@ -2925,7 +2925,7 @@ def agent_loop_cmd(
         "Seed a lit test scene with a few cubes visible in frame, then idle."
     ),
     llm_model: Annotated[Optional[str], typer.Option("--llm-model", help="Chat model id")] = (
-        "deepseek-ai/deepseek-v4-pro-0813"
+        "nvidia/nemotron-3-ultra-550b-a55b"
     ),
     llm_url: Annotated[Optional[str], typer.Option("--llm-url", help="OpenAI-compatible base URL")] = (
         "https://integrate.api.nvidia.com/v1"
@@ -2934,7 +2934,7 @@ def agent_loop_cmd(
     """
     Run an observe -> decide -> act -> recapture loop against a live PIE session.
 
-    Default planner LLM is DeepSeek V4 Pro (deepseek-ai/deepseek-v4-pro-0813) via NVIDIA NIM.
+    Default planner LLM is Nemotron-3 Ultra (nvidia/nemotron-3-ultra-550b-a55b) via NVIDIA NIM.
     Requires NVIDIA_API_KEY. --planner auto uses NIM when a key is available, else heuristic.
     """
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -3655,7 +3655,7 @@ async def _run_nim_session(task: str, budget_mgr: BudgetManager, cfg: dict):
 
     if task:
         response = await nim_client.chat_completion(
-            model="deepseek-ai/deepseek-v4-pro-0813",
+            model="nvidia/nemotron-3-ultra-550b-a55b",
             messages=[{"role": "user", "content": task}],
             max_tokens=512,
         )

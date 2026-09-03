@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from cloud.nim_client import (  # noqa: E402
+    DEEPSEEK_V4_PRO_MODEL,
     DEFAULT_CHAT_MODEL,
     DEFAULT_FAST_MODEL,
     DEFAULT_LEGACY_ULTRA_MODEL,
@@ -30,20 +31,23 @@ def test_canonical_ids_passthrough():
     assert NIMClient.resolve_model(DEFAULT_PLANNER_MODEL) == DEFAULT_PLANNER_MODEL
     assert NIMClient.resolve_model(DEFAULT_LEGACY_ULTRA_MODEL) == DEFAULT_LEGACY_ULTRA_MODEL
     assert NIMClient.resolve_model(DEFAULT_FAST_MODEL) == DEFAULT_FAST_MODEL
+    assert NIMClient.resolve_model(DEEPSEEK_V4_PRO_MODEL) == DEEPSEEK_V4_PRO_MODEL
 
 
 def test_default_chat_model_is_planner():
     assert DEFAULT_CHAT_MODEL == DEFAULT_PLANNER_MODEL
+    assert "nemotron-3-ultra" in DEFAULT_PLANNER_MODEL
+    assert DEFAULT_PLANNER_MODEL == DEFAULT_LEGACY_ULTRA_MODEL
 
 
 def test_deepseek_aliases():
-    assert NIMClient.resolve_model("deepseek-v4-pro") == DEFAULT_PLANNER_MODEL
-    assert NIMClient.resolve_model("deepseek-ai/deepseek-v4-pro") == DEFAULT_PLANNER_MODEL
+    assert NIMClient.resolve_model("deepseek-v4-pro") == DEEPSEEK_V4_PRO_MODEL
+    assert NIMClient.resolve_model("deepseek-ai/deepseek-v4-pro") == DEEPSEEK_V4_PRO_MODEL
 
 
 def test_chat_template_kwargs_by_family():
-    assert chat_template_kwargs_for_model(DEFAULT_PLANNER_MODEL) == {"thinking": False}
-    assert chat_template_kwargs_for_model(DEFAULT_LEGACY_ULTRA_MODEL)["enable_thinking"] is False
+    assert chat_template_kwargs_for_model(DEEPSEEK_V4_PRO_MODEL) == {"thinking": False}
+    assert chat_template_kwargs_for_model(DEFAULT_PLANNER_MODEL)["enable_thinking"] is False
     assert chat_template_kwargs_for_model(DEFAULT_FAST_MODEL)["enable_thinking"] is False
 
 

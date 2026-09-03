@@ -2,7 +2,7 @@
 
 `.~cursorconfig.json` documents Hephaestus NIM models for this repo. **Cursor does not auto-import models from this file** into the model picker — add them once in Cursor Settings.
 
-## Add DeepSeek V4 Pro (one-time)
+## Add Nemotron-3 Ultra (one-time)
 
 1. Open **Cursor Settings** (`Ctrl+Shift+J`)
 2. Go to **Models**
@@ -10,7 +10,7 @@
 4. Enable **Override OpenAI Base URL** → `https://integrate.api.nvidia.com/v1`
 5. Click **+ Add model** and type exactly:
    ```
-   deepseek-ai/deepseek-v4-pro-0813
+   nvidia/nemotron-3-ultra-550b-a55b
    ```
 6. Enable the checkbox next to the new model
 7. Select it in the chat/agent model dropdown
@@ -19,6 +19,12 @@ Optional fast coder (same base URL + key):
 
 ```
 nvidia/nemotron-3.5-lightning-30b-a3b
+```
+
+Optional DeepSeek planner:
+
+```
+deepseek-ai/deepseek-v4-pro-0813
 ```
 
 ## Notes
@@ -36,7 +42,7 @@ python -c "
 from openai import OpenAI
 import os
 c = OpenAI(base_url='https://integrate.api.nvidia.com/v1', api_key=os.environ['NVIDIA_API_KEY'])
-r = c.chat.completions.create(model='deepseek-ai/deepseek-v4-pro-0813', messages=[{'role':'user','content':'ping'}], max_tokens=16, extra_body={'chat_template_kwargs':{'thinking':False}})
+r = c.chat.completions.create(model='nvidia/nemotron-3-ultra-550b-a55b', messages=[{'role':'user','content':'ping'}], max_tokens=16, extra_body={'chat_template_kwargs':{'enable_thinking':False,'force_nonempty_content':True}})
 print(r.choices[0].message.content)
 "
 ```

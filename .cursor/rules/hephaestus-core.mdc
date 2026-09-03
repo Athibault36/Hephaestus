@@ -11,9 +11,9 @@ alwaysApply: true
 - Desktop: `forge desktop` — pywebview shell + `~/.hephaestus/projects.json` registry.
 - Spawn/edit in **camera frustum** via `world.get_view`; never assume world origin is visible.
 - NIM models (use in parallel when asked):
-  - Planner (default) `deepseek-ai/deepseek-v4-pro-0813`
-  - Ultra (legacy) `nvidia/nemotron-3-ultra-550b-a55b`
+  - Planner / Ultra (default) `nvidia/nemotron-3-ultra-550b-a55b`
   - Lightning `nvidia/nemotron-3.5-lightning-30b-a3b`
+  - Optional DeepSeek `deepseek-ai/deepseek-v4-pro-0813`
   - Never call dead ids `nvidia/nemotron-3-ultra` or `nvidia/nemotron-3-8b` without alias remap.
 - Docs: use **Context7** MCP for library/UE API truth.
 - Live UE: use **user-ue58-python** MCP when available to verify PIE.

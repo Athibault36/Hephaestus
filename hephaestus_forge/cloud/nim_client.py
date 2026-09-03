@@ -19,12 +19,14 @@ except ImportError:
 console = Console()
 
 # Canonical NIM model ids (verified against integrate.api.nvidia.com)
-DEFAULT_PLANNER_MODEL = "deepseek-ai/deepseek-v4-pro-0813"
-DEFAULT_LEGACY_ULTRA_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
+# Default planner / chat = Nemotron-3 Ultra; DeepSeek remains available by id/alias.
+DEFAULT_PLANNER_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
+DEFAULT_LEGACY_ULTRA_MODEL = DEFAULT_PLANNER_MODEL
+DEEPSEEK_V4_PRO_MODEL = "deepseek-ai/deepseek-v4-pro-0813"
 DEFAULT_FAST_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
 # Multimodal caption model for viewport → text (when HEPHAESTUS_PLANNER_VISION=1)
 DEFAULT_VISION_MODEL = "microsoft/phi-3.5-vision-instruct"
-# Primary chat/planner default (fast + strong coding on NIM)
+# Primary chat/planner default
 DEFAULT_CHAT_MODEL = DEFAULT_PLANNER_MODEL
 
 # Old / shorthand ids → working NIM ids
@@ -35,9 +37,9 @@ MODEL_ALIASES = {
     "nemotron-3-ultra": DEFAULT_LEGACY_ULTRA_MODEL,
     "nemotron-3-8b": DEFAULT_FAST_MODEL,
     "nemotron-3-ultra-550b-a55b": DEFAULT_LEGACY_ULTRA_MODEL,
-    "deepseek-v4-pro": DEFAULT_PLANNER_MODEL,
-    "deepseek-ai/deepseek-v4-pro": DEFAULT_PLANNER_MODEL,
-    "deepseek-v4": DEFAULT_PLANNER_MODEL,
+    "deepseek-v4-pro": DEEPSEEK_V4_PRO_MODEL,
+    "deepseek-ai/deepseek-v4-pro": DEEPSEEK_V4_PRO_MODEL,
+    "deepseek-v4": DEEPSEEK_V4_PRO_MODEL,
 }
 
 
@@ -70,17 +72,17 @@ class NIMClient:
     MODELS = {
         DEFAULT_PLANNER_MODEL: NIMModel(
             name=DEFAULT_PLANNER_MODEL,
-            input_cost_per_1m=0.12,
-            output_cost_per_1m=0.48,
-            max_tokens=16384,
-            context_window=1000000,
-        ),
-        DEFAULT_LEGACY_ULTRA_MODEL: NIMModel(
-            name=DEFAULT_LEGACY_ULTRA_MODEL,
             input_cost_per_1m=0.15,
             output_cost_per_1m=0.60,
             max_tokens=4096,
             context_window=128000,
+        ),
+        DEEPSEEK_V4_PRO_MODEL: NIMModel(
+            name=DEEPSEEK_V4_PRO_MODEL,
+            input_cost_per_1m=0.12,
+            output_cost_per_1m=0.48,
+            max_tokens=16384,
+            context_window=1000000,
         ),
         DEFAULT_FAST_MODEL: NIMModel(
             name=DEFAULT_FAST_MODEL,
