@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from hephaestus_forge.autonomous_suite import (
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from autonomous_suite import (  # noqa: E402
     resolve_suite_character_assets,
     resolve_suite_static_mesh,
     wait_for_pie,
@@ -27,7 +32,7 @@ def test_resolve_suite_character_assets_prefers_skeletal_and_walk():
             ]
         return []
 
-    with patch("hephaestus_forge.autonomous_suite._search", side_effect=fake_search):
+    with patch("autonomous_suite._search", side_effect=fake_search):
         mesh, anim = resolve_suite_character_assets(client)
 
     assert "Beverly_SK" in mesh
@@ -47,7 +52,7 @@ def test_resolve_suite_static_mesh_skips_materials():
             return ["/Engine/BasicShapes/Cube.Cube"]
         return []
 
-    with patch("hephaestus_forge.autonomous_suite._search", side_effect=fake_search):
+    with patch("autonomous_suite._search", side_effect=fake_search):
         mesh = resolve_suite_static_mesh(client)
 
     assert mesh.endswith("Cube.Cube")
@@ -57,7 +62,7 @@ def test_resolve_suite_static_mesh_skips_materials():
 def test_wait_for_pie_returns_true_when_health_ok():
     client = MagicMock()
     client.health.return_value = {"ok": True}
-    with patch("hephaestus_forge.autonomous_suite._client", return_value=(client, lambda e: False)):
+    with patch("autonomous_suite._client", return_value=(client, lambda e: False)):
         assert wait_for_pie("http://127.0.0.1:8765", timeout_s=1.0, poll_s=0.01) is True
 
 
@@ -68,7 +73,7 @@ def test_wait_for_pie_retries_connection_errors_then_ok():
         {"ok": True},
     ]
     is_conn = lambda e: "10061" in str(e)
-    with patch("hephaestus_forge.autonomous_suite._client", return_value=(client, is_conn)):
-        with patch("hephaestus_forge.autonomous_suite.time.sleep"):
+    with patch("autonomous_suite._client", return_value=(client, is_conn)):
+        with patch("autonomous_suite.time.sleep"):
             assert wait_for_pie("http://127.0.0.1:8765", timeout_s=5.0, poll_s=0.01) is True
     assert client.health.call_count == 2
