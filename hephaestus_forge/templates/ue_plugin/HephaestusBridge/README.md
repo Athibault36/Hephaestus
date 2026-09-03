@@ -20,14 +20,18 @@ Rebuild **Development Editor** after sync. Version in `/v1/health` comes from `H
 
 ## Supported command families (v1.0)
 
-- **world.*** — list/spawn/edit actors, move input, pawn state
+- **world.*** — list/spawn/edit actors, move input, pawn state, **camera**
+  - `world.get_view` — PIE camera location / rotation / forward
+  - `world.set_view` — position view (`mode`: `free` default = dedicated CameraActor + SetViewTarget; `pawn` = teleport player). Optional `look_at_actor`, `distance`, `yaw_offset`, `height` for orbit framing.
 - **vision.capture_frame** — PNG to `Saved/Hephaestus/`
 - **animation.*** — locomotion, montage
 - **asset.*** — create_material, create_instance, search (import/reimport deferred)
-- **sequence.*** — create_shot, play
+- **sequence.*** — create_shot (animated free camera; same orbit params), play
 - **audio.*** — play_quartz; create_metasound needs existing `source_path`
 - **blueprint.compile** — compile only; mutation verbs stubbed
 - **pcg.*** — spatial query
+
+After C++ camera changes: `forge sync-plugin <target>`, rebuild HephaestusBridge, **restart editor**, Play (PIE).
 
 ## Stubbed (post-1.0)
 
