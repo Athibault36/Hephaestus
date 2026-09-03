@@ -23,6 +23,7 @@ try:
         DEFAULT_CHAT_MODEL,
         DEFAULT_FAST_MODEL,
         DEFAULT_PLANNER_MODEL,
+        DEFAULT_LEGACY_ULTRA_MODEL,
         chat_template_kwargs_for_model,
     )
 except ImportError:  # script / package layout
@@ -30,12 +31,13 @@ except ImportError:  # script / package layout
         DEFAULT_CHAT_MODEL,
         DEFAULT_FAST_MODEL,
         DEFAULT_PLANNER_MODEL,
+        DEFAULT_LEGACY_ULTRA_MODEL,
         chat_template_kwargs_for_model,
     )
 
 DEFAULT_NIM_URL = "https://integrate.api.nvidia.com/v1"
 
-ULTRA_SYSTEM = """You are HEPHAESTUS Planner (DeepSeek V4 Pro on NIM).
+ULTRA_SYSTEM = """You are HEPHAESTUS Planner (Nemotron-3 Ultra on NIM).
 Produce a concise architecture / plan for the coding task.
 Output markdown with: Goal, Approach, Files to touch, Risks, Acceptance checks.
 Do not dump full file bodies unless a tiny stub is essential."""
@@ -72,7 +74,7 @@ class ParallelNemotronCoder:
         self,
         api_key: Optional[str] = None,
         base_url: str = DEFAULT_NIM_URL,
-        ultra_model: str = DEFAULT_PLANNER_MODEL,
+        ultra_model: str = DEFAULT_LEGACY_ULTRA_MODEL,
         lightning_model: str = DEFAULT_FAST_MODEL,
         timeout: float = 180.0,
     ):
