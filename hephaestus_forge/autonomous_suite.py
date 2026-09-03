@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -69,10 +70,8 @@ SUITE_SCENARIOS: list[SuiteScenario] = [
         "A",
         "Spawn creature and walk",
         "autonomous",
-        # Explicit MacroVerse paths — avoid open-ended "dog" search that returns AnimSequences.
-        "Spawn skeletal mesh /Game/MacroVerse/Characters/Beverly/Beverly_SK.Beverly_SK "
-        "in front of the camera, then play AnimSequence "
-        "/Game/MacroVerse/Characters/Beverly/Anims/Beverly_Walk.Beverly_Walk on that actor",
+        # Goal filled at runtime from project asset search (__suite_spawn_walk__).
+        "__suite_spawn_walk__",
     ),
     SuiteScenario(
         "B",
@@ -80,11 +79,11 @@ SUITE_SCENARIOS: list[SuiteScenario] = [
         "autonomous",
         "Use world.set_view with mode free to frame the character in a cinematic shot from the left",
     ),
-    # Direct scenarios use MacroVerse-stable assets (not PlaceholderActor / missing mannequins).
-    SuiteScenario("E1", "Direct spawn path", "direct", "/Game/Meshes/Dog.Dog"),
+    # Direct scenarios resolve paths from the target project at runtime.
+    SuiteScenario("E1", "Direct spawn path", "direct", "__suite_spawn_mesh__"),
     SuiteScenario("E2", "Direct locomotion", "direct", "__suite_locomotion__"),
     SuiteScenario("E3", "Direct audio", "direct", "play test audio"),
-    SuiteScenario("E4", "Direct asset search", "direct", "search assets for Beverly"),
+    SuiteScenario("E4", "Direct asset search", "direct", "__suite_search_character__"),
     SuiteScenario(
         "F",
         "Asset pipeline validation",
@@ -116,16 +115,116 @@ SUITE_SCENARIOS: list[SuiteScenario] = [
 ]
 
 
+def _client(remote_api: str, timeout: float = 60.0):
+    try:
+        from ue_agent_loop import RemoteUeClient, _is_connection_error
+    except ImportError:
+        from hephaestus_forge.ue_agent_loop import RemoteUeClient, _is_connection_error  # type: ignore
+    return RemoteUeClient(remote_api, timeout=timeout), _is_connection_error
+
+
+def _search(client: Any, query: str, asset_class: str = "", limit: int = 8) -> list[str]:
+    try:
+        from agent_asset import search_project_assets
+    except ImportError:
+        from hephaestus_forge.agent_asset import search_project_assets  # type: ignore
+    return search_project_assets(client, query, asset_class=asset_class, limit=limit)
+
+
+def _prefer_sk_paths(paths: list[str]) -> list[str]:
+    ranked = sorted(
+        paths,
+        key=lambda p: (
+            0 if ("_SK." in p or "/SK_" in p or p.endswith(".SkeletalMesh")) else 1,
+            0 if "Anim" not in p else 1,
+            len(p),
+        ),
+    )
+    return [p for p in ranked if ".AnimSequence" not in p and "/Anims/" not in p]
+
+
+def resolve_suite_character_assets(client: Any) -> tuple[str, str]:
+    """Pick a skeletal mesh + walk anim from the live project (any UE target)."""
+    mesh_hits: list[str] = []
+    for query in ("Beverly", "character", "SK_", "mannequin", "body"):
+        mesh_hits.extend(_search(client, query, asset_class="SkeletalMesh", limit=8))
+        if mesh_hits:
+            break
+    mesh_hits = _prefer_sk_paths(list(dict.fromkeys(mesh_hits)))
+    mesh = mesh_hits[0] if mesh_hits else ""
+
+    anim_hits: list[str] = []
+    tokens = []
+    if mesh:
+        # Prefer walk anims near the chosen character folder.
+        parts = [p for p in mesh.split("/") if p and p not in ("Game",)]
+        if parts:
+            tokens.append(parts[1] if len(parts) > 1 else parts[0])
+    tokens.extend(["Walk", "walk", "locomotion"])
+    for token in tokens:
+        anim_hits.extend(_search(client, token, asset_class="AnimSequence", limit=8))
+        walkish = [p for p in anim_hits if "walk" in p.lower()]
+        if walkish:
+            anim_hits = walkish
+            break
+    anim_hits = list(dict.fromkeys(anim_hits))
+    anim = anim_hits[0] if anim_hits else ""
+    return mesh, anim
+
+
+def resolve_suite_static_mesh(client: Any) -> str:
+    for query in ("Dog", "Cube", "BasicShape", "SM_", "mesh"):
+        hits = _search(client, query, asset_class="StaticMesh", limit=8)
+        hits = [p for p in hits if ".Material" not in p]
+        if hits:
+            return hits[0]
+    return ""
+
+
+def wait_for_pie(remote_api: str, *, timeout_s: float = 45.0, poll_s: float = 2.0) -> bool:
+    """Block until /v1/health is ok, or timeout."""
+    client, _is_conn = _client(remote_api, timeout=5.0)
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        try:
+            health = client.health()
+            if health.get("ok"):
+                return True
+        except Exception as exc:
+            if not _is_conn(exc):
+                return False
+        time.sleep(poll_s)
+    return False
+
+
+def _spawn_walk_goal(remote_api: str) -> str:
+    client, _ = _client(remote_api)
+    mesh, anim = resolve_suite_character_assets(client)
+    if not mesh:
+        return (
+            "Spawn a skeletal mesh character in front of the camera and play a walk AnimSequence "
+            "(no project skeletal mesh found via asset.search)"
+        )
+    if anim:
+        return (
+            f"Spawn skeletal mesh {mesh} in front of the camera, then play AnimSequence "
+            f"{anim} on that actor"
+        )
+    return f"Spawn skeletal mesh {mesh} in front of the camera and play a walk animation on that actor"
+
+
 def _direct_locomotion_suite(remote_api: str, scenario_id: str = "E2") -> SuiteStepResult:
     """Spawn a project skeletal mesh, then play a project walk AnimSequence."""
-    try:
-        from ue_agent_loop import RemoteUeClient
-    except ImportError:
-        from hephaestus_forge.ue_agent_loop import RemoteUeClient  # type: ignore
+    client, _ = _client(remote_api, timeout=60.0)
+    mesh, anim = resolve_suite_character_assets(client)
+    if not mesh:
+        return SuiteStepResult(
+            scenario_id,
+            False,
+            "No SkeletalMesh found via asset.search for locomotion suite",
+            report={},
+        )
 
-    client = RemoteUeClient(remote_api, timeout=60.0)
-    mesh = "/Game/MacroVerse/Characters/Beverly/Beverly_SK.Beverly_SK"
-    anim = "/Game/MacroVerse/Characters/Beverly/Anims/Beverly_Walk.Beverly_Walk"
     spawn = client.command({
         "command": "animation.spawn_skeletal_mesh",
         "params": {
@@ -138,33 +237,11 @@ def _direct_locomotion_suite(remote_api: str, scenario_id: str = "E2") -> SuiteS
         },
     })
     if not spawn.get("success"):
-        # Fallback: any searched skeletal character
-        try:
-            from agent_asset import search_project_assets
-        except ImportError:
-            from hephaestus_forge.agent_asset import search_project_assets  # type: ignore
-        hits = search_project_assets(client, "Beverly", asset_class="SkeletalMesh", limit=4)
-        if not hits:
-            hits = search_project_assets(client, "character", asset_class="SkeletalMesh", limit=4)
-        if hits:
-            mesh = hits[0]
-            spawn = client.command({
-                "command": "animation.spawn_skeletal_mesh",
-                "params": {
-                    "mesh_path": mesh,
-                    "transform": {
-                        "location": {"x": 300, "y": 0, "z": 100},
-                        "rotation": {"pitch": 0, "yaw": 0, "roll": 0},
-                        "scale": {"x": 1, "y": 1, "z": 1},
-                    },
-                },
-            })
-    if not spawn.get("success"):
         return SuiteStepResult(
             scenario_id,
             False,
             f"Could not spawn skeletal mesh for locomotion: {spawn.get('error')}",
-            report={"spawn": spawn},
+            report={"spawn": spawn, "mesh": mesh, "anim": anim},
         )
     actor = (spawn.get("actor_paths") or [None])[0]
     if not actor:
@@ -179,15 +256,17 @@ def _direct_locomotion_suite(remote_api: str, scenario_id: str = "E2") -> SuiteS
             scenario_id, False, "Spawn succeeded but no actor_path returned", report={"spawn": spawn}
         )
 
-    play = client.command({
-        "command": "animation.play_locomotion",
-        "params": {"actor_path": actor, "mode": "walk", "loop": True, "anim_path": anim},
-    })
-    if not play.get("success"):
+    play: dict[str, Any] = {"success": False, "error": "no walk anim"}
+    if anim:
         play = client.command({
-            "command": "animation.play_sequence",
-            "params": {"actor_path": actor, "anim_path": anim, "loop": True},
+            "command": "animation.play_locomotion",
+            "params": {"actor_path": actor, "mode": "walk", "loop": True, "anim_path": anim},
         })
+        if not play.get("success"):
+            play = client.command({
+                "command": "animation.play_sequence",
+                "params": {"actor_path": actor, "anim_path": anim, "loop": True},
+            })
     ok = bool(play.get("success"))
     detail = (
         f"Playing walk on {actor}"
@@ -200,6 +279,34 @@ def _direct_locomotion_suite(remote_api: str, scenario_id: str = "E2") -> SuiteS
         detail,
         report={"planner": "direct_locomotion", "mesh": mesh, "anim": anim, "actor": actor, "play": play},
     )
+
+
+def _direct_spawn_mesh_suite(remote_api: str, scenario_id: str = "E1") -> SuiteStepResult:
+    client, _ = _client(remote_api)
+    mesh = resolve_suite_static_mesh(client)
+    if not mesh:
+        return SuiteStepResult(scenario_id, False, "No StaticMesh found via asset.search", report={})
+    try:
+        from agent_chat import run_chat
+    except ImportError:
+        from hephaestus_forge.agent_chat import run_chat  # type: ignore
+    out = run_chat(mesh, project_root=None, remote_api=remote_api, reset=True)
+    return SuiteStepResult(
+        scenario_id,
+        bool(out.get("ok")),
+        str(out.get("reply") or out.get("grade", {}).get("summary", "")),
+        report={"mesh": mesh, "planner": out.get("planner"), "grade": out.get("grade")},
+    )
+
+
+def _direct_search_character_suite(remote_api: str, scenario_id: str = "E4") -> SuiteStepResult:
+    client, _ = _client(remote_api)
+    hits = _search(client, "character", asset_class="SkeletalMesh", limit=12)
+    if not hits:
+        hits = _search(client, "SK_", asset_class="SkeletalMesh", limit=12)
+    ok = bool(hits)
+    detail = ("Asset matches:\n- " + "\n- ".join(hits[:12])) if hits else "No /Game skeletal meshes matched."
+    return SuiteStepResult(scenario_id, ok, detail, report={"matches": hits})
 
 
 def _infra_c(project_root: Path) -> SuiteStepResult:
@@ -241,6 +348,79 @@ def run_autonomous_suite(
     }
     steps: list[SuiteStepResult] = []
 
+    try:
+        from ue_agent_loop import UePieOfflineError, _is_connection_error
+    except ImportError:
+        from hephaestus_forge.ue_agent_loop import UePieOfflineError, _is_connection_error  # type: ignore
+
+    def _needs_pie(scenario: SuiteScenario) -> bool:
+        return scenario.kind in ("autonomous", "direct") and not skip_nim
+
+    def _run_one(sid: str, scenario: SuiteScenario) -> SuiteStepResult:
+        if scenario.kind == "infra":
+            if sid == "C":
+                return _infra_c(root)
+            if sid == "D":
+                return _infra_d(root, live=live)
+            return SuiteStepResult(sid, False, f"unknown infra step {sid}")
+
+        if scenario.kind == "direct":
+            if skip_nim:
+                return SuiteStepResult(sid, True, "skipped (offline — direct scenarios not run)", report={})
+            if sid == "E2" or sid == "G4" or scenario.goal == "__suite_locomotion__":
+                return _direct_locomotion_suite(remote_api, scenario_id=sid)
+            if sid == "E1" or scenario.goal == "__suite_spawn_mesh__":
+                return _direct_spawn_mesh_suite(remote_api, scenario_id=sid)
+            if sid == "E4" or scenario.goal == "__suite_search_character__":
+                return _direct_search_character_suite(remote_api, scenario_id=sid)
+            try:
+                from agent_chat import run_chat
+            except ImportError:
+                from hephaestus_forge.agent_chat import run_chat  # type: ignore
+            out = run_chat(
+                scenario.goal,
+                project_root=root,
+                remote_api=remote_api,
+                reset=True,
+                on_thought=on_thought,
+            )
+            return SuiteStepResult(
+                sid,
+                bool(out.get("ok")),
+                str(out.get("reply") or out.get("grade", {}).get("summary", "")),
+                report={"planner": out.get("planner"), "grade": out.get("grade")},
+            )
+
+        if skip_nim:
+            return SuiteStepResult(sid, True, "skipped (offline — NIM goals not run)", report={})
+
+        goal = scenario.goal
+        if goal == "__suite_spawn_walk__":
+            goal = _spawn_walk_goal(remote_api)
+
+        report: AutonomousReport = run_autonomous_goal(
+            goal,
+            project_root=root,
+            remote_api=remote_api,
+            require_nim=True,
+            repair=True,
+            max_steps=12,
+            on_thought=on_thought or (
+                lambda kind, content, meta: print(
+                    f"[suite:{sid}] {kind}: {str(content)[:140]}",
+                    flush=True,
+                )
+                if kind in ("plan", "error", "reflection", "action")
+                else None
+            ),
+        )
+        return SuiteStepResult(
+            sid,
+            report.ok,
+            report.grade.get("summary", ""),
+            report=report.to_dict(),
+        )
+
     order = ["C", "D", "A", "B", "E1", "E2", "E3", "E4", "F", "G1", "G2", "G3", "G4"]
     for sid in order:
         scenario = selected.get(sid)
@@ -248,76 +428,65 @@ def run_autonomous_suite(
             continue
         print(f"[suite] {sid} starting…", flush=True)
         try:
-            if scenario.kind == "infra":
-                if sid == "C":
-                    steps.append(_infra_c(root))
-                elif sid == "D":
-                    steps.append(_infra_d(root, live=live))
-                print(f"[suite] {sid} {'ok' if steps[-1].ok else 'FAIL'}: {steps[-1].detail}", flush=True)
-                continue
+            if live and _needs_pie(scenario):
+                if not wait_for_pie(remote_api, timeout_s=30.0):
+                    steps.append(
+                        SuiteStepResult(
+                            sid,
+                            False,
+                            "PIE offline before scenario — press Play and retry",
+                            report={"error": "pie_offline"},
+                        )
+                    )
+                    print(f"[suite] {sid} FAIL: PIE offline before scenario", flush=True)
+                    continue
 
-            if scenario.kind == "direct":
-                if skip_nim:
-                    steps.append(SuiteStepResult(sid, True, "skipped (offline — direct scenarios not run)", report={}))
-                    print(f"[suite] {sid} skipped", flush=True)
-                    continue
-                if sid == "E2" or sid == "G4" or scenario.goal == "__suite_locomotion__":
-                    steps.append(_direct_locomotion_suite(remote_api, scenario_id=sid))
-                    print(f"[suite] {sid} {'ok' if steps[-1].ok else 'FAIL'}: {steps[-1].detail}", flush=True)
-                    continue
+            result = _run_one(sid, scenario)
+            # One recovery pass if PIE dropped mid-scenario.
+            detail_l = (result.detail or "").lower()
+            if (
+                live
+                and _needs_pie(scenario)
+                and not result.ok
+                and (_is_connection_error(result.detail) or "pie offline" in detail_l)
+            ):
+                print(f"[suite] {sid} PIE drop — waiting to retry…", flush=True)
+                if wait_for_pie(remote_api, timeout_s=45.0):
+                    result = _run_one(sid, scenario)
+                    result.report = {**(result.report or {}), "pie_retry": True}
+
+            steps.append(result)
+            print(f"[suite] {sid} {'ok' if result.ok else 'FAIL'}: {result.detail}", flush=True)
+        except UePieOfflineError as exc:
+            print(f"[suite] {sid} PIE offline — waiting to retry…", flush=True)
+            if live and wait_for_pie(remote_api, timeout_s=45.0):
                 try:
-                    from agent_chat import run_chat
-                except ImportError:
-                    from hephaestus_forge.agent_chat import run_chat  # type: ignore
-                out = run_chat(
-                    scenario.goal,
-                    project_root=root,
-                    remote_api=remote_api,
-                    reset=True,
-                    on_thought=on_thought,
-                )
-                steps.append(
-                    SuiteStepResult(
-                        sid,
-                        bool(out.get("ok")),
-                        str(out.get("reply") or out.get("grade", {}).get("summary", "")),
-                        report={"planner": out.get("planner"), "grade": out.get("grade")},
-                    )
-                )
-                print(f"[suite] {sid} {'ok' if steps[-1].ok else 'FAIL'}: {steps[-1].detail}", flush=True)
-                continue
-
-            if skip_nim:
-                steps.append(SuiteStepResult(sid, True, "skipped (offline — NIM goals not run)", report={}))
-                print(f"[suite] {sid} skipped", flush=True)
-                continue
-
-            report: AutonomousReport = run_autonomous_goal(
-                scenario.goal,
-                project_root=root,
-                remote_api=remote_api,
-                require_nim=True,
-                repair=True,
-                max_steps=12,
-                on_thought=on_thought or (
-                    lambda kind, content, meta: print(
-                        f"[suite:{sid}] {kind}: {str(content)[:140]}",
-                        flush=True,
-                    )
-                    if kind in ("plan", "error", "reflection", "action")
-                    else None
-                ),
-            )
+                    result = _run_one(sid, scenario)
+                    result.report = {**(result.report or {}), "pie_retry": True}
+                    steps.append(result)
+                    print(f"[suite] {sid} {'ok' if result.ok else 'FAIL'}: {result.detail}", flush=True)
+                    continue
+                except Exception as retry_exc:
+                    exc = retry_exc  # type: ignore[assignment]
             steps.append(
                 SuiteStepResult(
                     sid,
-                    report.ok,
-                    report.grade.get("summary", ""),
-                    report=report.to_dict(),
+                    False,
+                    f"PIE offline: {exc}",
+                    report={"error": str(exc), "error_type": type(exc).__name__},
                 )
             )
-            print(f"[suite] {sid} {'ok' if steps[-1].ok else 'FAIL'}: {steps[-1].detail}", flush=True)
+            print(f"[suite] {sid} FAIL: PIE offline: {exc}", flush=True)
         except Exception as exc:
+            if live and _is_connection_error(exc) and wait_for_pie(remote_api, timeout_s=45.0):
+                try:
+                    result = _run_one(sid, scenario)
+                    result.report = {**(result.report or {}), "pie_retry": True}
+                    steps.append(result)
+                    print(f"[suite] {sid} {'ok' if result.ok else 'FAIL'}: {result.detail}", flush=True)
+                    continue
+                except Exception as retry_exc:
+                    exc = retry_exc
             steps.append(
                 SuiteStepResult(
                     sid,
