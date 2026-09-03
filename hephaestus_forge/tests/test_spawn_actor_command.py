@@ -15,6 +15,8 @@ from hephaestus.commands import (  # noqa: E402
     build_capture_frame_command,
     build_destroy_actor_command,
     build_list_actors_command,
+    build_set_view_command,
+    build_sequence_create_shot_command,
     build_spawn_actor_command,
     build_spawn_mesh_command,
 )
@@ -52,8 +54,32 @@ def test_spawn_mesh_and_vision_builders():
     assert build_capture_frame_command()["command"] == "vision.capture_frame"
 
 
+def test_set_view_and_create_shot_builders():
+    view = build_set_view_command(
+        look_at_actor="/Game/Maps/M.M:PersistentLevel.Char",
+        distance=450.0,
+        yaw_offset=90.0,
+        mode="free",
+    )
+    assert view["command"] == "world.set_view"
+    assert view["params"]["mode"] == "free"
+    assert view["params"]["look_at_actor"].endswith("Char")
+    assert view["params"]["distance"] == 450.0
+
+    shot = build_sequence_create_shot_command(
+        look_at_actor="/Temp/A",
+        distance=400.0,
+        yaw_offset=-90.0,
+        duration=2.0,
+    )
+    assert shot["command"] == "sequence.create_shot"
+    assert shot["params"]["mode"] == "free"
+    assert shot["params"]["yaw_offset"] == -90.0
+
+
 if __name__ == "__main__":
     test_spawn_actor_command_shape()
     test_spawn_actor_defaults_identity_transform()
     test_spawn_mesh_and_vision_builders()
+    test_set_view_and_create_shot_builders()
     print("OK")

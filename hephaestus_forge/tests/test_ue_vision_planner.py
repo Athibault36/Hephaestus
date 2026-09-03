@@ -148,6 +148,7 @@ def test_plan_create_shot_and_play_level_sequence():
     )
     assert shot.kind == "create_shot"
     assert shot.command["command"] == "sequence.create_shot"
+    assert shot.command["params"].get("mode") == "free"
 
     play = plan_dict_to_action(
         {
@@ -159,6 +160,67 @@ def test_plan_create_shot_and_play_level_sequence():
     )
     assert play.command["command"] == "sequence.play"
     assert play.command["params"]["sequence_path"] == "/Game/Cinematics/Intro.Intro"
+
+
+def test_plan_set_view_frame_from_left():
+    snap = WorldSnapshot(
+        actor_paths=["/Game/Maps/Test.Test:PersistentLevel.Beverly"],
+        skeletal=1,
+    )
+    action = plan_dict_to_action(
+        {
+            "action": "set_view",
+            "look_at_actor": "/Game/Maps/Test.Test:PersistentLevel.Beverly",
+            "distance": 450,
+            "yaw_offset": 90,
+            "height": 120,
+            "mode": "free",
+            "reason": "frame from the left",
+        },
+        snap,
+    )
+    assert action.kind == "set_view"
+    assert action.command["command"] == "world.set_view"
+    params = action.command["params"]
+    assert params["mode"] == "free"
+    assert params["look_at_actor"].endswith("Beverly")
+    assert params["distance"] == 450
+    assert params["yaw_offset"] == 90
+
+
+def test_plan_set_view_infers_yaw_from_reason_left():
+    snap = WorldSnapshot(actor_paths=["/Temp/Char"])
+    action = plan_dict_to_action(
+        {
+            "action": "camera",
+            "look_at_actor": "/Temp/Char",
+            "reason": "Frame the character from the left with the camera",
+        },
+        snap,
+    )
+    assert action.command["params"]["yaw_offset"] == 90.0
+    assert action.command["params"]["mode"] == "free"
+
+
+def test_plan_create_shot_with_look_at_and_orbit():
+    snap = WorldSnapshot(actor_paths=["/Temp/Char"])
+    action = plan_dict_to_action(
+        {
+            "action": "create_shot",
+            "look_at_actor": "/Temp/Char",
+            "distance": 500,
+            "yaw_offset": -90,
+            "duration": 2.5,
+            "reason": "orbit right",
+        },
+        snap,
+    )
+    assert action.kind == "create_shot"
+    p = action.command["params"]
+    assert p["look_at_actor"] == "/Temp/Char"
+    assert p["distance"] == 500
+    assert p["yaw_offset"] == -90
+    assert p["mode"] == "free"
 
 
 def test_resolve_attach_images_deepseek_default_off():

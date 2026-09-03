@@ -78,12 +78,15 @@ Full list: [ENV_FLAGS.md](ENV_FLAGS.md).
 | Area | Status |
 |------|--------|
 | World spawn/edit, locomotion, montage | **Supported** |
+| Camera: `world.get_view` / `world.set_view` (free CameraActor by default), orbit `look_at_actor`+`distance`+`yaw_offset` | **Supported** |
 | Assets: create material/instance, search | **Supported** |
-| Sequencer: create_shot, play | **Supported** |
+| Sequencer: create_shot (animated free cam), play | **Supported** |
 | Audio: quartz play, metasound (needs `source_path`) | **Partial** |
 | Vision: PNG frame capture | **Supported** |
 | Blueprint mutation, IK retarget, FBX import | **Stub** (returns false; post-1.0) |
 | WebRTC / hardware encode | **Stub** |
+
+After bridge C++ camera changes: `forge sync-plugin <UE_PROJECT>`, rebuild plugin, **full editor restart**, then Play.
 
 Plugin details: [templates/ue_plugin/HephaestusBridge/README.md](../hephaestus_forge/templates/ue_plugin/HephaestusBridge/README.md).
 

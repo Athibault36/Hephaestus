@@ -18,6 +18,8 @@
 #include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 #include "Camera/PlayerCameraManager.h"
+#include "Camera/CameraActor.h"
+#include "Camera/CameraComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/Character.h"
@@ -54,6 +56,7 @@ struct FHephaestusViewJob
 	float Duration = 1.f;
 	float Elapsed = 0.f;
 	bool bEaseInOut = true;
+	FString Mode = TEXT("free");
 	FTimerHandle Timer;
 	TWeakObjectPtr<UWorld> World;
 };
@@ -597,7 +600,95 @@ bool UHephaestusWorldSubsystem::GetView(FVector& OutLocation, FRotator& OutRotat
     return false;
 }
 
-bool UHephaestusWorldSubsystem::SetView(const FVector& Location, const FRotator& Rotation) const
+AActor* UHephaestusWorldSubsystem::EnsureFreeCamera()
+{
+	UWorld* World = ResolveWorld();
+	if (!World)
+	{
+		return nullptr;
+	}
+
+	if (FreeCameraActor.IsValid() && IsValid(FreeCameraActor.Get()))
+	{
+		return FreeCameraActor.Get();
+	}
+
+	// Reuse an existing tagged free camera if present (e.g. after PIE restart mid-session).
+	for (TActorIterator<ACameraActor> It(World); It; ++It)
+	{
+		ACameraActor* Existing = *It;
+		if (Existing && Existing->GetName().Contains(TEXT("HephaestusFreeCamera")))
+		{
+			FreeCameraActor = Existing;
+			return Existing;
+		}
+	}
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.Name = MakeUniqueObjectName(World->GetCurrentLevel(), ACameraActor::StaticClass(), TEXT("HephaestusFreeCamera"));
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	ACameraActor* Cam = World->SpawnActor<ACameraActor>(ACameraActor::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
+	if (!Cam)
+	{
+		return nullptr;
+	}
+	Cam->Tags.AddUnique(FName(TEXT("HephaestusFreeCamera")));
+#if WITH_EDITOR
+	Cam->SetActorLabel(TEXT("HephaestusFreeCamera"));
+#endif
+	FreeCameraActor = Cam;
+	return Cam;
+}
+
+bool UHephaestusWorldSubsystem::ComputeFramePose(
+	const FString& ActorPath,
+	float Distance,
+	float YawOffsetDegrees,
+	float Height,
+	FVector& OutLocation,
+	FRotator& OutRotation) const
+{
+	AActor* Target = FindActorByPath(ActorPath);
+	if (!Target)
+	{
+		return false;
+	}
+
+	FVector Origin = Target->GetActorLocation();
+	FVector Extent = FVector::ZeroVector;
+	Target->GetActorBounds(false, Origin, Extent);
+	const FVector Focus = Origin + FVector(0.f, 0.f, FMath::Clamp(Extent.Z * 0.35f, 40.f, 180.f));
+
+	const float Dist = FMath::Max(Distance, 80.f);
+	const FRotator ActorYaw(0.f, Target->GetActorRotation().Yaw, 0.f);
+	const FVector Back = -ActorYaw.Vector();
+	const FVector Right = FRotationMatrix(ActorYaw).GetScaledAxis(EAxis::Y);
+	// YawOffset 0 = behind, +90 = left of actor (from actor's left looking in)
+	const float Rad = FMath::DegreesToRadians(YawOffsetDegrees);
+	const FVector OffsetDir = (Back * FMath::Cos(Rad) + Right * FMath::Sin(Rad)).GetSafeNormal();
+	OutLocation = Focus + OffsetDir * Dist + FVector(0.f, 0.f, Height);
+	const FVector ToFocus = Focus - OutLocation;
+	OutRotation = ToFocus.IsNearlyZero() ? ActorYaw : ToFocus.Rotation();
+	return true;
+}
+
+bool UHephaestusWorldSubsystem::FrameActor(
+	const FString& ActorPath,
+	float Distance,
+	float YawOffsetDegrees,
+	float Height,
+	const FString& Mode)
+{
+	FVector Loc = FVector::ZeroVector;
+	FRotator Rot = FRotator::ZeroRotator;
+	if (!ComputeFramePose(ActorPath, Distance, YawOffsetDegrees, Height, Loc, Rot))
+	{
+		return false;
+	}
+	return SetView(Loc, Rot, Mode);
+}
+
+bool UHephaestusWorldSubsystem::SetView(const FVector& Location, const FRotator& Rotation, const FString& Mode)
 {
     UWorld* World = ResolveWorld();
     if (!World)
@@ -605,24 +696,43 @@ bool UHephaestusWorldSubsystem::SetView(const FVector& Location, const FRotator&
         return false;
     }
 
-    if (APlayerController* PC = World->GetFirstPlayerController())
-    {
-        if (APawn* Pawn = PC->GetPawn())
-        {
-            Pawn->SetActorLocationAndRotation(Location, Rotation, false, nullptr, ETeleportType::TeleportPhysics);
-        }
-        PC->SetControlRotation(Rotation);
-        return true;
-    }
+	APlayerController* PC = World->GetFirstPlayerController();
+	if (!PC)
+	{
+		return false;
+	}
 
-    return false;
+	const FString ModeLower = Mode.IsEmpty() ? TEXT("free") : Mode.ToLower();
+	const bool bPawnMode = ModeLower == TEXT("pawn") || ModeLower == TEXT("player") || ModeLower == TEXT("character");
+
+	if (bPawnMode)
+	{
+		if (APawn* Pawn = PC->GetPawn())
+		{
+			Pawn->SetActorLocationAndRotation(Location, Rotation, false, nullptr, ETeleportType::TeleportPhysics);
+		}
+		PC->SetControlRotation(Rotation);
+		return true;
+	}
+
+	// Free camera (default): dedicated CameraActor + SetViewTarget — does not move the pawn.
+	AActor* Cam = EnsureFreeCamera();
+	if (!Cam)
+	{
+		return false;
+	}
+	Cam->SetActorLocationAndRotation(Location, Rotation, false, nullptr, ETeleportType::TeleportPhysics);
+	PC->SetViewTargetWithBlend(Cam, 0.f);
+	PC->SetControlRotation(Rotation);
+	return true;
 }
 
 bool UHephaestusWorldSubsystem::AnimateViewTo(
 	const FVector& TargetLocation,
 	const FRotator& TargetRotation,
 	float DurationSeconds,
-	bool bEaseInOut)
+	bool bEaseInOut,
+	const FString& Mode)
 {
 	UWorld* World = ResolveWorld();
 	if (!World)
@@ -645,6 +755,7 @@ bool UHephaestusWorldSubsystem::AnimateViewTo(
 	Job->EndRotation = TargetRotation;
 	Job->Duration = FMath::Max(DurationSeconds, 0.1f);
 	Job->bEaseInOut = bEaseInOut;
+	Job->Mode = Mode.IsEmpty() ? TEXT("free") : Mode;
 	Job->World = World;
 	GActiveViewJobs.Add(Job);
 
@@ -662,7 +773,7 @@ bool UHephaestusWorldSubsystem::AnimateViewTo(
 			const float T = Job->bEaseInOut ? FMath::InterpEaseInOut(0.f, 1.f, Alpha, 2.f) : Alpha;
 			const FVector Loc = FMath::Lerp(Job->StartLocation, Job->EndLocation, T);
 			const FRotator Rot = FMath::Lerp(Job->StartRotation, Job->EndRotation, T);
-			SetView(Loc, Rot);
+			SetView(Loc, Rot, Job->Mode);
 			if (Alpha >= 1.f)
 			{
 				World->GetTimerManager().ClearTimer(Job->Timer);

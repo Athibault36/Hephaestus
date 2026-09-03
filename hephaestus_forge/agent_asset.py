@@ -156,37 +156,49 @@ def augment_goal_with_assets(client: RemoteUeClient, goal: str) -> tuple[str, li
     if not tokens:
         return goal, [], meta
 
-    all_matches: list[str] = []
+    creature_hints = ("dog", "cat", "wolf", "horse", "human", "character", "creature", "animal", "beverly", "bill")
+    wants_creature = any(h in goal.lower() for h in creature_hints)
+
+    mesh_matches: list[str] = []
     for token in tokens[:4]:
-        for asset_class in ("", "SkeletalMesh", "StaticMesh"):
+        classes = ("SkeletalMesh", "StaticMesh", "") if wants_creature else ("", "SkeletalMesh", "StaticMesh")
+        for asset_class in classes:
             paths = search_project_assets(client, token, asset_class=asset_class, limit=8)
             meta["searches"].append({"token": token, "class": asset_class, "count": len(paths)})
             for p in paths:
-                if p not in all_matches:
-                    all_matches.append(p)
+                # Never treat animations as spawnable mesh candidates.
+                if ".AnimSequence" in p or ".AnimMontage" in p or "/Anims/" in p:
+                    continue
+                if p not in mesh_matches:
+                    mesh_matches.append(p)
 
+    anim_matches: list[str] = []
     anim_hints = ("walk", "run", "idle", "anim", "montage")
     if any(h in goal.lower() for h in anim_hints):
         for token in tokens[:3]:
             for asset_class in ("AnimSequence", "AnimMontage"):
                 anims = search_project_assets(client, token, asset_class=asset_class, limit=6)
                 for p in anims:
-                    if p not in all_matches:
-                        all_matches.append(p)
+                    if p not in anim_matches:
+                        anim_matches.append(p)
 
-    meta["matches"] = _rank_asset_paths(goal, all_matches)[:20]
-    all_matches = list(meta["matches"])
-
-    # Prefer skeletal meshes when the goal sounds like a character/creature.
-    creature_hints = ("dog", "cat", "wolf", "horse", "human", "character", "creature", "animal")
-    if any(h in goal.lower() for h in creature_hints):
-        skel = [p for p in all_matches if "SkeletalMesh" in p or p.endswith(".SkeletalMesh") or "/SK_" in p]
+    mesh_matches = _rank_asset_paths(goal, mesh_matches)[:16]
+    if wants_creature:
+        skel = [
+            p for p in mesh_matches
+            if "SkeletalMesh" in p or p.endswith(".SkeletalMesh") or "/SK_" in p or "_SK." in p
+        ]
         if skel:
-            all_matches = skel + [p for p in all_matches if p not in skel]
+            mesh_matches = skel + [p for p in mesh_matches if p not in skel]
 
-    if len(all_matches) == 1:
-        path = all_matches[0]
-        if path.endswith((".SkeletalMesh",)) or "SkeletalMesh" in path or "/SK_" in path or "SK_" in path:
+    all_matches = list(mesh_matches) + [p for p in anim_matches if p not in mesh_matches]
+    meta["matches"] = all_matches[:20]
+    meta["mesh_matches"] = mesh_matches[:16]
+    meta["anim_matches"] = anim_matches[:8]
+
+    if len(mesh_matches) == 1:
+        path = mesh_matches[0]
+        if path.endswith((".SkeletalMesh",)) or "SkeletalMesh" in path or "/SK_" in path or "SK_" in path or "_SK." in path:
             augmented = (
                 f"Spawn skeletal mesh {path} in front of the camera with a spotlight. "
                 f"Original request: {goal}"
@@ -196,14 +208,16 @@ def augment_goal_with_assets(client: RemoteUeClient, goal: str) -> tuple[str, li
                 f"Spawn static mesh {path} in front of the camera with a spotlight. "
                 f"Original request: {goal}"
             )
+        if anim_matches:
+            augmented += f"\nCandidate animations: {'; '.join(anim_matches[:4])}"
         return augmented, all_matches, meta
 
-    if all_matches:
-        hint = "; ".join(all_matches[:8])
-        extra = ""
-        anims = [p for p in all_matches if ".AnimSequence" in p or p.endswith(".AnimSequence")]
-        if anims:
-            extra = f"\nCandidate animations: {'; '.join(anims[:4])}"
-        return f"{goal}\nCandidate assets: {hint}{extra}", all_matches, meta
+    if mesh_matches or anim_matches:
+        parts = [goal]
+        if mesh_matches:
+            parts.append(f"Candidate meshes: {'; '.join(mesh_matches[:8])}")
+        if anim_matches:
+            parts.append(f"Candidate animations: {'; '.join(anim_matches[:4])}")
+        return "\n".join(parts), all_matches, meta
 
     return goal, [], meta

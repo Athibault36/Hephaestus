@@ -8,12 +8,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from cloud.parallel_nim import ParallelNemotronCoder, ParallelResult  # noqa: E402
-from cloud.nim_client import DEFAULT_FAST_MODEL, DEFAULT_PLANNER_MODEL  # noqa: E402
+from cloud.nim_client import DEFAULT_FAST_MODEL, DEFAULT_PLANNER_MODEL, DEFAULT_LEGACY_ULTRA_MODEL  # noqa: E402
 
 
 def test_parallel_result_ok_when_either_succeeds():
     r = ParallelResult(
-        ultra_model=DEFAULT_PLANNER_MODEL,
+        ultra_model=DEFAULT_LEGACY_ULTRA_MODEL,
         lightning_model=DEFAULT_FAST_MODEL,
         ultra_text="",
         lightning_text="impl",
@@ -24,7 +24,7 @@ def test_parallel_result_ok_when_either_succeeds():
 
 def test_parallel_result_not_ok_when_both_empty():
     r = ParallelResult(
-        ultra_model=DEFAULT_PLANNER_MODEL,
+        ultra_model=DEFAULT_LEGACY_ULTRA_MODEL,
         lightning_model=DEFAULT_FAST_MODEL,
         ultra_text="",
         lightning_text="",
@@ -42,9 +42,9 @@ def test_merge_includes_both_sections():
 
 def test_default_models_are_parallel_pair():
     coder = ParallelNemotronCoder(api_key="dummy")
-    assert coder.ultra_model == DEFAULT_PLANNER_MODEL
+    assert coder.ultra_model == DEFAULT_LEGACY_ULTRA_MODEL
     assert coder.lightning_model == DEFAULT_FAST_MODEL
-    assert "deepseek" in coder.ultra_model
+    assert "nemotron" in coder.ultra_model.lower()
     assert "lightning" in coder.lightning_model
 
 

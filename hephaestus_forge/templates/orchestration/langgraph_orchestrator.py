@@ -623,7 +623,8 @@ def create_agent_graph(
 @dataclass
 class OrchestrationConfig:
     nemotron_endpoint: str = "http://127.0.0.1:8080/v1"
-    nemotron_model: str = "deepseek-ai/deepseek-v4-pro-0813"
+    # Nemotron-3 Ultra for coding/agentic work (architecture + execution planning).
+    nemotron_model: str = "nvidia/nemotron-3-ultra-550b-a55b"
     nemotron_api_key: str = "nem"
     temperature_coding: float = 0.1
     temperature_planning: float = 0.4

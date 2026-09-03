@@ -208,6 +208,37 @@ def build_get_view_command() -> dict[str, Any]:
     return {"command": "world.get_view", "params": {}}
 
 
+def build_set_view_command(
+    location: Vec3 = None,
+    rotation: Vec3 = None,
+    *,
+    mode: str = "free",
+    look_at_actor: str = "",
+    distance: float = 0.0,
+    yaw_offset: float = 90.0,
+    height: float = 120.0,
+) -> dict[str, Any]:
+    """Position PIE camera. Default mode=free uses Hephaestus CameraActor (does not move pawn)."""
+    params: dict[str, Any] = {
+        "mode": mode or "free",
+        "transform": {
+            "location": _vec3(location, (0.0, 0.0, 200.0)),
+            "rotation": _rotator(rotation),
+        },
+    }
+    if look_at_actor:
+        params["look_at_actor"] = look_at_actor
+    if distance and distance > 1.0:
+        params["distance"] = float(distance)
+        params["yaw_offset"] = float(yaw_offset)
+        params["height"] = float(height)
+    elif look_at_actor:
+        params["distance"] = 450.0
+        params["yaw_offset"] = float(yaw_offset)
+        params["height"] = float(height)
+    return {"command": "world.set_view", "params": params}
+
+
 def build_stop_animation_command(actor_path: str) -> dict[str, Any]:
     return {"command": "animation.stop", "params": {"actor_path": actor_path}}
 
@@ -226,12 +257,24 @@ def build_sequence_create_shot_command(
     duration: float = 4.0,
     actor_path: str = "",
     actor_target: Vec3 = None,
+    look_at_actor: str = "",
+    mode: str = "free",
+    distance: float = 0.0,
+    yaw_offset: float = 90.0,
+    height: float = 120.0,
 ) -> dict[str, Any]:
     params: dict[str, Any] = {
         "location": _vec3(location, (0.0, 0.0, 200.0)),
         "rotation": _rotator(rotation),
         "duration": float(duration),
+        "mode": mode or "free",
     }
+    if look_at_actor:
+        params["look_at_actor"] = look_at_actor
+    if distance and distance > 1.0:
+        params["distance"] = float(distance)
+        params["yaw_offset"] = float(yaw_offset)
+        params["height"] = float(height)
     if actor_path:
         params["actor_path"] = actor_path
         params["target_location"] = _vec3(actor_target, params["location"])
@@ -240,6 +283,89 @@ def build_sequence_create_shot_command(
 
 def build_sequence_stop_command() -> dict[str, Any]:
     return {"command": "sequence.stop", "params": {}}
+
+
+def build_create_material_command(
+    name: str = "HephaestusMaterial",
+    *,
+    base_material_path: str = "",
+    parameters: Optional[Mapping[str, str]] = None,
+) -> dict[str, Any]:
+    params: dict[str, Any] = {"name": name}
+    if base_material_path:
+        params["base_material_path"] = base_material_path
+    if parameters:
+        params["parameters"] = dict(parameters)
+    return {"command": "asset.create_material", "params": params}
+
+
+def build_import_fbx_command(
+    source_path: str,
+    *,
+    destination_path: str = "/Game/Hephaestus/Imported",
+    destination_name: Optional[str] = None,
+    destination_rename: bool = False,
+    destination_force_reimport: bool = False,
+    destination_package_error: bool = False,
+    auto_verify: bool = True,
+    import_materials: bool = True,
+    import_textures: bool = True,
+    uniform_scale: float = 1.0,
+) -> dict[str, Any]:
+    """Build an FBX import command (asset.import_fbx / import_fbx alias)."""
+    params: dict[str, Any] = {
+        "source_path": source_path,
+        "file_path": source_path,
+        "destination_path": destination_path,
+        "destination_rename": destination_rename,
+        "destination_force_reimport": destination_force_reimport,
+        "destination_package_error": destination_package_error,
+        "auto_verify": auto_verify,
+        "import_materials": import_materials,
+        "import_textures": import_textures,
+        "uniform_scale": uniform_scale,
+    }
+    if destination_name is not None:
+        params["destination_name"] = destination_name
+    return {"command": "asset.import_fbx", "params": params}
+
+
+def build_import_fbx_command_v2(
+    source_path: str,
+    *,
+    destination_path: str = "/Game/Hephaestus/Imported",
+    destination_name: Optional[str] = None,
+    destination_subobject_index: int = 0,
+    destination_subobject_name: Optional[str] = None,
+    destination_rename: bool = False,
+    destination_force_reimport: bool = False,
+    destination_package_error: bool = False,
+    auto_verify: bool = True,
+    verify_mesh_count: bool = True,
+    verify_anim_count: int = 0,
+    verify_texture_count: int = 0,
+) -> dict[str, Any]:
+    """FBX import with optional verify block (client-side expectations)."""
+    command = build_import_fbx_command(
+        source_path,
+        destination_path=destination_path,
+        destination_name=destination_name,
+        destination_rename=destination_rename,
+        destination_force_reimport=destination_force_reimport,
+        destination_package_error=destination_package_error,
+        auto_verify=auto_verify,
+    )
+    params = command["params"]
+    if destination_subobject_index >= 0:
+        params["destination_subobject_index"] = destination_subobject_index
+    if destination_subobject_name is not None:
+        params["destination_subobject_name"] = destination_subobject_name
+    params["verify"] = {
+        "mesh_count": verify_mesh_count,
+        "anim_count": verify_anim_count,
+        "texture_count": verify_texture_count,
+    }
+    return command
 
 
 def spawn_actor_json(**kwargs: Any) -> str:

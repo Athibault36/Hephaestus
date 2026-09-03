@@ -69,9 +69,35 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
 	bool GetView(FVector& OutLocation, FRotator& OutRotation, FVector& OutForward) const;
 
-	/** Move the player pawn + control rotation (simple cinematic framing) */
+	/**
+	 * Position the PIE view.
+	 * Mode "free" (default): dedicated CameraActor + SetViewTarget (does not move pawn).
+	 * Mode "pawn": teleport possessed pawn + control rotation (gameplay).
+	 */
 	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
-	bool SetView(const FVector& Location, const FRotator& Rotation) const;
+	bool SetView(const FVector& Location, const FRotator& Rotation, const FString& Mode = TEXT("free"));
+
+	/**
+	 * Frame an actor: orbit camera around bounds center and apply SetView.
+	 * YawOffsetDegrees: 0 = behind actor forward, +90 = from actor's left, -90 = from right.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
+	bool FrameActor(
+		const FString& ActorPath,
+		float Distance = 450.f,
+		float YawOffsetDegrees = 90.f,
+		float Height = 120.f,
+		const FString& Mode = TEXT("free"));
+
+	/** Compute orbit camera pose without applying it (returns false if actor missing). */
+	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
+	bool ComputeFramePose(
+		const FString& ActorPath,
+		float Distance,
+		float YawOffsetDegrees,
+		float Height,
+		FVector& OutLocation,
+		FRotator& OutRotation) const;
 
 	/** Smoothly animate camera/pawn view to a target over DurationSeconds */
 	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
@@ -79,7 +105,8 @@ public:
 		const FVector& TargetLocation,
 		const FRotator& TargetRotation,
 		float DurationSeconds = 4.f,
-		bool bEaseInOut = true);
+		bool bEaseInOut = true,
+		const FString& Mode = TEXT("free"));
 
 	/** Tint a StaticMeshActor with a readable MID color */
 	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
@@ -100,8 +127,15 @@ public:
 	/** Native (non-UHT) asset registry access */
 	IAssetRegistry& GetAssetRegistry();
 
+	/** Spawn or reuse the transient Hephaestus free CameraActor for framing. */
+	UFUNCTION(BlueprintCallable, Category = "Hephaestus|World")
+	AActor* EnsureFreeCamera();
+
 private:
 	UClass* ResolveClass(const FString& ClassPath) const;
 	UWorld* ResolveWorld() const;
 	bool IsSpawnClassAllowed(const FString& ClassPath, UClass* Resolved) const;
+
+	UPROPERTY(Transient)
+	TWeakObjectPtr<AActor> FreeCameraActor;
 };

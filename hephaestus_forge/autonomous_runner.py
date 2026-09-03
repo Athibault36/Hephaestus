@@ -174,7 +174,11 @@ def run_autonomous_goal(
     results, grade = loop.run_until_goal(max_steps=step_budget)
     repair_passes = 0
 
-    if repair and not grade.met:
+    last_kind = results[-1].action.kind if results else ""
+    last_err = (results[-1].act_result or {}).get("error") if results else ""
+    fatal = last_kind == "llm_error" or "PIE offline" in str(last_err or "")
+
+    if repair and not grade.met and not fatal:
         try:
             from agent_repair import maybe_repair_after_grade
 
@@ -196,9 +200,25 @@ def run_autonomous_goal(
     llm_error = llm.last_error or ""
     if require_nim and not llm.available:
         llm_error = llm_error or "NVIDIA_API_KEY not set"
+    if fatal and results:
+        llm_error = llm_error or results[-1].action.reason or str(last_err or "")
+        if "PIE offline" in str(last_err or "") or "PIE offline" in (results[-1].action.reason or ""):
+            grade_dict = {
+                "met": False,
+                "score": 0.0,
+                "summary": results[-1].action.reason or str(last_err),
+                "missing": ["ue_pie"],
+            }
+        elif last_kind == "llm_error":
+            grade_dict = {
+                "met": False,
+                "score": grade_dict.get("score", 0.0),
+                "summary": results[-1].action.reason or grade_dict.get("summary", "planner failed"),
+                "missing": list(dict.fromkeys([*(grade_dict.get("missing") or []), "nim_planner"])),
+            }
 
     return AutonomousReport(
-        ok=grade.met,
+        ok=grade.met and not fatal,
         goal=augmented_goal,
         grade=grade_dict,
         planner=llm.model if llm.available else "heuristic",
