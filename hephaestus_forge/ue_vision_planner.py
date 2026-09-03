@@ -17,6 +17,7 @@ import json
 import os
 import random
 import re
+import socket
 import urllib.error
 import urllib.request
 from typing import Any, Optional
@@ -28,12 +29,14 @@ except ImportError:
 
 try:
     from hephaestus_forge.cloud.nim_client import (
+        DEFAULT_FAST_MODEL,
         DEFAULT_PLANNER_MODEL,
         DEFAULT_VISION_MODEL,
         chat_template_kwargs_for_model,
     )
 except ImportError:
     from cloud.nim_client import (  # type: ignore
+        DEFAULT_FAST_MODEL,
         DEFAULT_PLANNER_MODEL,
         DEFAULT_VISION_MODEL,
         chat_template_kwargs_for_model,
@@ -41,6 +44,32 @@ except ImportError:
 
 DEFAULT_NIM_URL = "https://integrate.api.nvidia.com/v1"
 DEFAULT_NEMOTRON_MODEL = DEFAULT_PLANNER_MODEL  # backward-compatible name
+DEFAULT_FALLBACK_MODEL = DEFAULT_FAST_MODEL
+
+
+def _is_transient_llm_error(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return any(
+        token in text
+        for token in (
+            "timed out",
+            "timeout",
+            "temporarily unavailable",
+            "429",
+            "502",
+            "503",
+            "504",
+            "connection reset",
+            "remote end closed",
+        )
+    )
+
+
+def _fallback_model() -> str:
+    raw = (os.environ.get("HEPHAESTUS_LLM_FALLBACK_MODEL") or "").strip()
+    if raw.lower() in ("0", "false", "none", "off"):
+        return ""
+    return raw or DEFAULT_FALLBACK_MODEL
 
 SYSTEM_PROMPT = """You are HEPHAESTUS, an embodied Unreal Engine agent.
 You receive a viewport census (and optional prior step memory). Choose exactly ONE next action.
@@ -70,15 +99,19 @@ Rules:
 - Prefer small reversible edits. |offset from view| should stay within a few meters.
 - destroy/set_* only with actor_path from the provided interesting-actor list.
 - set_light only on PointLight paths.
-- set_view moves the player camera (location + rotation) for framing shots.
-- create_shot animates camera to x/y/z over duration (cinematic pan; prefer for "frame" goals).
+- set_view moves the PIE view via a free CameraActor (default mode=free; does not move the pawn).
+  Use mode=pawn only when the goal is gameplay / move the player character.
+- Prefer look_at_actor + distance + yaw_offset for framing ("from the left" => yaw_offset=90).
+- create_shot animates the free camera to x/y/z over duration (cinematic pan; prefer for "frame" goals).
 - play_level_sequence plays sequence_path Level Sequence asset (/Game/...).
 - set_mesh_color tints a listed StaticMeshActor (color r/g/b 0-1).
 - spawn_character spawns a skeletal mesh in view (cinematic/gameplay characters).
 - play_anim plays anim_path on a listed SkeletalMeshActor path.
 - play_locomotion plays idle|walk|run fallback on actor_path when anim_path is unknown.
 - Example play_locomotion: {"action":"play_locomotion","actor_path":"/Temp/...","mode":"walk","reason":"walk in place"}
-- Example create_shot: {"action":"create_shot","x":400,"y":0,"z":200,"duration":3,"look_at_actor":"/Temp/...","reason":"frame character"}
+- Example create_shot: {"action":"create_shot","x":400,"y":0,"z":200,"duration":3,"look_at_actor":"/Temp/...","mode":"free","reason":"frame character"}
+- Example set_view frame-from-left: {"action":"set_view","look_at_actor":"/Temp/...","distance":450,"yaw_offset":90,"height":120,"mode":"free","reason":"frame from left"}
+- Extra set_view fields: mode (free|pawn), look_at_actor, distance, yaw_offset, height, pitch.
 - move_actor animates an actor toward x/y/z over duration seconds (walk into frame).
 - apply_move applies forward/right input to the possessed pawn (gameplay jog/walk).
 - play_montage plays montage_path on a listed character/skeletal actor.
@@ -332,50 +365,98 @@ def plan_dict_to_action(plan: dict[str, Any], snapshot: WorldSnapshot) -> AgentA
             },
         )
 
-    if action in ("set_view", "camera", "frame_shot"):
+    if action in ("set_view", "camera", "frame_shot", "frame_actor"):
         pitch = float(plan.get("pitch", 0.0))
         duration = float(plan.get("duration", 0.0))
+        look_at = str(
+            plan.get("look_at_actor")
+            or plan.get("frame_actor")
+            or plan.get("actor_path")
+            or ""
+        )
+        cam_mode = str(plan.get("mode") or "free").lower()
+        if cam_mode not in ("free", "pawn", "player", "character"):
+            cam_mode = "free"
+        distance = float(plan.get("distance") or 0.0)
+        yaw_offset = float(plan.get("yaw_offset", plan.get("yaw_offset_degrees", 90.0)))
+        height = float(plan.get("height") or 120.0)
+        reason_l = reason.lower()
+        if "left" in reason_l and "yaw_offset" not in plan and "yaw_offset_degrees" not in plan:
+            yaw_offset = 90.0
+        elif "right" in reason_l and "yaw_offset" not in plan and "yaw_offset_degrees" not in plan:
+            yaw_offset = -90.0
         loc = {"x": x, "y": y, "z": z if z else 200.0}
         rot = {"pitch": pitch, "yaw": yaw, "roll": 0.0}
+        view_params: dict[str, Any] = {
+            "mode": cam_mode,
+            "transform": {"location": loc, "rotation": rot},
+        }
+        if look_at:
+            view_params["look_at_actor"] = look_at
+        if distance > 1.0 or look_at:
+            view_params["distance"] = distance if distance > 1.0 else 450.0
+            view_params["yaw_offset"] = yaw_offset
+            view_params["height"] = height
         if duration > 0.1:
+            shot_params = {
+                "location": loc,
+                "rotation": rot,
+                "duration": duration,
+                "mode": cam_mode,
+            }
+            if look_at:
+                shot_params["look_at_actor"] = look_at
+            if "distance" in view_params:
+                shot_params["distance"] = view_params["distance"]
+                shot_params["yaw_offset"] = yaw_offset
+                shot_params["height"] = height
+            actor_move = str(plan.get("move_actor_path") or "")
+            if actor_move:
+                shot_params["actor_path"] = actor_move
             return AgentAction(
                 kind="create_shot",
                 reason=reason,
-                command={
-                    "command": "sequence.create_shot",
-                    "params": {
-                        "location": loc,
-                        "rotation": rot,
-                        "duration": duration,
-                        "actor_path": str(plan.get("actor_path") or ""),
-                    },
-                },
+                command={"command": "sequence.create_shot", "params": shot_params},
             )
         return AgentAction(
             kind="set_view",
             reason=reason,
-            command={
-                "command": "world.set_view",
-                "params": {"transform": {"location": loc, "rotation": rot}},
-            },
+            command={"command": "world.set_view", "params": view_params},
         )
 
     if action in ("create_shot", "camera_shot", "cinematic_shot", "sequence_shot"):
         pitch = float(plan.get("pitch", 0.0))
         duration = float(plan.get("duration", 4.0))
         actor_path = str(plan.get("actor_path") or "")
+        look_at = str(plan.get("look_at_actor") or plan.get("look_at_actor_path") or "")
+        cam_mode = str(plan.get("mode") or plan.get("camera_mode") or "free").lower()
+        if cam_mode not in ("free", "pawn", "player", "character"):
+            cam_mode = "free"
+        distance = float(plan.get("distance") or 0.0)
+        yaw_offset = float(plan.get("yaw_offset", plan.get("yaw_offset_degrees", 90.0)))
+        height = float(plan.get("height") or 120.0)
         shot_params: dict[str, Any] = {
             "location": {"x": x, "y": y, "z": z if z else 200.0},
             "rotation": {"pitch": pitch, "yaw": yaw, "roll": 0.0},
             "duration": duration,
+            "mode": cam_mode,
         }
-        if actor_path:
+        if look_at:
+            shot_params["look_at_actor"] = look_at
+        if distance > 1.0:
+            shot_params["distance"] = distance
+            shot_params["yaw_offset"] = yaw_offset
+            shot_params["height"] = height
+        if actor_path and not look_at:
+            # actor_path on create_shot historically means "also move this actor"
             shot_params["actor_path"] = actor_path
             shot_params["target_location"] = {
                 "x": float(plan.get("actor_x", x)),
                 "y": float(plan.get("actor_y", y)),
                 "z": float(plan.get("actor_z", z if z else 100.0)),
             }
+        elif actor_path and look_at and actor_path != look_at:
+            shot_params["actor_path"] = actor_path
         return AgentAction(
             kind="create_shot",
             reason=reason,
@@ -549,7 +630,7 @@ class VisionLLMPlanner:
         base_url: Optional[str] = None,
         api_key: Optional[str] = None,
         model: Optional[str] = None,
-        timeout: float = 120.0,
+        timeout: float = 60.0,
         goal: str = "Seed a lit test scene with a few cubes, then idle.",
         fallback_rng: Optional[random.Random] = None,
         asset_hints: Optional[list[str]] = None,
@@ -732,10 +813,51 @@ class VisionLLMPlanner:
                 {"role": "user", "content": content},
             ],
         }
-        template_kwargs = chat_template_kwargs_for_model(self.model)
-        if template_kwargs:
-            payload["chat_template_kwargs"] = template_kwargs
+        body = self._chat_completion(payload)
+        raw = body["choices"][0]["message"]["content"]
+        if isinstance(raw, list):
+            raw = "".join(
+                part.get("text", "") if isinstance(part, dict) else str(part) for part in raw
+            )
+        self.last_raw = str(raw)
+        return _extract_json_object(self.last_raw)
 
+    def _chat_completion(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """POST /chat/completions with one retry, then Lightning fallback on timeout/5xx."""
+        primary = str(payload.get("model") or self.model)
+        fallback = _fallback_model()
+        models = [primary]
+        if fallback and fallback != primary:
+            models.append(fallback)
+
+        last_exc: Optional[BaseException] = None
+        for model_idx, model in enumerate(models):
+            attempt_payload = dict(payload)
+            attempt_payload["model"] = model
+            template_kwargs = chat_template_kwargs_for_model(model)
+            if template_kwargs:
+                attempt_payload["chat_template_kwargs"] = template_kwargs
+            else:
+                attempt_payload.pop("chat_template_kwargs", None)
+
+            attempts = 2 if model_idx == 0 else 1
+            for attempt in range(attempts):
+                try:
+                    return self._post_chat(attempt_payload)
+                except Exception as exc:
+                    last_exc = exc
+                    transient = _is_transient_llm_error(exc)
+                    if attempt + 1 < attempts and transient:
+                        continue
+                    if model_idx + 1 < len(models) and transient:
+                        self.last_error = (
+                            f"{primary} failed ({exc}); falling back to {models[model_idx + 1]}"
+                        )
+                        break
+                    raise
+        raise RuntimeError(str(last_exc) if last_exc else "LLM request failed")
+
+    def _post_chat(self, payload: dict[str, Any]) -> dict[str, Any]:
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
             self.base_url + "/chat/completions",
@@ -746,20 +868,24 @@ class VisionLLMPlanner:
                 **({"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}),
             },
         )
+        # Windows can leave SSL reads hanging past urlopen's timeout; also set a socket default.
+        prev_timeout = socket.getdefaulttimeout()
         try:
+            socket.setdefaulttimeout(float(self.timeout) + 5.0)
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                body = json.loads(resp.read().decode("utf-8"))
+                return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             err = exc.read().decode("utf-8", errors="replace")
             raise RuntimeError(f"LLM HTTP {exc.code}: {err[:400]}") from exc
-
-        raw = body["choices"][0]["message"]["content"]
-        if isinstance(raw, list):
-            raw = "".join(
-                part.get("text", "") if isinstance(part, dict) else str(part) for part in raw
-            )
-        self.last_raw = str(raw)
-        return _extract_json_object(self.last_raw)
+        except TimeoutError as exc:
+            raise RuntimeError(f"LLM timed out after {self.timeout:.0f}s") from exc
+        except OSError as exc:
+            # Includes socket.timeout on some Python builds
+            if _is_transient_llm_error(exc):
+                raise RuntimeError(f"LLM network error: {exc}") from exc
+            raise
+        finally:
+            socket.setdefaulttimeout(prev_timeout)
 
 
 def resolve_planner_mode(mode: str) -> str:

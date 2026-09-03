@@ -24,6 +24,27 @@ ThoughtFn = Callable[[str, str, dict[str, Any]], None]
 AvatarFn = Callable[[str, Optional[int], Optional[str]], None]  # state, form, trigger
 
 
+class UePieOfflineError(RuntimeError):
+    """Raised when the UE remote API is unreachable mid-loop."""
+
+
+def _is_connection_error(err: object) -> bool:
+    text = str(err or "").lower()
+    return any(
+        token in text
+        for token in (
+            "10061",
+            "10054",
+            "actively refused",
+            "forcibly closed",
+            "timed out",
+            "connection reset",
+            "unreachable",
+            "urlopen error",
+        )
+    )
+
+
 @dataclass
 class WorldSnapshot:
     actor_paths: list[str] = field(default_factory=list)
@@ -457,9 +478,15 @@ def decide_action(
             "rotation": {"pitch": -10.0, "yaw": yaw, "roll": 0.0},
             "duration": 3.0,
             "ease_in_out": True,
+            "mode": "free",
         }
         if skel_frame:
             shot_params["look_at_actor"] = skel_frame
+            shot_params["distance"] = 450.0
+            shot_params["yaw_offset"] = 90.0 if "left" in goal_l else (-90.0 if "right" in goal_l else 45.0)
+            shot_params["height"] = 120.0
+            # Let bridge compute orbit from actor when look_at + distance set.
+            shot_params["location"] = {"x": 0.0, "y": 0.0, "z": 0.0}
         return AgentAction(
             kind="create_shot",
             reason="Heuristic cinematic camera shot for framing goal",
@@ -602,19 +629,33 @@ class ObserveActLoop:
         self._thought("observation", "Capturing viewport + listing actors")
         cap = self.client.command({"command": "vision.capture_frame", "params": {}})
         if not cap.get("success"):
-            raise RuntimeError(f"capture_frame failed: {cap.get('error')}")
-        meta = _parse_result_json(cap)
-        frame = b""
-        try:
-            frame = self.client.frame()
-            frame_bytes = len(frame)
-        except urllib.error.HTTPError:
+            err = cap.get("error") or "capture_frame failed"
+            self._thought("error", f"capture_frame failed: {err}")
+            if _is_connection_error(err):
+                raise UePieOfflineError(f"PIE offline during capture_frame: {err}")
+            # Soft-fail: continue with empty frame so a single capture blip does not kill the run.
+            meta = {"error": str(err)}
+            frame = b""
             frame_bytes = 0
+        else:
+            meta = _parse_result_json(cap)
+            frame = b""
+            frame_bytes = 0
+            try:
+                frame = self.client.frame()
+                frame_bytes = len(frame)
+            except urllib.error.HTTPError:
+                pass
+            except Exception as exc:
+                if _is_connection_error(exc):
+                    raise UePieOfflineError(f"PIE offline during frame fetch: {exc}") from exc
 
         listed = self.client.command({
             "command": "world.list_actors",
             "params": {"include_details": True, "detail_limit": 12},
         })
+        if not listed.get("success") and _is_connection_error(listed.get("error")):
+            raise UePieOfflineError(f"PIE offline during list_actors: {listed.get('error')}")
         paths = _parse_actor_paths(listed)
         lights, meshes, skeletal = summarize_actors(paths)
         actor_details: list[dict[str, Any]] = []
@@ -679,13 +720,49 @@ class ObserveActLoop:
 
     def step(self, step_index: int = 1) -> StepResult:
         self._avatar("thinking", None, f"step_{step_index}_start")
-        before = self.observe()
+        try:
+            before = self.observe()
+        except UePieOfflineError as exc:
+            self._thought("error", str(exc))
+            dead = AgentAction(
+                kind="llm_error" if self.require_nim else "noop",
+                reason=str(exc),
+                command={"command": "world.list_actors", "params": {}},
+            )
+            return StepResult(
+                step=step_index,
+                observation=WorldSnapshot(),
+                action=dead,
+                act_result={"success": False, "error": str(exc), "result_json": "{}"},
+                reobservation=WorldSnapshot(),
+                ok=False,
+            )
         action = self._decide(before)
         self._thought("plan", action.reason, {"kind": action.kind})
+
+        # NIM required: stop after planner failure instead of executing a dummy list_actors.
+        if action.kind == "llm_error" and self.require_nim:
+            self._thought("error", action.reason, {"kind": "llm_error"})
+            self.memory.append({
+                "step": step_index,
+                "kind": "llm_error",
+                "reason": action.reason,
+                "ok": False,
+                "command": None,
+            })
+            return StepResult(
+                step=step_index,
+                observation=before,
+                action=action,
+                act_result={"success": False, "error": action.reason, "result_json": "{}"},
+                reobservation=before,
+                ok=False,
+            )
+
         self._thought("action", f"Executing {action.command.get('command')}", action.command)
 
-        if action.kind == "noop":
-            act_result = {"success": True, "error": "", "result_json": "{}", "skipped": True}
+        if action.kind in ("noop", "llm_error"):
+            act_result = {"success": action.kind == "noop", "error": action.reason if action.kind == "llm_error" else "", "result_json": "{}", "skipped": True}
         else:
             self._avatar("working", None, f"executing_{action.kind}")
             act_result = self.client.command(action.command)
@@ -736,7 +813,21 @@ class ObserveActLoop:
             if action.kind in ("apply_move", "create_shot", "move_actor")
             else 0.15
         )
-        after = self.observe()
+        try:
+            after = self.observe()
+        except UePieOfflineError as exc:
+            self._thought("error", str(exc))
+            failed = dict(act_result or {})
+            failed["success"] = False
+            failed["error"] = str(exc)
+            return StepResult(
+                step=step_index,
+                observation=before,
+                action=action,
+                act_result=failed,
+                reobservation=before,
+                ok=False,
+            )
         self._avatar("thinking", None, f"step_{step_index}_reobserving")
         return StepResult(
             step=step_index,
@@ -759,7 +850,8 @@ class ObserveActLoop:
             self._thought("plan", f"Agent step {i}/{budget}")
             self._avatar("thinking", None, f"step_{i}_planning")
             results.append(self.step(i))
-            grade = grade_goal(self.goal, results[-1].reobservation, self.memory)
+            last = results[-1]
+            grade = grade_goal(self.goal, last.reobservation, self.memory)
             self._thought(
                 "reflection",
                 grade.summary,
@@ -768,7 +860,12 @@ class ObserveActLoop:
             if grade.met:
                 self._avatar("success", None, "goal_satisfied")
                 break
-            if results[-1].action.kind == "noop" and results[-1].ok and grade.met:
+            if last.action.kind == "llm_error":
+                self._thought("error", "Stopping loop after planner/PIE failure", {"kind": last.action.kind})
+                break
+            if "PIE offline" in (last.act_result.get("error") or ""):
+                break
+            if last.action.kind == "noop" and last.ok and grade.met:
                 break
         final_state = "success" if results and all(r.ok for r in results) else "error"
         if results and grade_goal(self.goal, results[-1].reobservation, self.memory).met:
@@ -789,6 +886,8 @@ class ObserveActLoop:
         extensions = 0
         while not grade.met and extensions < 2 and results:
             last = results[-1]
+            if last.action.kind == "llm_error" or "PIE offline" in (last.act_result.get("error") or ""):
+                break
             progressed = (
                 last.reobservation.lights > last.observation.lights
                 or last.reobservation.meshes > last.observation.meshes

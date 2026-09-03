@@ -208,6 +208,37 @@ def build_get_view_command() -> dict[str, Any]:
     return {"command": "world.get_view", "params": {}}
 
 
+def build_set_view_command(
+    location: Vec3 = None,
+    rotation: Vec3 = None,
+    *,
+    mode: str = "free",
+    look_at_actor: str = "",
+    distance: float = 0.0,
+    yaw_offset: float = 90.0,
+    height: float = 120.0,
+) -> dict[str, Any]:
+    """Position PIE camera. Default mode=free uses Hephaestus CameraActor (does not move pawn)."""
+    params: dict[str, Any] = {
+        "mode": mode or "free",
+        "transform": {
+            "location": _vec3(location, (0.0, 0.0, 200.0)),
+            "rotation": _rotator(rotation),
+        },
+    }
+    if look_at_actor:
+        params["look_at_actor"] = look_at_actor
+    if distance and distance > 1.0:
+        params["distance"] = float(distance)
+        params["yaw_offset"] = float(yaw_offset)
+        params["height"] = float(height)
+    elif look_at_actor:
+        params["distance"] = 450.0
+        params["yaw_offset"] = float(yaw_offset)
+        params["height"] = float(height)
+    return {"command": "world.set_view", "params": params}
+
+
 def build_stop_animation_command(actor_path: str) -> dict[str, Any]:
     return {"command": "animation.stop", "params": {"actor_path": actor_path}}
 
@@ -226,12 +257,24 @@ def build_sequence_create_shot_command(
     duration: float = 4.0,
     actor_path: str = "",
     actor_target: Vec3 = None,
+    look_at_actor: str = "",
+    mode: str = "free",
+    distance: float = 0.0,
+    yaw_offset: float = 90.0,
+    height: float = 120.0,
 ) -> dict[str, Any]:
     params: dict[str, Any] = {
         "location": _vec3(location, (0.0, 0.0, 200.0)),
         "rotation": _rotator(rotation),
         "duration": float(duration),
+        "mode": mode or "free",
     }
+    if look_at_actor:
+        params["look_at_actor"] = look_at_actor
+    if distance and distance > 1.0:
+        params["distance"] = float(distance)
+        params["yaw_offset"] = float(yaw_offset)
+        params["height"] = float(height)
     if actor_path:
         params["actor_path"] = actor_path
         params["target_location"] = _vec3(actor_target, params["location"])

@@ -238,61 +238,87 @@ def run_autonomous_suite(
         scenario = selected.get(sid)
         if not scenario:
             continue
-        if scenario.kind == "infra":
-            if sid == "C":
-                steps.append(_infra_c(root))
-            elif sid == "D":
-                steps.append(_infra_d(root, live=live))
-            continue
+        print(f"[suite] {sid} starting…", flush=True)
+        try:
+            if scenario.kind == "infra":
+                if sid == "C":
+                    steps.append(_infra_c(root))
+                elif sid == "D":
+                    steps.append(_infra_d(root, live=live))
+                print(f"[suite] {sid} {'ok' if steps[-1].ok else 'FAIL'}: {steps[-1].detail}", flush=True)
+                continue
 
-        if scenario.kind == "direct":
+            if scenario.kind == "direct":
+                if skip_nim:
+                    steps.append(SuiteStepResult(sid, True, "skipped (offline — direct scenarios not run)", report={}))
+                    print(f"[suite] {sid} skipped", flush=True)
+                    continue
+                if sid == "E2" or scenario.goal == "__suite_locomotion__":
+                    steps.append(_direct_locomotion_suite(remote_api))
+                    print(f"[suite] {sid} {'ok' if steps[-1].ok else 'FAIL'}: {steps[-1].detail}", flush=True)
+                    continue
+                try:
+                    from agent_chat import run_chat
+                except ImportError:
+                    from hephaestus_forge.agent_chat import run_chat  # type: ignore
+                out = run_chat(
+                    scenario.goal,
+                    project_root=root,
+                    remote_api=remote_api,
+                    reset=True,
+                    on_thought=on_thought,
+                )
+                steps.append(
+                    SuiteStepResult(
+                        sid,
+                        bool(out.get("ok")),
+                        str(out.get("reply") or out.get("grade", {}).get("summary", "")),
+                        report={"planner": out.get("planner"), "grade": out.get("grade")},
+                    )
+                )
+                print(f"[suite] {sid} {'ok' if steps[-1].ok else 'FAIL'}: {steps[-1].detail}", flush=True)
+                continue
+
             if skip_nim:
-                steps.append(SuiteStepResult(sid, True, "skipped (offline — direct scenarios not run)", report={}))
+                steps.append(SuiteStepResult(sid, True, "skipped (offline — NIM goals not run)", report={}))
+                print(f"[suite] {sid} skipped", flush=True)
                 continue
-            if sid == "E2" or scenario.goal == "__suite_locomotion__":
-                steps.append(_direct_locomotion_suite(remote_api))
-                continue
-            try:
-                from agent_chat import run_chat
-            except ImportError:
-                from hephaestus_forge.agent_chat import run_chat  # type: ignore
-            out = run_chat(
+
+            report: AutonomousReport = run_autonomous_goal(
                 scenario.goal,
                 project_root=root,
                 remote_api=remote_api,
-                reset=True,
-                on_thought=on_thought,
+                require_nim=True,
+                repair=True,
+                max_steps=12,
+                on_thought=on_thought or (
+                    lambda kind, content, meta: print(
+                        f"[suite:{sid}] {kind}: {str(content)[:140]}",
+                        flush=True,
+                    )
+                    if kind in ("plan", "error", "reflection", "action")
+                    else None
+                ),
             )
             steps.append(
                 SuiteStepResult(
                     sid,
-                    bool(out.get("ok")),
-                    str(out.get("reply") or out.get("grade", {}).get("summary", "")),
-                    report={"planner": out.get("planner"), "grade": out.get("grade")},
+                    report.ok,
+                    report.grade.get("summary", ""),
+                    report=report.to_dict(),
                 )
             )
-            continue
-
-        if skip_nim:
-            steps.append(SuiteStepResult(sid, True, "skipped (offline — NIM goals not run)", report={}))
-            continue
-
-        report: AutonomousReport = run_autonomous_goal(
-            scenario.goal,
-            project_root=root,
-            remote_api=remote_api,
-            require_nim=True,
-            repair=True,
-            on_thought=on_thought,
-        )
-        steps.append(
-            SuiteStepResult(
-                sid,
-                report.ok,
-                report.grade.get("summary", ""),
-                report=report.to_dict(),
+            print(f"[suite] {sid} {'ok' if steps[-1].ok else 'FAIL'}: {steps[-1].detail}", flush=True)
+        except Exception as exc:
+            steps.append(
+                SuiteStepResult(
+                    sid,
+                    False,
+                    f"scenario crashed: {exc}",
+                    report={"error": str(exc), "error_type": type(exc).__name__},
+                )
             )
-        )
+            print(f"[suite] {sid} CRASH: {exc}", flush=True)
 
     ok = all(s.ok for s in steps) if steps else False
     return SuiteReport(ok=ok, steps=steps)
