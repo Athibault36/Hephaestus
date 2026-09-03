@@ -285,6 +285,89 @@ def build_sequence_stop_command() -> dict[str, Any]:
     return {"command": "sequence.stop", "params": {}}
 
 
+def build_create_material_command(
+    name: str = "HephaestusMaterial",
+    *,
+    base_material_path: str = "",
+    parameters: Optional[Mapping[str, str]] = None,
+) -> dict[str, Any]:
+    params: dict[str, Any] = {"name": name}
+    if base_material_path:
+        params["base_material_path"] = base_material_path
+    if parameters:
+        params["parameters"] = dict(parameters)
+    return {"command": "asset.create_material", "params": params}
+
+
+def build_import_fbx_command(
+    source_path: str,
+    *,
+    destination_path: str = "/Game/Hephaestus/Imported",
+    destination_name: Optional[str] = None,
+    destination_rename: bool = False,
+    destination_force_reimport: bool = False,
+    destination_package_error: bool = False,
+    auto_verify: bool = True,
+    import_materials: bool = True,
+    import_textures: bool = True,
+    uniform_scale: float = 1.0,
+) -> dict[str, Any]:
+    """Build an FBX import command (asset.import_fbx / import_fbx alias)."""
+    params: dict[str, Any] = {
+        "source_path": source_path,
+        "file_path": source_path,
+        "destination_path": destination_path,
+        "destination_rename": destination_rename,
+        "destination_force_reimport": destination_force_reimport,
+        "destination_package_error": destination_package_error,
+        "auto_verify": auto_verify,
+        "import_materials": import_materials,
+        "import_textures": import_textures,
+        "uniform_scale": uniform_scale,
+    }
+    if destination_name is not None:
+        params["destination_name"] = destination_name
+    return {"command": "asset.import_fbx", "params": params}
+
+
+def build_import_fbx_command_v2(
+    source_path: str,
+    *,
+    destination_path: str = "/Game/Hephaestus/Imported",
+    destination_name: Optional[str] = None,
+    destination_subobject_index: int = 0,
+    destination_subobject_name: Optional[str] = None,
+    destination_rename: bool = False,
+    destination_force_reimport: bool = False,
+    destination_package_error: bool = False,
+    auto_verify: bool = True,
+    verify_mesh_count: bool = True,
+    verify_anim_count: int = 0,
+    verify_texture_count: int = 0,
+) -> dict[str, Any]:
+    """FBX import with optional verify block (client-side expectations)."""
+    command = build_import_fbx_command(
+        source_path,
+        destination_path=destination_path,
+        destination_name=destination_name,
+        destination_rename=destination_rename,
+        destination_force_reimport=destination_force_reimport,
+        destination_package_error=destination_package_error,
+        auto_verify=auto_verify,
+    )
+    params = command["params"]
+    if destination_subobject_index >= 0:
+        params["destination_subobject_index"] = destination_subobject_index
+    if destination_subobject_name is not None:
+        params["destination_subobject_name"] = destination_subobject_name
+    params["verify"] = {
+        "mesh_count": verify_mesh_count,
+        "anim_count": verify_anim_count,
+        "texture_count": verify_texture_count,
+    }
+    return command
+
+
 def spawn_actor_json(**kwargs: Any) -> str:
     """JSON string ready for ExecuteCommand."""
     return json.dumps(build_spawn_actor_command(**kwargs))

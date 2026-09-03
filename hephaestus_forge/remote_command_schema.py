@@ -210,17 +210,23 @@ def validate_asset_export(command_obj: dict[str, Any]) -> list[str]:
 
 def validate_asset_import(command_obj: dict[str, Any]) -> list[str]:
     errors: list[str] = []
-    if command_obj.get("command") != "asset.import":
-        errors.append("command must be asset.import")
+    cmd = command_obj.get("command")
+    if cmd not in ("asset.import", "asset.import_fbx", "import_fbx"):
+        errors.append("command must be asset.import, asset.import_fbx, or import_fbx")
     params = resolve_params(command_obj)
     if params is None:
         errors.append("missing params/args object")
         return errors
-    if not params.get("file_path"):
-        errors.append("missing file_path")
+    if not (params.get("file_path") or params.get("source_path")):
+        errors.append("missing file_path or source_path")
     if not params.get("destination_path"):
         errors.append("missing destination_path")
     return errors
+
+
+def validate_import_fbx_command(command_obj: dict[str, Any]) -> list[str]:
+    """Validate import_fbx / asset.import_fbx (alias of asset.import)."""
+    return validate_asset_import(command_obj)
 
 
 def validate_asset_reimport(command_obj: dict[str, Any]) -> list[str]:

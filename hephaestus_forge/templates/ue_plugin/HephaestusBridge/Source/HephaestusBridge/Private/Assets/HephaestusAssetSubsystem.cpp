@@ -18,6 +18,12 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 
+#if WITH_EDITOR
+#include "AssetImportTask.h"
+#include "AssetToolsModule.h"
+#include "IAssetTools.h"
+#endif
+
 void UHephaestusAssetSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
@@ -74,13 +80,48 @@ UObject* UHephaestusAssetSubsystem::ImportAsset(const FString& FilePath, const F
 		UE_LOG(LogHephaestusBridge, Warning, TEXT("ImportAsset: destination_path required"));
 		return nullptr;
 	}
+
+#if WITH_EDITOR
+	UAssetImportTask* ImportTask = NewObject<UAssetImportTask>();
+	ImportTask->Filename = FilePath;
+	ImportTask->DestinationPath = DestinationPath;
+	ImportTask->bAutomated = true;
+	ImportTask->bSave = true;
+	ImportTask->bReplaceExisting = true;
+	ImportTask->bReplaceExistingSettings = true;
+
+	TArray<UAssetImportTask*> Tasks;
+	Tasks.Add(ImportTask);
+
+	FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools");
+	AssetToolsModule.Get().ImportAssetTasks(Tasks);
+
+	if (ImportTask->ImportedObjectPaths.Num() > 0)
+	{
+		const FString ImportedPath = ImportTask->ImportedObjectPaths[0];
+		UObject* Imported = FSoftObjectPath(ImportedPath).TryLoad();
+		UE_LOG(
+			LogHephaestusBridge,
+			Log,
+			TEXT("ImportAsset: imported %s -> %s (options scale=%.3f materials=%d textures=%d)"),
+			*FilePath,
+			*ImportedPath,
+			Options.UniformScale,
+			Options.bImportMaterials ? 1 : 0,
+			Options.bImportTextures ? 1 : 0);
+		return Imported;
+	}
+
+	UE_LOG(LogHephaestusBridge, Warning, TEXT("ImportAsset: AssetTools returned no objects for %s"), *FilePath);
+	return nullptr;
+#else
 	UE_LOG(
 		LogHephaestusBridge,
 		Warning,
-		TEXT("ImportAsset: validated %s -> %s (editor import pipeline deferred)"),
-		*FilePath,
-		*DestinationPath);
+		TEXT("ImportAsset: editor-only — cannot import %s outside editor builds"),
+		*FilePath);
 	return nullptr;
+#endif
 }
 
 bool UHephaestusAssetSubsystem::ReimportAsset(UObject* Asset)

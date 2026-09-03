@@ -222,6 +222,8 @@ TArray<FString> UHephaestusCommandHandler::GetAvailableCommands() const
         TEXT("world.query_spatial"),
         TEXT("asset.create_material"),
         TEXT("asset.import"),
+        TEXT("asset.import_fbx"),
+        TEXT("import_fbx"),
         TEXT("asset.reimport"),
         TEXT("asset.export"),
         TEXT("asset.create_instance"),
@@ -364,6 +366,10 @@ FHephaestusCommandResult UHephaestusCommandHandler::RouteCommand(const TSharedPt
     }
 
     // Route to subsystem handlers
+    if (Command.Equals(TEXT("import_fbx"), ESearchCase::IgnoreCase))
+    {
+        Command = TEXT("asset.import_fbx");
+    }
     if (Command.StartsWith(TEXT("world.")))
     {
         return HandleWorldCommand(Command, Params);
@@ -1015,37 +1021,59 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleAssetCommand(const FSt
                       *Material->GetPathName()))
             : MakeErrorResult(TEXT(""), TEXT("create_material failed"));
     }
-    else if (Action == TEXT("import"))
+    else if (Action == TEXT("import") || Action == TEXT("import_fbx"))
     {
         FString FilePath;
         FString DestinationPath;
+        FString DestinationName;
         if (Params.IsValid())
         {
             Params->TryGetStringField(TEXT("file_path"), FilePath);
+            if (FilePath.IsEmpty())
+            {
+                Params->TryGetStringField(TEXT("source_path"), FilePath);
+            }
             Params->TryGetStringField(TEXT("destination_path"), DestinationPath);
+            Params->TryGetStringField(TEXT("destination_name"), DestinationName);
         }
         if (FilePath.IsEmpty())
         {
-            return MakeErrorResult(TEXT(""), TEXT("import requires file_path"));
+            return MakeErrorResult(TEXT(""), TEXT("import requires file_path or source_path"));
         }
         if (DestinationPath.IsEmpty())
         {
-            return MakeErrorResult(TEXT(""), TEXT("import requires destination_path"));
+            DestinationPath = TEXT("/Game/Hephaestus/Imported");
         }
         if (!FPaths::FileExists(FilePath))
         {
             return MakeErrorResult(TEXT(""), FString::Printf(TEXT("import: file not found: %s"), *FilePath));
         }
-        UObject* Asset = AssetSubsystem->ImportAsset(FilePath, DestinationPath, FHephaestusImportOptions{});
+        FHephaestusImportOptions ImportOpts;
+        if (Params.IsValid())
+        {
+            Params->TryGetBoolField(TEXT("import_materials"), ImportOpts.bImportMaterials);
+            Params->TryGetBoolField(TEXT("import_textures"), ImportOpts.bImportTextures);
+            Params->TryGetBoolField(TEXT("auto_generate_collision"), ImportOpts.bAutoGenerateCollision);
+            double Scale = 1.0;
+            if (Params->TryGetNumberField(TEXT("uniform_scale"), Scale))
+            {
+                ImportOpts.UniformScale = static_cast<float>(Scale);
+            }
+        }
+        UObject* Asset = AssetSubsystem->ImportAsset(FilePath, DestinationPath, ImportOpts);
         if (Asset)
         {
             return MakeSuccessResult(
                 TEXT(""),
-                FString::Printf(TEXT("{\"asset_path\":\"%s\"}"), *DestinationPath));
+                FString::Printf(
+                    TEXT("{\"asset_path\":\"%s\",\"destination_path\":\"%s\",\"destination_name\":\"%s\"}"),
+                    *Asset->GetPathName(),
+                    *DestinationPath,
+                    *DestinationName));
         }
         return MakeErrorResult(
             TEXT(""),
-            TEXT("import: file validated on disk — editor import pipeline not linked yet"));
+            TEXT("import: AssetTools import produced no assets (check FBX path and editor permissions)"));
     }
     else if (Action == TEXT("reimport"))
     {

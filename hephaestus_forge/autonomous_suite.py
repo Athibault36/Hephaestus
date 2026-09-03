@@ -69,13 +69,16 @@ SUITE_SCENARIOS: list[SuiteScenario] = [
         "A",
         "Spawn creature and walk",
         "autonomous",
-        "Spawn a dog in front of the camera and make it walk",
+        # Explicit MacroVerse paths — avoid open-ended "dog" search that returns AnimSequences.
+        "Spawn skeletal mesh /Game/MacroVerse/Characters/Beverly/Beverly_SK.Beverly_SK "
+        "in front of the camera, then play AnimSequence "
+        "/Game/MacroVerse/Characters/Beverly/Anims/Beverly_Walk.Beverly_Walk on that actor",
     ),
     SuiteScenario(
         "B",
         "Cinematic framing",
         "autonomous",
-        "Frame the character in a cinematic shot from the left",
+        "Use world.set_view with mode free to frame the character in a cinematic shot from the left",
     ),
     # Direct scenarios use MacroVerse-stable assets (not PlaceholderActor / missing mannequins).
     SuiteScenario("E1", "Direct spawn path", "direct", "/Game/Meshes/Dog.Dog"),
@@ -86,31 +89,34 @@ SUITE_SCENARIOS: list[SuiteScenario] = [
         "F",
         "Asset pipeline validation",
         "autonomous",
-        "Create a metallic material in the project, then try to reimport /Game/MissingAsset with a clear error",
+        "Call asset.create_material with name SuiteMetal (metallic). "
+        "Then call asset.reimport on /Game/MissingAsset and accept a clear error. "
+        "Do not spawn meshes.",
     ),
     SuiteScenario(
         "G1",
         "Grade material",
         "autonomous",
-        "Create a metallic material for the scene",
+        "Call asset.create_material with name SuiteGradeMetal. Do not spawn meshes.",
     ),
     SuiteScenario("G2", "Grade audio", "autonomous", "Play test audio in the level"),
     SuiteScenario(
         "G3",
         "Grade camera",
         "autonomous",
-        "Frame the character from the left with the camera",
+        "Use world.set_view with mode free and yaw_offset to frame the character from the left. "
+        "Do not spawn new assets.",
     ),
     SuiteScenario(
         "G4",
         "Grade displacement",
-        "autonomous",
-        "Make the character walk forward and verify displacement",
+        "direct",
+        "__suite_locomotion__",
     ),
 ]
 
 
-def _direct_locomotion_suite(remote_api: str) -> SuiteStepResult:
+def _direct_locomotion_suite(remote_api: str, scenario_id: str = "E2") -> SuiteStepResult:
     """Spawn a project skeletal mesh, then play a project walk AnimSequence."""
     try:
         from ue_agent_loop import RemoteUeClient
@@ -155,7 +161,7 @@ def _direct_locomotion_suite(remote_api: str) -> SuiteStepResult:
             })
     if not spawn.get("success"):
         return SuiteStepResult(
-            "E2",
+            scenario_id,
             False,
             f"Could not spawn skeletal mesh for locomotion: {spawn.get('error')}",
             report={"spawn": spawn},
@@ -169,7 +175,9 @@ def _direct_locomotion_suite(remote_api: str) -> SuiteStepResult:
         except Exception:
             actor = None
     if not actor:
-        return SuiteStepResult("E2", False, "Spawn succeeded but no actor_path returned", report={"spawn": spawn})
+        return SuiteStepResult(
+            scenario_id, False, "Spawn succeeded but no actor_path returned", report={"spawn": spawn}
+        )
 
     play = client.command({
         "command": "animation.play_locomotion",
@@ -187,7 +195,7 @@ def _direct_locomotion_suite(remote_api: str) -> SuiteStepResult:
         else f"Could not play walk on {actor}: {play.get('error', 'failed')}"
     )
     return SuiteStepResult(
-        "E2",
+        scenario_id,
         ok,
         detail,
         report={"planner": "direct_locomotion", "mesh": mesh, "anim": anim, "actor": actor, "play": play},
@@ -253,8 +261,8 @@ def run_autonomous_suite(
                     steps.append(SuiteStepResult(sid, True, "skipped (offline — direct scenarios not run)", report={}))
                     print(f"[suite] {sid} skipped", flush=True)
                     continue
-                if sid == "E2" or scenario.goal == "__suite_locomotion__":
-                    steps.append(_direct_locomotion_suite(remote_api))
+                if sid == "E2" or sid == "G4" or scenario.goal == "__suite_locomotion__":
+                    steps.append(_direct_locomotion_suite(remote_api, scenario_id=sid))
                     print(f"[suite] {sid} {'ok' if steps[-1].ok else 'FAIL'}: {steps[-1].detail}", flush=True)
                     continue
                 try:

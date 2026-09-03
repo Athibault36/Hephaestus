@@ -112,6 +112,37 @@ def _extract_game_paths(text: str) -> list[str]:
     return re.findall(r"/Game/[^\s,;\"']+", text or "")
 
 
+_NON_SPAWN_PATH_MARKERS = (
+    ".AnimSequence",
+    ".AnimMontage",
+    ".Animation",
+    ".Material",
+    ".MaterialInstance",
+    ".MaterialInstanceConstant",
+    ".Texture2D",
+    ".SoundWave",
+    ".LevelSequence",
+    "/Anims/",
+    "/Materials/",
+    "/Textures/",
+    "/Audio/",
+    "MissingAsset",
+)
+
+
+def _spawnable_game_paths(text: str) -> list[str]:
+    """/Game paths that must appear as spawned meshes — not anims/materials/hints."""
+    out: list[str] = []
+    for path in _extract_game_paths(text):
+        lower = path.lower()
+        if any(m.lower() in lower or m in path for m in _NON_SPAWN_PATH_MARKERS):
+            continue
+        if "animsequence" in lower or "animmontage" in lower:
+            continue
+        out.append(path)
+    return out
+
+
 def _mesh_paths_in_snapshot(snapshot: Any) -> set[str]:
     paths: set[str] = set()
     for detail in getattr(snapshot, "actor_details", None) or []:
@@ -133,8 +164,8 @@ def _spawned_mesh_paths(memory: Optional[list[dict[str, Any]]]) -> set[str]:
 
 
 def _asset_goal_satisfied(goal: str, snapshot: Any, memory: Optional[list[dict[str, Any]]]) -> bool:
-    """True when a /Game asset path named in the goal appears in scene or spawn memory."""
-    wanted = _extract_game_paths(goal)
+    """True when a spawnable /Game mesh path named in the goal appears in scene or spawn memory."""
+    wanted = _spawnable_game_paths(goal)
     if not wanted:
         return False
     scene = _mesh_paths_in_snapshot(snapshot)
@@ -327,17 +358,20 @@ def grade_goal(goal: str, snapshot: Any, memory: Optional[list[dict[str, Any]]] 
         elif not wants_montage:
             missing.append("animation not playing")
 
-    if ("level sequence" in goal_l or ("sequence" in goal_l and "/game/" in goal_l)):
+    # Require a LevelSequence only — not AnimSequence / play_sequence wording.
+    wants_level_sequence = (
+        "level sequence" in goal_l
+        or "sequence.play" in goal_l
+        or "play level sequence" in goal_l
+        or (".levelsequence" in goal_l and "/game/" in goal_l)
+    )
+    if wants_level_sequence:
         played = any(
-            (step.get("command") == "sequence.play" or step.get("kind") == "play_level_sequence")
+            (
+                step.get("command") == "sequence.play"
+                or step.get("kind") == "play_level_sequence"
+            )
             and step.get("ok")
-            for step in (memory or [])
-        )
-        if not played:
-            missing.append("level sequence not playing")
-    elif "sequence.play" in goal_l or "play level sequence" in goal_l:
-        played = any(
-            step.get("command") == "sequence.play" and step.get("ok")
             for step in (memory or [])
         )
         if not played:
@@ -373,7 +407,8 @@ def grade_goal(goal: str, snapshot: Any, memory: Optional[list[dict[str, Any]]] 
             return GradeResult(met=True, score=1.0, summary="Seed goal satisfied", missing=[])
 
     gradable = _has_gradable_criteria(goal_l, min_lights, min_meshes, min_skeletal)
-    if _extract_game_paths(goal) and not _asset_goal_satisfied(goal, snapshot, memory):
+    spawnable = _spawnable_game_paths(goal)
+    if spawnable and not _asset_goal_satisfied(goal, snapshot, memory):
         missing.append("named asset not spawned yet")
 
     if not missing and not gradable:
