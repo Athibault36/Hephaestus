@@ -7,5 +7,10 @@
       "command": "cd hephaestus_forge/templates/mission_control && npm run dev"
     }
   ],
-  "ports": [3000]
+  "ports": [
+    {
+      "name": "mission-control",
+      "port": 3000
+    }
+  ]
 }
