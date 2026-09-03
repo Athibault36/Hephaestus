@@ -38,7 +38,8 @@ public:
 		const FString& ActorPath = TEXT(""),
 		const FVector& ActorTargetLocation = FVector::ZeroVector,
 		const FString& LookAtActorPath = TEXT(""),
-		bool bEaseInOut = true);
+		bool bEaseInOut = true,
+		const FString& CameraMode = TEXT("free"));
 
 private:
 	UWorld* ResolveWorld() const;

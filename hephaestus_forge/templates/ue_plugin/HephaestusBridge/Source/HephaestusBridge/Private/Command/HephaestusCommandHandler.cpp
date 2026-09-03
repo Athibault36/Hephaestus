@@ -635,13 +635,88 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleWorldCommand(const FSt
             ParseVectorField(Params, TEXT("location"), Loc);
             ParseRotatorField(Params, TEXT("rotation"), Rot);
         }
-        if (!WorldSubsystem->SetView(Loc, Rot))
+
+        FString Mode = TEXT("free");
+        Params->TryGetStringField(TEXT("mode"), Mode);
+        if (Mode.IsEmpty())
         {
-            return MakeErrorResult(TEXT(""), TEXT("Failed to set view (is PIE running?)"));
+            Mode = TEXT("free");
         }
+
+        FString LookAtActor;
+        Params->TryGetStringField(TEXT("look_at_actor"), LookAtActor);
+        if (LookAtActor.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("look_at_actor_path"), LookAtActor);
+        }
+        if (LookAtActor.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("frame_actor"), LookAtActor);
+        }
+
+        // Orbit framing around an actor when distance / yaw_offset / frame_actor provided.
+        double Distance = 0.0;
+        double YawOffset = 90.0;
+        double Height = 120.0;
+        Params->TryGetNumberField(TEXT("distance"), Distance);
+        if (!Params->TryGetNumberField(TEXT("yaw_offset"), YawOffset))
+        {
+            Params->TryGetNumberField(TEXT("yaw_offset_degrees"), YawOffset);
+        }
+        Params->TryGetNumberField(TEXT("height"), Height);
+
+        const bool bWantFrame =
+            !LookAtActor.IsEmpty()
+            && (Distance > 1.0 || Params->HasField(TEXT("yaw_offset")) || Params->HasField(TEXT("yaw_offset_degrees"))
+                || Params->HasField(TEXT("frame_actor")) || Loc.IsNearlyZero());
+
+        if (bWantFrame && Distance <= 1.0)
+        {
+            Distance = 450.0;
+        }
+
+        if (bWantFrame && !LookAtActor.IsEmpty())
+        {
+            if (!WorldSubsystem->FrameActor(
+                    LookAtActor,
+                    static_cast<float>(Distance),
+                    static_cast<float>(YawOffset),
+                    static_cast<float>(Height),
+                    Mode))
+            {
+                return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Failed to frame actor: %s"), *LookAtActor));
+            }
+            FVector ViewLoc;
+            FRotator ViewRot;
+            FVector Forward;
+            WorldSubsystem->GetView(ViewLoc, ViewRot, Forward);
+            Loc = ViewLoc;
+            Rot = ViewRot;
+        }
+        else
+        {
+            if (!LookAtActor.IsEmpty())
+            {
+                AActor* LookTarget = WorldSubsystem->FindActorByPath(LookAtActor);
+                if (LookTarget)
+                {
+                    const FVector ToTarget = LookTarget->GetActorLocation() - Loc;
+                    if (!ToTarget.IsNearlyZero())
+                    {
+                        Rot = ToTarget.Rotation();
+                        Rot.Pitch -= 8.f;
+                    }
+                }
+            }
+            if (!WorldSubsystem->SetView(Loc, Rot, Mode))
+            {
+                return MakeErrorResult(TEXT(""), TEXT("Failed to set view (is PIE running?)"));
+            }
+        }
+
         const FString ResultJSON = FString::Printf(
-            TEXT("{\"location\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},\"rotation\":{\"pitch\":%.3f,\"yaw\":%.3f,\"roll\":%.3f}}"),
-            Loc.X, Loc.Y, Loc.Z, Rot.Pitch, Rot.Yaw, Rot.Roll);
+            TEXT("{\"location\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},\"rotation\":{\"pitch\":%.3f,\"yaw\":%.3f,\"roll\":%.3f},\"mode\":\"%s\",\"look_at_actor\":\"%s\"}"),
+            Loc.X, Loc.Y, Loc.Z, Rot.Pitch, Rot.Yaw, Rot.Roll, *Mode, *LookAtActor);
         return MakeSuccessResult(TEXT(""), ResultJSON);
     }
     else if (Action == TEXT("get_actor"))
@@ -1948,20 +2023,74 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleSequenceCommand(
         {
             ParseVectorField(Params, TEXT("target_location"), ActorTarget);
         }
+
+        FString CameraMode = TEXT("free");
+        Params->TryGetStringField(TEXT("mode"), CameraMode);
+        if (CameraMode.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("camera_mode"), CameraMode);
+        }
+        if (CameraMode.IsEmpty())
+        {
+            CameraMode = TEXT("free");
+        }
+
+        // Optional orbit framing when look_at + distance provided without explicit location.
+        double Distance = 0.0;
+        double YawOffset = 90.0;
+        double Height = 120.0;
+        Params->TryGetNumberField(TEXT("distance"), Distance);
+        if (!Params->TryGetNumberField(TEXT("yaw_offset"), YawOffset))
+        {
+            Params->TryGetNumberField(TEXT("yaw_offset_degrees"), YawOffset);
+        }
+        Params->TryGetNumberField(TEXT("height"), Height);
+        if (!LookAtActor.IsEmpty() && Distance > 1.0 && TargetLocation.IsNearlyZero())
+        {
+            if (!WorldSubsystem)
+            {
+                if (UGameInstance* GI = GetGameInstance())
+                {
+                    WorldSubsystem = GI->GetSubsystem<UHephaestusWorldSubsystem>();
+                }
+            }
+            FVector FrameLoc;
+            FRotator FrameRot;
+            if (WorldSubsystem && WorldSubsystem->ComputeFramePose(
+                    LookAtActor,
+                    static_cast<float>(Distance),
+                    static_cast<float>(YawOffset),
+                    static_cast<float>(Height),
+                    FrameLoc,
+                    FrameRot))
+            {
+                TargetLocation = FrameLoc;
+                TargetRotation = FrameRot;
+            }
+        }
+
         if (TargetLocation.IsNearlyZero())
         {
             return MakeErrorResult(TEXT(""), TEXT("target location required for sequence.create_shot"));
         }
         const bool bOk = SequenceSubsystem->CreateCameraShot(
-            TargetLocation, TargetRotation, static_cast<float>(Duration), ActorPath, ActorTarget, LookAtActor, bEaseInOut);
+            TargetLocation,
+            TargetRotation,
+            static_cast<float>(Duration),
+            ActorPath,
+            ActorTarget,
+            LookAtActor,
+            bEaseInOut,
+            CameraMode);
         return bOk
             ? MakeSuccessResult(
                   TEXT(""),
                   FString::Printf(
-                      TEXT("{\"duration\":%.2f,\"camera_shot\":true,\"look_at_actor\":\"%s\",\"ease_in_out\":%s}"),
+                      TEXT("{\"duration\":%.2f,\"camera_shot\":true,\"look_at_actor\":\"%s\",\"ease_in_out\":%s,\"mode\":\"%s\"}"),
                       Duration,
                       *LookAtActor,
-                      bEaseInOut ? TEXT("true") : TEXT("false")))
+                      bEaseInOut ? TEXT("true") : TEXT("false"),
+                      *CameraMode))
             : MakeErrorResult(TEXT(""), TEXT("Failed to create camera shot"));
     }
 
