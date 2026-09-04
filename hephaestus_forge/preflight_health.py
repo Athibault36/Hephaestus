@@ -53,38 +53,78 @@ class PreflightReport:
         }
 
 
-def _probe_ue(remote_api: str, timeout: float = 2.0) -> HealthCheck:
+def _normalize_project_dir(path: Any) -> str:
+    """Compare UE ProjectDir vs forge project_root across OS path quirks."""
+    p = Path(str(path)).resolve()
+    # UE ProjectDir usually ends with a trailing separator conceptually; strip noise.
+    text = str(p).replace("/", "\\").rstrip("\\").lower()
+    return text
+
+
+def fetch_ue_health(remote_api: str, timeout: float = 2.0) -> dict[str, Any]:
+    url = remote_api.rstrip("/") + "/v1/health"
+    with urllib.request.urlopen(url, timeout=timeout) as resp:
+        if resp.status != 200:
+            raise RuntimeError(f"HTTP {resp.status}")
+        return json.loads(resp.read().decode("utf-8") or "{}")
+
+
+def pie_matches_project(health: dict[str, Any], project_root: Path) -> tuple[bool, str]:
+    """Return (ok, detail) whether live PIE health belongs to project_root."""
+    expected = _normalize_project_dir(project_root)
+    remote_dir = str(health.get("project_dir") or "").strip()
+    remote_name = str(health.get("project_name") or "").strip()
+    if not remote_dir and not remote_name:
+        return (
+            False,
+            "PIE health has no project_dir/project_name — rebuild HephaestusBridge, then Play",
+        )
+    if remote_dir:
+        got = _normalize_project_dir(remote_dir)
+        if got == expected or got.startswith(expected + "\\") or expected.startswith(got + "\\"):
+            return True, f"PIE project matches ({remote_name or Path(remote_dir).name})"
+        return (
+            False,
+            f"PIE is '{remote_name or remote_dir}' but forge target is '{project_root.name}' "
+            f"— close other editors / Play the correct .uproject (got {remote_dir})",
+        )
+    # Name-only fallback
+    if remote_name and remote_name.lower() == project_root.name.lower():
+        return True, f"PIE project name matches ({remote_name})"
+    return (
+        False,
+        f"PIE project_name '{remote_name}' != '{project_root.name}' — Play the matching .uproject",
+    )
+
+
+def _probe_ue(remote_api: str, timeout: float = 2.0, project_root: Optional[Path] = None) -> HealthCheck:
     url = remote_api.rstrip("/") + "/v1/health"
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
-            if resp.status != 200:
+        body = fetch_ue_health(remote_api, timeout=timeout)
+        service = body.get("service", "hephaestus-remote")
+        port = body.get("port", "")
+        plugin_version = body.get("plugin_version", "")
+        detail = f"Online ({service}"
+        if port:
+            detail += f", port {port}"
+        if plugin_version:
+            detail += f", plugin {plugin_version}"
+            if plugin_version != BRIDGE_VERSION:
                 return HealthCheck(
                     "ue_pie",
-                    False,
-                    f"UE Remote API returned HTTP {resp.status} at {url}",
+                    True,
+                    detail + f" — rebuild required (factory template v{BRIDGE_VERSION})",
+                    blocker=True,
                 )
-            import json
-
-            body = json.loads(resp.read().decode("utf-8") or "{}")
-            service = body.get("service", "hephaestus-remote")
-            port = body.get("port", "")
-            plugin_version = body.get("plugin_version", "")
-            detail = f"Online ({service}"
-            if port:
-                detail += f", port {port}"
-            if plugin_version:
-                detail += f", plugin {plugin_version}"
-                if plugin_version != BRIDGE_VERSION:
-                    return HealthCheck(
-                        "ue_pie",
-                        True,
-                        detail + f" — rebuild required (factory template v{BRIDGE_VERSION})",
-                        blocker=True,
-                    )
-            else:
-                detail += f" — no plugin_version in health (rebuild HephaestusBridge v{BRIDGE_VERSION})"
-            detail += ")"
-            return HealthCheck("ue_pie", True, detail, blocker=True)
+        else:
+            detail += f" — no plugin_version in health (rebuild HephaestusBridge v{BRIDGE_VERSION})"
+        detail += ")"
+        if project_root is not None:
+            match_ok, match_detail = pie_matches_project(body, Path(project_root))
+            if not match_ok:
+                return HealthCheck("ue_pie", False, match_detail, blocker=True)
+            detail += f"; {match_detail}"
+        return HealthCheck("ue_pie", True, detail, blocker=True)
     except Exception as exc:
         return HealthCheck(
             "ue_pie",
@@ -271,7 +311,7 @@ def run_preflight(
         HealthCheck("forge", True, f"HephaestusForge {FORGE_VERSION} (bridge template {BRIDGE_VERSION})", blocker=False),
         _probe_project(project_root),
         _probe_bridge_template(project_root),
-        _probe_ue(remote_api),
+        _probe_ue(remote_api, project_root=project_root),
         _probe_bridge_capabilities(remote_api),
         _probe_nim_key(),
         _probe_planner(),

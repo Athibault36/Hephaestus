@@ -559,6 +559,68 @@ class ProjectScaffold:
                 "Plugins": [{"Name": "HephaestusBridge", "Enabled": True}],
             }, indent=2) + "\n", encoding="utf-8")
             self.console.print(f"  ✓ Written: {uproject.relative_to(project_root)}")
+        self._write_minimal_game_module(project_root, config.project_name)
+
+    def _write_minimal_game_module(self, project_root: Path, project_name: str) -> None:
+        """Stub C++ game module so UBT can build *Editor for forge compile."""
+        src = project_root / "Source"
+        if (src / f"{project_name}.Target.cs").exists():
+            return
+        (src / project_name).mkdir(parents=True, exist_ok=True)
+        (src / f"{project_name}.Target.cs").write_text(
+            "using UnrealBuildTool;\n"
+            "using System.Collections.Generic;\n\n"
+            f"public class {project_name}Target : TargetRules\n"
+            "{\n"
+            f"\tpublic {project_name}Target(TargetInfo Target) : base(Target)\n"
+            "\t{\n"
+            "\t\tType = TargetType.Game;\n"
+            "\t\tDefaultBuildSettings = BuildSettingsVersion.V7;\n"
+            "\t\tIncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_8;\n"
+            f'\t\tExtraModuleNames.Add("{project_name}");\n'
+            "\t}\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (src / f"{project_name}Editor.Target.cs").write_text(
+            "using UnrealBuildTool;\n"
+            "using System.Collections.Generic;\n\n"
+            f"public class {project_name}EditorTarget : TargetRules\n"
+            "{\n"
+            f"\tpublic {project_name}EditorTarget(TargetInfo Target) : base(Target)\n"
+            "\t{\n"
+            "\t\tType = TargetType.Editor;\n"
+            "\t\tDefaultBuildSettings = BuildSettingsVersion.V7;\n"
+            "\t\tIncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_8;\n"
+            f'\t\tExtraModuleNames.Add("{project_name}");\n'
+            "\t}\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        mod = src / project_name
+        (mod / f"{project_name}.Build.cs").write_text(
+            "using UnrealBuildTool;\n\n"
+            f"public class {project_name} : ModuleRules\n"
+            "{\n"
+            f"\tpublic {project_name}(ReadOnlyTargetRules Target) : base(Target)\n"
+            "\t{\n"
+            "\t\tPCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;\n"
+            '\t\tPublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore" });\n'
+            "\t}\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (mod / f"{project_name}.h").write_text(
+            "#pragma once\n\n#include \"CoreMinimal.h\"\n",
+            encoding="utf-8",
+        )
+        (mod / f"{project_name}.cpp").write_text(
+            f'#include "{project_name}.h"\n'
+            '#include "Modules/ModuleManager.h"\n\n'
+            f'IMPLEMENT_PRIMARY_GAME_MODULE(FDefaultGameModuleImpl, {project_name}, "{project_name}");\n',
+            encoding="utf-8",
+        )
+        self.console.print(f"  ✓ Written: Source/{project_name} (minimal game module)")
 
     def _write_config(self, project_root: Path, config: ForgeConfig) -> None:
         forge_dir = project_root / config.paths.forge_dir

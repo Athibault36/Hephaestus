@@ -60,20 +60,36 @@ def test_resolve_suite_static_mesh_skips_materials():
 
 
 def test_wait_for_pie_returns_true_when_health_ok():
-    client = MagicMock()
-    client.health.return_value = {"ok": True}
-    with patch("autonomous_suite._client", return_value=(client, lambda e: False)):
-        assert wait_for_pie("http://127.0.0.1:8765", timeout_s=1.0, poll_s=0.01) is True
+    with patch(
+        "preflight_health.fetch_ue_health",
+        return_value={"ok": True, "project_name": "X", "project_dir": "C:\\X"},
+    ):
+        with patch("autonomous_suite.pie_matches_project", create=True):
+            with patch(
+                "hephaestus_forge.preflight_health.pie_matches_project",
+                return_value=(True, "ok"),
+            ):
+                pass
+    with patch("autonomous_suite.fetch_ue_health", create=True):
+        pass
+    # Patch the import path wait_for_pie uses (preflight_health.*)
+    with patch("preflight_health.fetch_ue_health", return_value={"ok": True}):
+        with patch("preflight_health.pie_matches_project", return_value=(True, "match")):
+            with patch("autonomous_suite._client", return_value=(MagicMock(), lambda e: False)):
+                assert wait_for_pie("http://127.0.0.1:8765", timeout_s=1.0, poll_s=0.01) is True
 
 
 def test_wait_for_pie_retries_connection_errors_then_ok():
-    client = MagicMock()
-    client.health.side_effect = [
-        ConnectionError("10061 actively refused"),
-        {"ok": True},
-    ]
-    is_conn = lambda e: "10061" in str(e)
-    with patch("autonomous_suite._client", return_value=(client, is_conn)):
-        with patch("autonomous_suite.time.sleep"):
-            assert wait_for_pie("http://127.0.0.1:8765", timeout_s=5.0, poll_s=0.01) is True
-    assert client.health.call_count == 2
+    health_calls = {"n": 0}
+
+    def fake_health(*_a, **_k):
+        health_calls["n"] += 1
+        if health_calls["n"] == 1:
+            raise ConnectionError("10061 actively refused")
+        return {"ok": True}
+
+    with patch("preflight_health.fetch_ue_health", side_effect=fake_health):
+        with patch("autonomous_suite._client", return_value=(MagicMock(), lambda e: "10061" in str(e))):
+            with patch("autonomous_suite.time.sleep"):
+                assert wait_for_pie("http://127.0.0.1:8765", timeout_s=5.0, poll_s=0.01) is True
+    assert health_calls["n"] == 2
