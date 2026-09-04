@@ -55,6 +55,13 @@ def test_prepare_dist_writes_fallback_when_missing(tmp_path):
         d.mkdir(parents=True, exist_ok=True)
         (d / "index.html").write_text("fallback", encoding="utf-8")
 
-    out = prepare_mission_control_dist(tmp_path, "MissionControl", force_static=False, write_fallback=_fallback)
+    # Disable auto npm/vite build so this asserts the static fallback path.
+    out = prepare_mission_control_dist(
+        tmp_path,
+        "MissionControl",
+        force_static=False,
+        write_fallback=_fallback,
+        auto_build=False,
+    )
     assert (out / "index.html").read_text(encoding="utf-8") == "fallback"
     assert calls == [""]
