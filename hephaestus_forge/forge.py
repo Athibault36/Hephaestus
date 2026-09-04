@@ -1850,7 +1850,7 @@ _MISSION_CONTROL_HTML = r"""<!DOCTYPE html>
       <button class="primary" id="btnCapture">Capture frame</button>
       <button id="btnRefresh">Refresh image</button>
       <button id="btnHealth">Ping API</button>
-      <button id="btnAgentLoop" class="primary">Run agent loop (DeepSeek)</button>
+      <button id="btnAgentLoop" class="primary">Run agent loop (Nemotron Ultra)</button>
     </div>
     <div class="viewport-wrap">
       <img id="viewport" alt=""/>
@@ -2592,7 +2592,7 @@ function applyChatResult(json) {
     showToast("LLM: " + json.llm_error, "err");
   }
   if (!json.llm_available && json.planner === "heuristic") {
-    showToast("Heuristic mode — set NVIDIA_API_KEY for DeepSeek", "err");
+    showToast("Heuristic mode — set NVIDIA_API_KEY for Nemotron Ultra", "err");
   }
   if (json.session) renderChat(json.session.messages || []);
   state = json.ok ? "success" : "active";
@@ -2601,7 +2601,7 @@ function applyChatResult(json) {
 function applyLoopResult(json) {
   log("tool_result", json);
   if (json.llm_error) log("error", "LLM: " + json.llm_error);
-  if (!json.llm_available) log("error", "DeepSeek not used — check NVIDIA_API_KEY in shell running forge observe");
+  if (!json.llm_available) log("error", "NIM planner not used — check NVIDIA_API_KEY in shell running forge observe");
   (json.thoughts || []).forEach((t) => log(t.kind || "plan", t.content || ""));
   state = json.ok ? "success" : "error";
   setTimeout(() => { state = "active"; }, 1500);
@@ -2644,7 +2644,7 @@ async function loadAgentHealth() {
         : (data.checks || []).filter(c => !c.ok && c.blocker).map(c => c.detail).join(" ") || "Fix blockers above before chatting.";
     }
     if (data.llm_available) {
-      plannerStatusEl.textContent = "DeepSeek ready";
+      plannerStatusEl.textContent = "Nemotron Ultra ready";
       plannerStatusEl.className = "pill ok";
     } else {
       plannerStatusEl.textContent = "No API key";
@@ -2750,9 +2750,9 @@ document.getElementById("btnAgentLoop").onclick = async () => {
   const btn = document.getElementById("btnAgentLoop");
   btn.disabled = true;
   try {
-    log("plan", "Starting DeepSeek agent loop via /agent/loop");
+    log("plan", "Starting Nemotron Ultra agent loop via /agent/loop");
     viewportPlaceholder.classList.remove("hidden");
-    viewportPlaceholder.textContent = "Agent running (DeepSeek V4 Pro)…";
+    viewportPlaceholder.textContent = "Agent running (Nemotron Ultra)…";
     state = 'working';
     const chatInput = document.getElementById("chatInput");
     const goalText = (chatInput && chatInput.value.trim()) || "Seed a lit test scene with a few cubes in front of the camera, then idle.";

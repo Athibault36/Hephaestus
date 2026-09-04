@@ -80,7 +80,7 @@ def test_step_returns_on_llm_error_when_require_nim():
     def planner(_snap, _mem=None):
         return AgentAction(
             kind="llm_error",
-            reason="DeepSeek planner failed: The read operation timed out",
+            reason="NIM planner failed: The read operation timed out",
             command={"command": "world.list_actors", "params": {}},
         )
 

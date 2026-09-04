@@ -374,7 +374,7 @@ def make_handler(
                                 )
                             elif not use_llm and not llm_error:
                                 llm_error = (
-                                    "DeepSeek planner unavailable: set NVIDIA_API_KEY or "
+                                    "NIM planner unavailable: set NVIDIA_API_KEY or "
                                     "HEPHAESTUS_LLM_API_KEY (heuristic fallback was used)"
                                 )
                             return {

@@ -104,7 +104,7 @@ def _probe_nim_key() -> HealthCheck:
     return HealthCheck(
         "nim_api_key",
         False,
-        "Set NVIDIA_API_KEY (or HEPHAESTUS_LLM_API_KEY) for DeepSeek planner — heuristic fallback only",
+        "Set NVIDIA_API_KEY (or HEPHAESTUS_LLM_API_KEY) for Nemotron planner — heuristic fallback only",
         blocker=False,
     )
 
