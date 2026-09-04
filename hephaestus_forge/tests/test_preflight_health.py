@@ -26,8 +26,11 @@ def test_preflight_online_ue_with_key(tmp_path):
     (plugin_dir / "HEPHAESTUS_BRIDGE_VERSION").write_text(f"{BRIDGE_VERSION}\n", encoding="utf-8")
     fake_resp = MagicMock()
     fake_resp.status = 200
+    proj = str(tmp_path.resolve()).replace("\\", "\\\\")
     fake_resp.read.return_value = (
-        f'{{"ok":true,"service":"hephaestus-remote","port":8765,"plugin_version":"{BRIDGE_VERSION}"}}'
+        f'{{"ok":true,"service":"hephaestus-remote","port":8765,'
+        f'"plugin_version":"{BRIDGE_VERSION}",'
+        f'"project_name":"{tmp_path.name}","project_dir":"{proj}"}}'
     ).encode()
     fake_resp.__enter__ = lambda s: s
     fake_resp.__exit__ = MagicMock(return_value=False)
@@ -39,6 +42,41 @@ def test_preflight_online_ue_with_key(tmp_path):
                 report = run_preflight("http://127.0.0.1:8765", tmp_path)
     assert report.ready is True
     assert any(c.name == "project" and c.ok for c in report.checks)
+
+
+def test_preflight_rejects_mismatched_pie_project(tmp_path):
+    forge = tmp_path / ".hephaestus_forge"
+    forge.mkdir()
+    plugin_dir = tmp_path / "Plugins" / "HephaestusBridge"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "HEPHAESTUS_BRIDGE_VERSION").write_text(f"{BRIDGE_VERSION}\n", encoding="utf-8")
+    fake_resp = MagicMock()
+    fake_resp.status = 200
+    fake_resp.read.return_value = (
+        f'{{"ok":true,"service":"hephaestus-remote","port":8765,'
+        f'"plugin_version":"{BRIDGE_VERSION}",'
+        f'"project_name":"MacroVerse","project_dir":"C:\\\\Unreal Projects\\\\MacroVerse"}}'
+    ).encode()
+    fake_resp.__enter__ = lambda s: s
+    fake_resp.__exit__ = MagicMock(return_value=False)
+    with patch("urllib.request.urlopen", return_value=fake_resp):
+        report = run_preflight("http://127.0.0.1:8765", tmp_path)
+    ue = next(c for c in report.checks if c.name == "ue_pie")
+    assert ue.ok is False
+    assert "MacroVerse" in ue.detail or "matching" in ue.detail.lower()
+    assert report.ready is False
+
+
+def test_pie_matches_project_normalizes_paths(tmp_path):
+    from preflight_health import pie_matches_project
+
+    ok, detail = pie_matches_project(
+        {"project_name": tmp_path.name, "project_dir": str(tmp_path) + "\\"},
+        tmp_path,
+    )
+    assert ok is True
+    assert "matches" in detail.lower()
+
 
 
 def test_grade_camera_framing_requires_set_view():

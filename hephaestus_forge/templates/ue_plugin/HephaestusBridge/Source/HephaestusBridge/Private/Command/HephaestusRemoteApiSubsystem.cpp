@@ -31,6 +31,10 @@
 
 #include "Misc/Parse.h"
 
+#include "Misc/Paths.h"
+
+#include "Misc/App.h"
+
 #include "Serialization/JsonSerializer.h"
 
 #include "Serialization/JsonWriter.h"
@@ -290,12 +294,17 @@ bool UHephaestusRemoteApiSubsystem::HandleCors(const FHttpServerRequest& Request
 bool UHephaestusRemoteApiSubsystem::HandleHealth(const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete)
 
 {
+	TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+	Root->SetBoolField(TEXT("ok"), true);
+	Root->SetStringField(TEXT("service"), TEXT("hephaestus-remote"));
+	Root->SetNumberField(TEXT("port"), ListenPort);
+	Root->SetStringField(TEXT("plugin_version"), HEPHAESTUS_BRIDGE_VERSION);
+	Root->SetStringField(TEXT("project_name"), FApp::GetProjectName());
+	Root->SetStringField(TEXT("project_dir"), FPaths::ConvertRelativePathToFull(FPaths::ProjectDir()));
 
-	const FString Body = FString::Printf(
-
-		TEXT("{\"ok\":true,\"service\":\"hephaestus-remote\",\"port\":%d,\"plugin_version\":\"%s\"}"),
-		ListenPort,
-		HEPHAESTUS_BRIDGE_VERSION);
+	FString Body;
+	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Body);
+	FJsonSerializer::Serialize(Root, Writer);
 
 	TUniquePtr<FHttpServerResponse> Response = FHttpServerResponse::Create(Body, TEXT("application/json"));
 

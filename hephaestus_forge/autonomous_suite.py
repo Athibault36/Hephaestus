@@ -194,18 +194,40 @@ def resolve_suite_static_mesh(client: Any) -> str:
     return ""
 
 
-def wait_for_pie(remote_api: str, *, timeout_s: float = 45.0, poll_s: float = 2.0) -> bool:
-    """Block until /v1/health is ok, or timeout."""
+def wait_for_pie(
+    remote_api: str,
+    *,
+    timeout_s: float = 45.0,
+    poll_s: float = 2.0,
+    project_root: Optional[Path] = None,
+) -> bool:
+    """Block until /v1/health is ok (and matches project_root when given), or timeout."""
+    try:
+        from preflight_health import fetch_ue_health, pie_matches_project
+    except ImportError:
+        from hephaestus_forge.preflight_health import fetch_ue_health, pie_matches_project  # type: ignore
+
     client, _is_conn = _client(remote_api, timeout=5.0)
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         try:
-            health = client.health()
-            if health.get("ok"):
-                return True
+            health = fetch_ue_health(remote_api, timeout=5.0)
+            if not health.get("ok"):
+                time.sleep(poll_s)
+                continue
+            if project_root is not None:
+                ok, _ = pie_matches_project(health, Path(project_root))
+                if not ok:
+                    time.sleep(poll_s)
+                    continue
+            return True
         except Exception as exc:
             if not _is_conn(exc):
-                return False
+                # Non-connection errors while matching may still be transient JSON issues.
+                try:
+                    client.health()
+                except Exception:
+                    pass
         time.sleep(poll_s)
     return False
 
@@ -466,16 +488,16 @@ def run_autonomous_suite(
         print(f"[suite] {sid} starting…", flush=True)
         try:
             if live and _needs_pie(scenario):
-                if not wait_for_pie(remote_api, timeout_s=30.0):
+                if not wait_for_pie(remote_api, timeout_s=30.0, project_root=root):
                     steps.append(
                         SuiteStepResult(
                             sid,
                             False,
-                            "PIE offline before scenario — press Play and retry",
-                            report={"error": "pie_offline"},
+                            "PIE offline or wrong project before scenario — Play the matching .uproject",
+                            report={"error": "pie_offline_or_mismatch"},
                         )
                     )
-                    print(f"[suite] {sid} FAIL: PIE offline before scenario", flush=True)
+                    print(f"[suite] {sid} FAIL: PIE offline or wrong project before scenario", flush=True)
                     continue
 
             result = _run_one(sid, scenario)
@@ -488,7 +510,7 @@ def run_autonomous_suite(
                 and (_is_connection_error(result.detail) or "pie offline" in detail_l)
             ):
                 print(f"[suite] {sid} PIE drop — waiting to retry…", flush=True)
-                if wait_for_pie(remote_api, timeout_s=45.0):
+                if wait_for_pie(remote_api, timeout_s=45.0, project_root=root):
                     result = _run_one(sid, scenario)
                     result.report = {**(result.report or {}), "pie_retry": True}
 
@@ -496,7 +518,7 @@ def run_autonomous_suite(
             print(f"[suite] {sid} {'ok' if result.ok else 'FAIL'}: {result.detail}", flush=True)
         except UePieOfflineError as exc:
             print(f"[suite] {sid} PIE offline — waiting to retry…", flush=True)
-            if live and wait_for_pie(remote_api, timeout_s=45.0):
+            if live and wait_for_pie(remote_api, timeout_s=45.0, project_root=root):
                 try:
                     result = _run_one(sid, scenario)
                     result.report = {**(result.report or {}), "pie_retry": True}
@@ -515,7 +537,7 @@ def run_autonomous_suite(
             )
             print(f"[suite] {sid} FAIL: PIE offline: {exc}", flush=True)
         except Exception as exc:
-            if live and _is_connection_error(exc) and wait_for_pie(remote_api, timeout_s=45.0):
+            if live and _is_connection_error(exc) and wait_for_pie(remote_api, timeout_s=45.0, project_root=root):
                 try:
                     result = _run_one(sid, scenario)
                     result.report = {**(result.report or {}), "pie_retry": True}
