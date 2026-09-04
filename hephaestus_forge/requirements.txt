@@ -20,6 +20,9 @@ sentence-transformers>=3.0.0
 # Optional: Hephaestus Desktop native window
 # pywebview>=5.0
 
+# Local .env loading (NVIDIA_API_KEY, HEPHAESTUS_PLANNER_VISION, …)
+python-dotenv>=1.0.0
+
 # Optional: local LLM server
 # llama-cpp-python[server]  # install separately with CUDA wheel on Linux
 
