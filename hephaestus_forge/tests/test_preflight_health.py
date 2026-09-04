@@ -35,7 +35,7 @@ def test_preflight_online_ue_with_key(tmp_path):
         with patch("urllib.request.urlopen", return_value=fake_resp):
             with patch("ue_vision_planner.VisionLLMPlanner") as planner_cls:
                 planner_cls.return_value.available = True
-                planner_cls.return_value.model = "deepseek-ai/deepseek-v4-pro-0813"
+                planner_cls.return_value.model = "nvidia/nemotron-3-ultra-550b-a55b"
                 report = run_preflight("http://127.0.0.1:8765", tmp_path)
     assert report.ready is True
     assert any(c.name == "project" and c.ok for c in report.checks)

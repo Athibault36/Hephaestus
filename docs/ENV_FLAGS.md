@@ -37,8 +37,8 @@ Requires `NVIDIA_API_KEY`. Repair loop is on by default for `forge run` and MC c
 
 ## NIM model IDs (planner)
 
-- Planner (default): `deepseek-ai/deepseek-v4-pro-0813`
-- Ultra (legacy): `nvidia/nemotron-3-ultra-550b-a55b`
+- Planner / Ultra (default): `nvidia/nemotron-3-ultra-550b-a55b`
+- Optional DeepSeek: `deepseek-ai/deepseek-v4-pro-0813`
 - Lightning: `nvidia/nemotron-3.5-lightning-30b-a3b`
 
 Dead aliases (`nvidia/nemotron-3-ultra`, `nvidia/nemotron-3-8b`) are remapped in `NIMClient`.

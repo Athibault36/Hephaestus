@@ -42,7 +42,7 @@ export function AgentConsole() {
           {preflightReady ? 'PIE ready' : 'PIE offline'}
         </span>
         <span className={`pill ${plannerAvailable ? 'ok' : ''}`}>
-          {plannerAvailable ? 'DeepSeek ready' : 'Heuristic mode'}
+          {plannerAvailable ? 'Nemotron Ultra ready' : 'Heuristic mode'}
         </span>
         {agentBusy && <span className="pill busy">Agent working…</span>}
       </div>

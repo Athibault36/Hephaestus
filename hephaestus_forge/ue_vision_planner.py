@@ -2,7 +2,7 @@
 """
 LLM planner for the UE observe→act loop (NVIDIA NIM OpenAI-compatible API).
 
-Default model: deepseek-ai/deepseek-v4-pro-0813 @ https://integrate.api.nvidia.com/v1
+Default model: nvidia/nemotron-3-ultra-550b-a55b @ https://integrate.api.nvidia.com/v1
 Auth: NVIDIA_API_KEY or HEPHAESTUS_LLM_API_KEY
 
 Planner uses text over frame census + step memory by default. When
@@ -623,7 +623,7 @@ def _vision_caption_enabled() -> bool:
 
 
 class VisionLLMPlanner:
-    """NIM text planner (DeepSeek V4 Pro by default) with heuristic fallback."""
+    """NIM text planner (Nemotron-3 Ultra by default) with heuristic fallback."""
 
     def __init__(
         self,
@@ -684,7 +684,7 @@ class VisionLLMPlanner:
             if _vision_caption_enabled():
                 return AgentAction(
                     kind="llm_error",
-                    reason=f"DeepSeek planner failed (vision required): {exc}",
+                    reason=f"NIM planner failed (vision required): {exc}",
                     command={"command": "world.list_actors", "params": {}},
                 )
             if not self.available:
@@ -695,7 +695,7 @@ class VisionLLMPlanner:
                 return fallback
             return AgentAction(
                 kind="llm_error",
-                reason=f"DeepSeek planner failed: {exc}",
+                reason=f"NIM planner failed: {exc}",
                 command={"command": "world.list_actors", "params": {}},
             )
 

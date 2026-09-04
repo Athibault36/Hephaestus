@@ -36,9 +36,9 @@ Registered targets are stored in `%USERPROFILE%\.hephaestus\projects.json`.
 - **Canonical command body**: always prefer `"params"` (also accept `"args"`). Nested `transform.location.{x,y,z}` or flat `location` arrays both work.
 - **Spawns**: place actors **in front of the camera** (`world.get_view` → along `forward`). World origin is behind the default PIE pawn looking −X.
 - **NIM coding models (both, in parallel)**:
-  - Planner (default): `deepseek-ai/deepseek-v4-pro-0813`
-  - Ultra (legacy planner): `nvidia/nemotron-3-ultra-550b-a55b`
+  - Planner / Ultra (default): `nvidia/nemotron-3-ultra-550b-a55b`
   - Lightning: `nvidia/nemotron-3.5-lightning-30b-a3b`
+  - Optional: `deepseek-ai/deepseek-v4-pro-0813` (aliases `deepseek-v4-pro`, etc.)
   - Dead ids (404): `nvidia/nemotron-3-ultra`, `nvidia/nemotron-3-8b` — aliases remap in `NIMClient`
 
 ## Auth
