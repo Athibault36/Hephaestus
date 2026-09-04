@@ -330,15 +330,17 @@ def _direct_spawn_mesh_suite(remote_api: str, scenario_id: str = "E1") -> SuiteS
     if not mesh:
         return SuiteStepResult(scenario_id, False, "No StaticMesh found via asset.search", report={})
     try:
-        from agent_chat import run_chat
+        from agent_asset import spawn_asset_in_view
     except ImportError:
-        from hephaestus_forge.agent_chat import run_chat  # type: ignore
-    out = run_chat(mesh, project_root=None, remote_api=remote_api, reset=True)
+        from hephaestus_forge.agent_asset import spawn_asset_in_view  # type: ignore
+    results = spawn_asset_in_view(client, mesh, with_light=True)
+    ok = any(bool(r.get("success")) for r in results)
+    detail = f"Spawned {mesh}" if ok else f"Failed to spawn {mesh}"
     return SuiteStepResult(
         scenario_id,
-        bool(out.get("ok")),
-        str(out.get("reply") or out.get("grade", {}).get("summary", "")),
-        report={"mesh": mesh, "planner": out.get("planner"), "grade": out.get("grade")},
+        ok,
+        detail,
+        report={"mesh": mesh, "planner": "direct_spawn", "results": results},
     )
 
 
