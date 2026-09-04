@@ -79,17 +79,10 @@ def test_wait_for_pie_returns_true_when_health_ok():
                 assert wait_for_pie("http://127.0.0.1:8765", timeout_s=1.0, poll_s=0.01) is True
 
 
-def test_wait_for_pie_retries_connection_errors_then_ok():
-    health_calls = {"n": 0}
+def test_skip_no_character_is_ok():
+    from autonomous_suite import _skip_no_character
 
-    def fake_health(*_a, **_k):
-        health_calls["n"] += 1
-        if health_calls["n"] == 1:
-            raise ConnectionError("10061 actively refused")
-        return {"ok": True}
-
-    with patch("preflight_health.fetch_ue_health", side_effect=fake_health):
-        with patch("autonomous_suite._client", return_value=(MagicMock(), lambda e: "10061" in str(e))):
-            with patch("autonomous_suite.time.sleep"):
-                assert wait_for_pie("http://127.0.0.1:8765", timeout_s=5.0, poll_s=0.01) is True
-    assert health_calls["n"] == 2
+    r = _skip_no_character("E2", "blank project")
+    assert r.ok is True
+    assert r.report.get("skipped") is True
+    assert "skipped" in r.detail

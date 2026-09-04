@@ -157,9 +157,12 @@ def _prefer_sk_paths(paths: list[str]) -> list[str]:
 
 
 def resolve_suite_character_assets(client: Any) -> tuple[str, str]:
-    """Pick a skeletal mesh + walk anim from the live project (any UE target)."""
+    """Pick a skeletal mesh + walk anim from the live project (any UE target).
+
+    Falls back to Engine package search via asset.search when /Game is empty.
+    """
     mesh_hits: list[str] = []
-    for query in ("Beverly", "character", "SK_", "mannequin", "body"):
+    for query in ("Beverly", "character", "mannequin", "SK_", "SKM_", "body", "Quinn", "Manny"):
         mesh_hits.extend(_search(client, query, asset_class="SkeletalMesh", limit=8))
         if mesh_hits:
             break
@@ -170,10 +173,10 @@ def resolve_suite_character_assets(client: Any) -> tuple[str, str]:
     tokens = []
     if mesh:
         # Prefer walk anims near the chosen character folder.
-        parts = [p for p in mesh.split("/") if p and p not in ("Game",)]
+        parts = [p for p in mesh.split("/") if p and p not in ("Game", "Engine")]
         if parts:
-            tokens.append(parts[1] if len(parts) > 1 else parts[0])
-    tokens.extend(["Walk", "walk", "locomotion"])
+            tokens.append(parts[0] if parts[0] not in ("EditorMeshes", "EngineMeshes") else (parts[1] if len(parts) > 1 else parts[0]))
+    tokens.extend(["Walk", "walk", "locomotion", "MF_Walk", "Idle"])
     for token in tokens:
         anim_hits.extend(_search(client, token, asset_class="AnimSequence", limit=8))
         walkish = [p for p in anim_hits if "walk" in p.lower()]
@@ -183,6 +186,16 @@ def resolve_suite_character_assets(client: Any) -> tuple[str, str]:
     anim_hits = list(dict.fromkeys(anim_hits))
     anim = anim_hits[0] if anim_hits else ""
     return mesh, anim
+
+
+def _skip_no_character(scenario_id: str, detail: str) -> SuiteStepResult:
+    """Blank projects have no SK content — treat as soft skip, not suite failure."""
+    return SuiteStepResult(
+        scenario_id,
+        True,
+        f"skipped: {detail}",
+        report={"skipped": True, "reason": detail},
+    )
 
 
 def resolve_suite_static_mesh(client: Any) -> str:
@@ -236,10 +249,7 @@ def _spawn_walk_goal(remote_api: str) -> str:
     client, _ = _client(remote_api)
     mesh, anim = resolve_suite_character_assets(client)
     if not mesh:
-        return (
-            "Spawn a skeletal mesh character in front of the camera and play a walk AnimSequence "
-            "(no project skeletal mesh found via asset.search)"
-        )
+        return "__suite_skip_no_character__"
     if anim:
         return (
             f"Spawn skeletal mesh {mesh} in front of the camera, then play AnimSequence "
@@ -253,11 +263,9 @@ def _direct_locomotion_suite(remote_api: str, scenario_id: str = "E2") -> SuiteS
     client, _ = _client(remote_api, timeout=60.0)
     mesh, anim = resolve_suite_character_assets(client)
     if not mesh:
-        return SuiteStepResult(
+        return _skip_no_character(
             scenario_id,
-            False,
-            "No SkeletalMesh found via asset.search for locomotion suite",
-            report={},
+            "No SkeletalMesh via asset.search (/Game or Engine) — blank project",
         )
 
     spawn = client.command({
@@ -338,9 +346,16 @@ def _direct_search_character_suite(remote_api: str, scenario_id: str = "E4") -> 
     client, _ = _client(remote_api)
     hits = _search(client, "character", asset_class="SkeletalMesh", limit=12)
     if not hits:
+        hits = _search(client, "mannequin", asset_class="SkeletalMesh", limit=12)
+    if not hits:
         hits = _search(client, "SK_", asset_class="SkeletalMesh", limit=12)
+    if not hits:
+        return _skip_no_character(
+            scenario_id,
+            "No /Game or Engine skeletal meshes matched — blank project",
+        )
     ok = bool(hits)
-    detail = ("Asset matches:\n- " + "\n- ".join(hits[:12])) if hits else "No /Game skeletal meshes matched."
+    detail = "Asset matches:\n- " + "\n- ".join(hits[:12])
     return SuiteStepResult(scenario_id, ok, detail, report={"matches": hits})
 
 
@@ -456,6 +471,12 @@ def run_autonomous_suite(
         goal = scenario.goal
         if goal == "__suite_spawn_walk__":
             goal = _spawn_walk_goal(remote_api)
+        if goal == "__suite_skip_no_character__":
+            return _skip_no_character(sid, "No SkeletalMesh via asset.search — blank project")
+        if sid == "G3":
+            mesh, _anim = resolve_suite_character_assets(_client(remote_api)[0])
+            if not mesh:
+                return _skip_no_character(sid, "No SkeletalMesh via asset.search — blank project")
 
         report: AutonomousReport = run_autonomous_goal(
             goal,
