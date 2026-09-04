@@ -21,6 +21,20 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Optional
 
+# Load factory-root .env early so NVIDIA_API_KEY / HEPHAESTUS_* persist across forge cmds.
+def _load_factory_dotenv() -> None:
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    factory_root = Path(__file__).resolve().parent.parent
+    env_path = factory_root / ".env"
+    if env_path.is_file():
+        load_dotenv(env_path, override=False)
+
+
+_load_factory_dotenv()
+
 import typer
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -311,15 +325,34 @@ class SystemScanner:
             result.warnings.append("No GPU detected: CPU-only mode (very slow)")
 
     def _find_ue58(self) -> tuple[Optional[str], Optional[str]]:
-        # Check env var first
-        if ue_path := os.environ.get("UE_PATH"):
-            version_file = Path(ue_path) / "Engine" / "Build" / "Version.txt"
-            if version_file.exists():
-                version = version_file.read_text().strip()
+        def _version_from(path: Path) -> Optional[str]:
+            build_version = path / "Engine" / "Build" / "Build.version"
+            if build_version.is_file():
+                try:
+                    data = json.loads(build_version.read_text(encoding="utf-8"))
+                    major = data.get("MajorVersion")
+                    minor = data.get("MinorVersion")
+                    patch = data.get("PatchVersion", 0)
+                    if major == 5 and minor == 8:
+                        return f"{major}.{minor}.{patch}"
+                except Exception:
+                    pass
+            version_file = path / "Engine" / "Build" / "Version.txt"
+            if version_file.is_file():
+                version = version_file.read_text(encoding="utf-8", errors="replace").strip()
                 if version.startswith("5.8"):
-                    return ue_path, version
+                    return version
+            # Epic launcher installs often omit Version.txt; directory name is enough.
+            if path.name in ("UE_5.8", "5.8") and (path / "Engine" / "Binaries").exists():
+                return "5.8"
+            return None
 
-        # Common locations
+        if ue_path := os.environ.get("UE_PATH"):
+            root = Path(ue_path)
+            version = _version_from(root)
+            if version:
+                return str(root), version
+
         candidates = [
             Path.home() / "UnrealEngine" / "5.8",
             Path("C:/UnrealEngine/5.8"),
@@ -330,11 +363,9 @@ class SystemScanner:
 
         for path in candidates:
             if path.exists():
-                version_file = path / "Engine" / "Build" / "Version.txt"
-                if version_file.exists():
-                    version = version_file.read_text().strip()
-                    if version.startswith("5.8"):
-                        return str(path), version
+                version = _version_from(path)
+                if version:
+                    return str(path), version
 
         return None, None
 

@@ -103,14 +103,27 @@ SUITE_SCENARIOS: list[SuiteScenario] = [
         "G3",
         "Grade camera",
         "autonomous",
-        "Use world.set_view with mode free and yaw_offset to frame the character from the left. "
-        "Do not spawn new assets.",
+        "Spawn a skeletal mesh character in front of the camera, then use world.set_view with mode free and yaw_offset to frame that character from the left. Do not spawn additional assets.",
     ),
     SuiteScenario(
         "G4",
         "Grade displacement",
         "direct",
         "__suite_locomotion__",
+    ),
+    SuiteScenario("H1", "Direct world view", "direct", "__suite_get_view__"),
+    SuiteScenario("H2", "Direct create material", "direct", "__suite_create_material__"),
+    SuiteScenario(
+        "I1",
+        "Grade spotlight",
+        "autonomous",
+        "Spawn a spotlight in front of the camera aimed at the character. Do not spawn meshes.",
+    ),
+    SuiteScenario(
+        "I2",
+        "Grade list + idle",
+        "autonomous",
+        "Call world.list_actors then idle. Do not spawn meshes.",
     ),
 ]
 
@@ -309,6 +322,26 @@ def _direct_search_character_suite(remote_api: str, scenario_id: str = "E4") -> 
     return SuiteStepResult(scenario_id, ok, detail, report={"matches": hits})
 
 
+def _direct_get_view_suite(remote_api: str, scenario_id: str = "H1") -> SuiteStepResult:
+    client, _ = _client(remote_api)
+    view = client.command({"command": "world.get_view", "params": {}})
+    ok = bool(view.get("success"))
+    detail = "world.get_view ok" if ok else f"world.get_view failed: {view.get('error')}"
+    return SuiteStepResult(scenario_id, ok, detail, report={"view": view})
+
+
+def _direct_create_material_suite(remote_api: str, scenario_id: str = "H2") -> SuiteStepResult:
+    client, _ = _client(remote_api)
+    name = f"SuiteDirectMat_{int(time.time()) % 100000}"
+    result = client.command({
+        "command": "asset.create_material",
+        "params": {"name": name},
+    })
+    ok = bool(result.get("success"))
+    detail = f"Created material {name}" if ok else f"create_material failed: {result.get('error')}"
+    return SuiteStepResult(scenario_id, ok, detail, report={"result": result, "name": name})
+
+
 def _infra_c(project_root: Path) -> SuiteStepResult:
     dist = mc_dist_path(project_root)
     ok = dist.is_dir() and is_vite_build(dist)
@@ -373,6 +406,10 @@ def run_autonomous_suite(
                 return _direct_spawn_mesh_suite(remote_api, scenario_id=sid)
             if sid == "E4" or scenario.goal == "__suite_search_character__":
                 return _direct_search_character_suite(remote_api, scenario_id=sid)
+            if sid == "H1" or scenario.goal == "__suite_get_view__":
+                return _direct_get_view_suite(remote_api, scenario_id=sid)
+            if sid == "H2" or scenario.goal == "__suite_create_material__":
+                return _direct_create_material_suite(remote_api, scenario_id=sid)
             try:
                 from agent_chat import run_chat
             except ImportError:
@@ -421,7 +458,7 @@ def run_autonomous_suite(
             report=report.to_dict(),
         )
 
-    order = ["C", "D", "A", "B", "E1", "E2", "E3", "E4", "F", "G1", "G2", "G3", "G4"]
+    order = ["C", "D", "A", "B", "E1", "E2", "E3", "E4", "F", "G1", "G2", "G3", "G4", "H1", "H2", "I1", "I2"]
     for sid in order:
         scenario = selected.get(sid)
         if not scenario:
