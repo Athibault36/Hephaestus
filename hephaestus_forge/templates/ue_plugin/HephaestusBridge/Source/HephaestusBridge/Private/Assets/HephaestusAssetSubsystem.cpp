@@ -353,7 +353,13 @@ bool UHephaestusAssetSubsystem::SearchAssetsJson(
 	{
 		FARFilter EngineFilter = Filter;
 		EngineFilter.PackagePaths.Reset();
+		// BasicShapes covers Cube/etc. Broader Engine roots cover mannequin/SK fallbacks on blank projects.
 		EngineFilter.PackagePaths.Add(TEXT("/Engine/BasicShapes"));
+		EngineFilter.PackagePaths.Add(TEXT("/Engine/EngineMeshes"));
+		EngineFilter.PackagePaths.Add(TEXT("/Engine/EditorMeshes"));
+		EngineFilter.PackagePaths.Add(TEXT("/Engine/Animation"));
+		EngineFilter.PackagePaths.Add(TEXT("/Engine/Characters"));
+		EngineFilter.PackagePaths.Add(TEXT("/Engine/ArtTools"));
 		EngineFilter.bRecursivePaths = true;
 		TArray<FAssetData> EngineAssets;
 		AssetRegistryModule.Get().GetAssets(EngineFilter, EngineAssets);
