@@ -139,7 +139,20 @@ def test_install_cc5_openplugin_copies_template(tmp_path: Path, monkeypatch):
     assert skip["ok"] and skip.get("skipped")
 
 
-def test_cc5_job_queue_timeout(monkeypatch, tmp_path: Path):
+def test_find_default_cc5_template(tmp_path: Path, monkeypatch):
+    from cc5_bridge import find_default_cc5_template
+
+    bin64 = tmp_path / "Bin64"
+    bin64.mkdir()
+    exe = bin64 / "CharacterCreator.exe"
+    exe.write_bytes(b"x")
+    default = tmp_path / "Program" / "Default"
+    default.mkdir(parents=True)
+    mannequin = default / "Mannequin_Male.ccAvatar"
+    mannequin.write_bytes(b"avatar")
+    monkeypatch.setattr("cc5_bridge.find_cc5", lambda env=None: str(exe))
+    assert find_default_cc5_template() == str(mannequin)
+
     from cc5_bridge import _export_via_job_queue
 
     monkeypatch.setattr("cc5_bridge.cc5_jobs_dir", lambda: tmp_path)
