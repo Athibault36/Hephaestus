@@ -331,6 +331,64 @@ def _spawned_actor_path(import_result: dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _apply_cc5_height_scale_in_pie(actor_path: str, appearance: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    """
+    When CC5 lacks Character Height morph, apply uniform actor scale in PIE for tall/short.
+    """
+    if not actor_path or not appearance:
+        return None
+    traits = {str(t).lower() for t in (appearance.get("traits") or [])}
+    morphs = appearance.get("morphs") or {}
+    h = float(morphs.get("height") or 0.0)
+    z = 1.0
+    if "tall" in traits or h < -0.2:
+        z = 1.12 + min(0.1, abs(h) * 0.08)
+    elif "short" in traits or h > 0.2:
+        z = 0.90 - min(0.06, abs(h) * 0.05)
+    else:
+        return None
+    if abs(z - 1.0) < 0.02:
+        return None
+    try:
+        from ue_agent_loop import RemoteUeClient
+    except ImportError:
+        try:
+            from hephaestus_forge.ue_agent_loop import RemoteUeClient  # type: ignore
+        except ImportError:
+            return None
+    client = RemoteUeClient()
+    info = client.command({"command": "world.get_actor", "params": {"actor_path": actor_path}})
+    loc = {"x": 0.0, "y": 0.0, "z": 0.0}
+    rot = {"pitch": 0.0, "yaw": 0.0, "roll": 0.0}
+    # Uniform scale only — non-uniform Z wrecks skinned CC5 meshes (spaghetti).
+    scale = {"x": z, "y": z, "z": z}
+    if info.get("success"):
+        try:
+            import json as _json
+            inner = _json.loads(info.get("result_json") or "{}")
+            if isinstance(inner.get("location"), dict):
+                loc = {k: float(inner["location"].get(k, 0)) for k in ("x", "y", "z")}
+            if isinstance(inner.get("rotation"), dict):
+                rot = {k: float(inner["rotation"].get(k, 0)) for k in ("pitch", "yaw", "roll")}
+            if isinstance(inner.get("scale"), dict):
+                sx = float(inner["scale"].get("x", 1.0))
+                sy = float(inner["scale"].get("y", 1.0))
+                sz = float(inner["scale"].get("z", 1.0))
+                # Re-apply uniform factor from current average scale
+                base = (sx + sy + sz) / 3.0
+                scale = {"x": base * z, "y": base * z, "z": base * z}
+        except Exception:
+            scale = {"x": z, "y": z, "z": z}
+    res = client.command({
+        "command": "world.set_transform",
+        "params": {
+            "actor_path": actor_path,
+            "transform": {"location": loc, "rotation": rot, "scale": scale},
+        },
+    })
+    return {"success": bool(res.get("success")), "scale": scale, "raw": res}
+
+
 def frame_actor(
     actor_path: str,
     *,
@@ -859,7 +917,12 @@ def try_direct_cc5_author(
     actor = _spawned_actor_path(imported)
     frame_res = None
     anim_res = None
+    height_scale_res = None
     if actor:
+        if provider == "cc5":
+            height_scale_res = _apply_cc5_height_scale_in_pie(
+                actor, export_meta.get("appearance") if isinstance(export_meta.get("appearance"), dict) else None
+            )
         frame_res = frame_actor(actor, create_shot=False)
         # People / animals should move after landing
         anim_mode = "walk" if wants_spin(message) or "walk" in (message or "").lower() else "idle"
@@ -876,6 +939,7 @@ def try_direct_cc5_author(
         "import": imported,
         "frame": frame_res,
         "animate": anim_res,
+        "height_scale": height_scale_res,
     }
     remember_dcc(project_root, meta)
     reply = (
