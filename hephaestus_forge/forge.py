@@ -4006,7 +4006,7 @@ def autonomous_suite_cmd(
     offline: Annotated[bool, typer.Option("--offline", help="Skip live NIM autonomous goals")] = False,
     json_out: Annotated[bool, typer.Option("--json", help="Emit suite report as JSON")] = False,
 ):
-    """Run operator A–G autonomous acceptance suite (v1)."""
+    """Run operator A–I autonomous acceptance suite (v1)."""
     try:
         from autonomous_suite import run_autonomous_suite
     except ImportError:
@@ -4024,10 +4024,21 @@ def autonomous_suite_cmd(
 
         typer.echo(_json.dumps(report.to_dict(), indent=2))
         raise typer.Exit(0 if report.ok else 1)
-    console.print(f"[bold]Autonomous suite {report.milestone}[/bold] ok={report.ok}")
+    skipped = report.skipped_ids
+    passed = report.passed_ids
+    failed = [s.scenario_id for s in report.steps if not s.ok]
+    console.print(
+        f"[bold]Autonomous suite {report.milestone}[/bold] ok={report.ok} "
+        f"passed={len(passed)} skipped={len(skipped)} failed={len(failed)}"
+    )
     for step in report.steps:
-        style = "green" if step.ok else "red"
-        console.print(f"[{style}]{'OK' if step.ok else 'FAIL'}[/] {step.scenario_id}: {step.detail[:120]}")
+        if not step.ok:
+            label, style = "FAIL", "red"
+        elif (step.report or {}).get("skipped"):
+            label, style = "SKIP", "yellow"
+        else:
+            label, style = "OK", "green"
+        console.print(f"[{style}]{label}[/] {step.scenario_id}: {step.detail[:120]}")
     raise typer.Exit(0 if report.ok else 1)
 
 

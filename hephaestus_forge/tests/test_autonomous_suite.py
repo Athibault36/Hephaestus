@@ -80,9 +80,14 @@ def test_wait_for_pie_returns_true_when_health_ok():
 
 
 def test_skip_no_character_is_ok():
-    from autonomous_suite import _skip_no_character
+    from autonomous_suite import SuiteReport, SuiteStepResult, _skip_no_character
 
     r = _skip_no_character("E2", "blank project")
     assert r.ok is True
     assert r.report.get("skipped") is True
     assert "skipped" in r.detail
+    report = SuiteReport(ok=True, steps=[r, SuiteStepResult("H1", True, "world.get_view ok")])
+    assert report.skipped_ids == ["E2"]
+    assert report.passed_ids == ["H1"]
+    assert report.to_dict()["skipped"] == ["E2"]
+    assert report.to_dict()["passed"] == ["H1"]
