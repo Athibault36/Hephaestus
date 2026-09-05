@@ -41,6 +41,100 @@ except ImportError:
     )
 
 
+def pick_imported_asset_path(
+    paths: list[Any],
+    *,
+    preferred_name: str = "",
+    fallback: str = "",
+    import_as_skeletal: bool = False,
+) -> tuple[str, bool]:
+    """
+    Choose the spawnable mesh from editor.import_fbx asset_paths.
+
+    Character FBX imports emit many materials/textures; prefer the mesh whose
+    leaf matches preferred_name (FBX stem), never a PBR/material leaf.
+    """
+    preferred = (preferred_name or "").strip()
+    preferred_l = preferred.lower()
+
+    def _leaf(p: str) -> str:
+        return p.split(".")[-1] if "." in p else p.rsplit("/", 1)[-1]
+
+    def _is_junk(p: str) -> bool:
+        leaf = _leaf(p).lower()
+        if leaf.endswith("skeleton") or leaf.endswith("_skeleton"):
+            return True
+        if leaf.endswith("physicsasset") or "physicsasset" in leaf:
+            return True
+        markers = (
+            "material",
+            "_mat",
+            "opacity",
+            "_normal",
+            "_orm",
+            "_mask",
+            "roughness",
+            "metallic",
+            "specular",
+            "std_tongue",
+            "std_eye",
+            "std_skin",
+            "std_cornea",
+            "std_tear",
+            "pbr_",
+        )
+        if any(m in leaf for m in markers):
+            if preferred_l and leaf == preferred_l:
+                return False
+            return True
+        # CC5 material convention: Std_*
+        if leaf.startswith("std_"):
+            return True
+        return False
+
+    cleaned: list[str] = []
+    for raw in paths or []:
+        ps = str(raw or "").strip()
+        if ps and not _is_junk(ps):
+            cleaned.append(ps)
+
+    skeletal = bool(import_as_skeletal)
+    chosen = ""
+
+    if preferred_l:
+        for p in cleaned:
+            if _leaf(p).lower() == preferred_l:
+                chosen = p
+                break
+        if not chosen:
+            for p in cleaned:
+                if preferred_l in _leaf(p).lower():
+                    chosen = p
+                    break
+
+    fb = str(fallback or "").strip()
+    if not chosen and fb and not _is_junk(fb):
+        chosen = fb
+        skeletal = skeletal or "SkeletalMesh" in fb
+
+    if not chosen and cleaned:
+        chosen = cleaned[0]
+
+    if (not chosen or _is_junk(chosen)) and preferred:
+        parent = "/Game/Hephaestus/DccImports"
+        if fb.startswith("/Game/"):
+            parent = "/".join(fb.split("/")[:-1]) or parent
+        elif cleaned and cleaned[0].startswith("/Game/"):
+            parent = "/".join(cleaned[0].split("/")[:-1]) or parent
+        chosen = f"{parent}/{preferred}.{preferred}"
+        skeletal = True
+
+    if chosen and (preferred_l and _leaf(chosen).lower() == preferred_l):
+        skeletal = skeletal or import_as_skeletal
+
+    return chosen, bool(skeletal or import_as_skeletal)
+
+
 def resolve_fbx_path(
     fbx: Optional[str | Path] = None,
     *,
@@ -162,38 +256,33 @@ def dcc_import_to_pie(
     skeletal = False
     try:
         inner = json.loads(import_res.get("result_json") or "{}")
-        asset_path = str(inner.get("asset_path") or inner.get("path") or "")
+        bridge_path = str(inner.get("asset_path") or inner.get("path") or "")
         skeletal = bool(inner.get("skeletal"))
         paths = inner.get("asset_paths") or []
+        preferred = fbx_path.stem
         if isinstance(paths, list) and paths:
-            ranked: list[str] = []
-            for p in paths:
-                ps = str(p)
-                # Skip pure Skeleton assets; prefer SkeletalMesh / mesh package
-                leaf = ps.split(".")[-1] if "." in ps else ps
-                if leaf.endswith("Skeleton") or leaf.endswith("_Skeleton"):
-                    continue
-                ranked.append(ps)
-            if ranked:
-                sk = next((p for p in ranked if "SkeletalMesh" in p), None)
-                asset_path = sk or ranked[0]
-                skeletal = skeletal or ("SkeletalMesh" in asset_path) or import_as_skeletal
-            elif not asset_path:
-                # Only skeleton paths returned — try mesh package convention
-                asset_path = f"{destination_path.rstrip('/')}/{fbx_path.stem}.{fbx_path.stem}"
-                skeletal = True
-        if asset_path and (
-            asset_path.rstrip("/").endswith("_Skeleton")
-            or asset_path.endswith(".Skeleton")
-            or asset_path.split(".")[-1].endswith("Skeleton")
-        ):
-            # Imported primary was skeleton; prefer mesh of same stem
+            asset_path, sk2 = pick_imported_asset_path(
+                paths,
+                preferred_name=preferred,
+                fallback=bridge_path,
+                import_as_skeletal=import_as_skeletal,
+            )
+            skeletal = skeletal or sk2
+        elif bridge_path:
+            asset_path, sk2 = pick_imported_asset_path(
+                [bridge_path],
+                preferred_name=preferred,
+                fallback=bridge_path,
+                import_as_skeletal=import_as_skeletal,
+            )
+            skeletal = skeletal or sk2
+        if not asset_path:
             asset_path = f"{destination_path.rstrip('/')}/{fbx_path.stem}.{fbx_path.stem}"
             skeletal = True
     except json.JSONDecodeError:
         asset_path = ""
     if not asset_path:
-        asset_path = f"{destination_path.rstrip('/')}/{fbx_path.stem}"
+        asset_path = f"{destination_path.rstrip('/')}/{fbx_path.stem}.{fbx_path.stem}"
 
     play_res = play()
     wait_ok, wait_health, wait_detail = wait_for_pie(project_root, timeout_s=wait_pie_s)

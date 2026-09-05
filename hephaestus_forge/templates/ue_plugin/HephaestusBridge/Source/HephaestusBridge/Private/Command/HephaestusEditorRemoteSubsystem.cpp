@@ -202,6 +202,7 @@ bool UHephaestusEditorRemoteSubsystem::RequestImportFbx(
 
 	FString FilePath;
 	FString DestinationPath = TEXT("/Game/Hephaestus/DccImports");
+	FString DestinationName;
 	bool bImportAsSkeletal = false;
 	if (Params.IsValid())
 	{
@@ -215,6 +216,7 @@ bool UHephaestusEditorRemoteSubsystem::RequestImportFbx(
 		{
 			DestinationPath = Dest;
 		}
+		Params->TryGetStringField(TEXT("destination_name"), DestinationName);
 		Params->TryGetBoolField(TEXT("import_as_skeletal"), bImportAsSkeletal);
 		if (!bImportAsSkeletal)
 		{
@@ -231,12 +233,17 @@ bool UHephaestusEditorRemoteSubsystem::RequestImportFbx(
 		OutError = FString::Printf(TEXT("editor.import_fbx: file not found: %s"), *FilePath);
 		return false;
 	}
+	if (DestinationName.IsEmpty())
+	{
+		DestinationName = FPaths::GetBaseFilename(FilePath);
+	}
 
 	FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools");
 
 	UAssetImportTask* ImportTask = NewObject<UAssetImportTask>();
 	ImportTask->Filename = FilePath;
 	ImportTask->DestinationPath = DestinationPath;
+	ImportTask->DestinationName = DestinationName;
 	ImportTask->bAutomated = true;
 	ImportTask->bSave = true;
 	ImportTask->bReplaceExisting = true;
@@ -294,11 +301,19 @@ bool UHephaestusEditorRemoteSubsystem::RequestImportFbx(
 		return false;
 	}
 
-	// Prefer SkeletalMesh when present (creature / character FBX).
+	// Prefer SkeletalMesh matching destination_name, then any SkeletalMesh, then StaticMesh.
 	UObject* Chosen = nullptr;
+	auto NameMatches = [&DestinationName](UObject* Obj) -> bool
+	{
+		if (!Obj || DestinationName.IsEmpty())
+		{
+			return false;
+		}
+		return Obj->GetName().Equals(DestinationName, ESearchCase::IgnoreCase);
+	};
 	for (UObject* Obj : Imported)
 	{
-		if (Cast<USkeletalMesh>(Obj))
+		if (Cast<USkeletalMesh>(Obj) && NameMatches(Obj))
 		{
 			Chosen = Obj;
 			OutSkeletal = true;
@@ -307,7 +322,45 @@ bool UHephaestusEditorRemoteSubsystem::RequestImportFbx(
 	}
 	if (!Chosen)
 	{
+		for (UObject* Obj : Imported)
+		{
+			if (Cast<USkeletalMesh>(Obj))
+			{
+				Chosen = Obj;
+				OutSkeletal = true;
+				break;
+			}
+		}
+	}
+	if (!Chosen)
+	{
+		for (UObject* Obj : Imported)
+		{
+			if (Cast<UStaticMesh>(Obj) && NameMatches(Obj))
+			{
+				Chosen = Obj;
+				break;
+			}
+		}
+	}
+	if (!Chosen)
+	{
+		for (UObject* Obj : Imported)
+		{
+			if (Cast<UStaticMesh>(Obj))
+			{
+				Chosen = Obj;
+				break;
+			}
+		}
+	}
+	if (!Chosen)
+	{
 		Chosen = Imported[0];
+		OutSkeletal = Cast<USkeletalMesh>(Chosen) != nullptr;
+	}
+	else
+	{
 		OutSkeletal = Cast<USkeletalMesh>(Chosen) != nullptr;
 	}
 
