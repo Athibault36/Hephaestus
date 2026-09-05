@@ -763,8 +763,8 @@ def try_direct_cc5_author(
             export = export_character_fbx(
                 character_name=name,
                 project_root=project_root,
-                # Short wait — if OpenPlugin/GUI not ready, fall through to NIM/Blender
-                timeout_seconds=20,
+                # Create mannequin + FBX export can take a minute on cold CC5
+                timeout_seconds=90,
             )
             export_meta["cc5"] = export
             if export.get("success") and export.get("output_path"):

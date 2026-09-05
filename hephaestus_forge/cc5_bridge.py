@@ -194,6 +194,27 @@ def cc5_jobs_dir() -> Path:
     return d
 
 
+def find_default_cc5_template(env: Optional[dict] = None) -> Optional[str]:
+    """Path to a built-in mannequin / neutral avatar for auto-create."""
+    environ = env if env is not None else os.environ
+    explicit = (environ.get("CC5_TEMPLATE") or environ.get("HEPHAESTUS_CC5_TEMPLATE") or "").strip()
+    if explicit and Path(explicit).is_file():
+        return explicit
+    cc5 = find_cc5(environ)
+    if not cc5:
+        return None
+    root = Path(cc5).resolve().parent.parent  # Bin64 → Character Creator 5
+    for rel in (
+        Path("Program") / "Default" / "Mannequin_Male.ccAvatar",
+        Path("Program") / "Default" / "Mannequin_Female.ccAvatar",
+        Path("Program") / "Default" / "DefDummyForMotion.iAvatar",
+    ):
+        cand = root / rel
+        if cand.is_file():
+            return str(cand)
+    return None
+
+
 def openplugin_template_dir() -> Path:
     return Path(__file__).resolve().parent / "templates" / "cc5_openplugin" / "HephaestusExport"
 
@@ -309,17 +330,27 @@ def _export_via_job_queue(
         "output_path": str(fbx_path.resolve()),
         "created_at": time.time(),
     }
+    template = find_default_cc5_template()
+    if template:
+        payload["template_path"] = template
     job_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     ensure_cc5_running()
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
-        if result_path.is_file():
+        # Accept both export_id.result.json and legacy export_id.job.result.json
+        candidates = [
+            result_path,
+            jobs / f"{job_id}.job.result.json",
+        ]
+        for candidate in candidates:
+            if not candidate.is_file():
+                continue
             try:
-                result = json.loads(result_path.read_text(encoding="utf-8"))
+                result = json.loads(candidate.read_text(encoding="utf-8"))
             except json.JSONDecodeError:
                 result = {"success": False, "error": "corrupt result json"}
             try:
-                result_path.unlink(missing_ok=True)
+                candidate.unlink(missing_ok=True)
             except OSError:
                 pass
             ok = bool(result.get("success")) and fbx_path.is_file()
@@ -340,9 +371,9 @@ def _export_via_job_queue(
         "success": False,
         "output_path": None,
         "error": (
-            "cc5_job_timeout — Open Character Creator with a character loaded, "
-            "ensure HephaestusExport OpenPlugin is installed (forge cc5 install-plugin), "
-            "then retry"
+            "cc5_job_timeout — keep Character Creator running with HephaestusExport "
+            "OpenPlugin installed (forge cc5 install-plugin); Hephaestus auto-creates "
+            "a mannequin if the scene is empty, then retry"
         ),
         "method": "openplugin_job",
         "job_path": str(job_path),
@@ -372,9 +403,8 @@ def export_character_fbx(
             "asset_paths": [],
             "next_steps": [
                 "Install Character Creator 5 from Reallusion",
-                "Open a character in CC5",
                 "forge cc5 install-plugin",
-                "Re-run: forge cc5 export",
+                "Re-run: forge cc5 export  (auto-loads a mannequin if scene empty)",
             ],
         }
 
@@ -457,7 +487,7 @@ def export_character_fbx(
         "asset_paths": [],
         "next_steps": [
             "forge cc5 install-plugin  (may need Admin once)",
-            "Open Character Creator with a character in the scene",
+            "Keep Character Creator running (Hephaestus auto-loads a mannequin)",
             "Retry make a person / forge cc5 export",
             "Or fall through to NIM→Blender humanoid automatically",
         ],
