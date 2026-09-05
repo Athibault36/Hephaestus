@@ -45,19 +45,25 @@ def test_known_match_requires_process_when_set():
     assert spec is None
 
 
-def test_auto_dismiss_handles_known(monkeypatch):
+def test_known_match_message_log_closes():
+    spec = dc._known_match("Message Log", "UnrealEditor.exe")
+    assert spec is not None
+    assert spec["id"] == "ue_message_log"
+    assert spec.get("close") is True
+
+
+def test_auto_dismiss_closes_message_log(monkeypatch):
     dialogs = [
         {
-            "hwnd": 42,
-            "title": "Restore Packages",
+            "hwnd": 99,
+            "title": "Message Log",
             "process_name": "UnrealEditor.exe",
-            "buttons": ["Restore", "Don't Restore"],
-            "known_id": "ue_restore_packages",
-            "class_name": "#32770",
+            "buttons": [],
+            "known_id": "ue_message_log",
+            "class_name": "UnrealWindow",
             "pid": 1,
         }
     ]
-
     monkeypatch.setattr(
         dc,
         "list_dialogs",
@@ -68,18 +74,10 @@ def test_auto_dismiss_handles_known(monkeypatch):
             "count": 1,
         },
     )
-
-    clicks: list[dict] = []
-
-    def _fake_click(**kwargs):
-        clicks.append(kwargs)
-        return {"ok": True, "clicked": kwargs.get("button")}
-
-    monkeypatch.setattr(dc, "click_dialog", _fake_click)
-    res = dc.auto_dismiss(only_known=True)
-    assert res["ok"] is True
+    monkeypatch.setattr(dc, "_close_window", lambda hwnd: {"ok": True, "clicked": "WM_CLOSE", "method": "test"})
+    res = dc.auto_dismiss(only_known=True, target_processes_only=True)
     assert res["handled_count"] == 1
-    assert clicks and clicks[0]["button"] == "Don't Restore"
+    assert res["handled"][0]["result"]["clicked"] == "WM_CLOSE"
 
 
 def test_click_dialog_resolves_action(monkeypatch):

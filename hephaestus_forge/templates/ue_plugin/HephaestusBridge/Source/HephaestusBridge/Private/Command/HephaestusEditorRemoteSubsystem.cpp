@@ -131,6 +131,29 @@ namespace HephaestusFbxImport
 		return LoadObject<UTexture>(nullptr, *ObjectPath, nullptr, LOAD_NoWarn | LOAD_Quiet);
 	}
 
+	/** Resolve CC5 texture by convention, with a few common name aliases. */
+	static UTexture* LoadCc5Texture(const FString& DestinationPath, const FString& MatName, const TCHAR* Suffix)
+	{
+		TArray<FString> Candidates;
+		Candidates.Add(MatName + Suffix);
+		if (MatName.EndsWith(TEXT("_Pbr")))
+		{
+			Candidates.Add(MatName.LeftChop(4) + Suffix);
+		}
+		else
+		{
+			Candidates.Add(MatName + TEXT("_Pbr") + Suffix);
+		}
+		for (const FString& Name : Candidates)
+		{
+			if (UTexture* Tex = LoadImportedTexture(DestinationPath, Name))
+			{
+				return Tex;
+			}
+		}
+		return nullptr;
+	}
+
 	static UMaterialInstanceConstant* CreateOrUpdateMic(
 		const FString& DestinationPath,
 		const FString& MicName,
@@ -290,11 +313,19 @@ namespace HephaestusFbxImport
 				MatName.LeftChopInline(3);
 			}
 
-			UTexture* Diffuse = LoadImportedTexture(DestinationPath, MatName + TEXT("_Diffuse"));
-			UTexture* Normal = LoadImportedTexture(DestinationPath, MatName + TEXT("_Normal"));
-			UTexture* Opacity = LoadImportedTexture(DestinationPath, MatName + TEXT("_Opacity"));
-			if (!Diffuse && !Normal && !Opacity)
+			UTexture* Diffuse = LoadCc5Texture(DestinationPath, MatName, TEXT("_Diffuse"));
+			UTexture* Normal = LoadCc5Texture(DestinationPath, MatName, TEXT("_Normal"));
+			UTexture* Opacity = LoadCc5Texture(DestinationPath, MatName, TEXT("_Opacity"));
+			if (!Diffuse)
 			{
+				// Never replace a slot with a white Phong MIC when only normal/opacity
+				// exist — that produces pale skin and white jaw/teeth patches.
+				if (Normal || Opacity)
+				{
+					UE_LOG(LogHephaestusBridge, Warning,
+						TEXT("editor.import_fbx: skip slot %d '%s' — no Diffuse (normal/opacity alone would wash out skin)"),
+						Index, *MatName);
+				}
 				continue;
 			}
 
@@ -497,12 +528,16 @@ bool UHephaestusEditorRemoteSubsystem::RequestImportFbx(
 	FString& OutAssetPath,
 	FString& OutError,
 	bool& OutSkeletal,
-	TArray<FString>& OutAssetPaths)
+	TArray<FString>& OutAssetPaths,
+	int32& OutFbmTexturesImported,
+	int32& OutMaterialsBound)
 {
 	OutAssetPath.Reset();
 	OutError.Reset();
 	OutSkeletal = false;
 	OutAssetPaths.Reset();
+	OutFbmTexturesImported = 0;
+	OutMaterialsBound = 0;
 
 	if (IsPieActive())
 	{
@@ -705,13 +740,15 @@ bool UHephaestusEditorRemoteSubsystem::RequestImportFbx(
 	// CC5: import sibling .fbm textures and wire Phong MICs onto skeletal slots.
 	if (USkeletalMesh* SkelMesh = Cast<USkeletalMesh>(Chosen))
 	{
-		HephaestusFbxImport::ImportFbmTextures(FilePath, DestinationPath);
-		HephaestusFbxImport::BindFbmTexturesToSkeletalMesh(SkelMesh, DestinationPath);
+		OutFbmTexturesImported = HephaestusFbxImport::ImportFbmTextures(FilePath, DestinationPath);
+		OutMaterialsBound = HephaestusFbxImport::BindFbmTexturesToSkeletalMesh(SkelMesh, DestinationPath);
 	}
 
 	OutAssetPath = Chosen->GetPathName();
-	UE_LOG(LogHephaestusBridge, Log, TEXT("editor.import_fbx: %s -> %s (skeletal=%s)"),
-		*FilePath, *OutAssetPath, OutSkeletal ? TEXT("true") : TEXT("false"));
+	UE_LOG(LogHephaestusBridge, Log,
+		TEXT("editor.import_fbx: %s -> %s (skeletal=%s fbm_tex=%d bound=%d)"),
+		*FilePath, *OutAssetPath, OutSkeletal ? TEXT("true") : TEXT("false"),
+		OutFbmTexturesImported, OutMaterialsBound);
 	return true;
 }
 
@@ -826,8 +863,12 @@ bool UHephaestusEditorRemoteSubsystem::HandleCommand(const FHttpServerRequest& R
 						FString AssetPath;
 						bool bSkeletal = false;
 						TArray<FString> AssetPaths;
+						int32 FbmTextures = 0;
+						int32 MaterialsBound = 0;
 						bImportOk = WeakThis.IsValid()
-							&& RequestImportFbx(ParamsCopy, AssetPath, ImportError, bSkeletal, AssetPaths);
+							&& RequestImportFbx(
+								ParamsCopy, AssetPath, ImportError, bSkeletal, AssetPaths,
+								FbmTextures, MaterialsBound);
 						if (bImportOk)
 						{
 							FString Escaped = AssetPath;
@@ -845,10 +886,12 @@ bool UHephaestusEditorRemoteSubsystem::HandleCommand(const FHttpServerRequest& R
 							}
 							PathsJson += TEXT("]");
 							ImportResultJson = FString::Printf(
-								TEXT("{\"action\":\"editor.import_fbx\",\"asset_path\":\"%s\",\"skeletal\":%s,\"asset_paths\":%s,\"pie_active\":%s}"),
+								TEXT("{\"action\":\"editor.import_fbx\",\"asset_path\":\"%s\",\"skeletal\":%s,\"asset_paths\":%s,\"fbm_textures_imported\":%d,\"materials_bound\":%d,\"pie_active\":%s}"),
 								*Escaped,
 								bSkeletal ? TEXT("true") : TEXT("false"),
 								*PathsJson,
+								FbmTextures,
+								MaterialsBound,
 								IsPieActive() ? TEXT("true") : TEXT("false"));
 						}
 

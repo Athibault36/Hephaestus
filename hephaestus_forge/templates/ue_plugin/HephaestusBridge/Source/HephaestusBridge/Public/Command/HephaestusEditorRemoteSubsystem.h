@@ -55,7 +55,9 @@ private:
 		FString& OutAssetPath,
 		FString& OutError,
 		bool& OutSkeletal,
-		TArray<FString>& OutAssetPaths);
+		TArray<FString>& OutAssetPaths,
+		int32& OutFbmTexturesImported,
+		int32& OutMaterialsBound);
 
 	int32 ListenPort = 8766;
 	bool bIsListening = false;

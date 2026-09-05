@@ -122,7 +122,7 @@ def wait_for_editor(
                     auto_dismiss = None  # type: ignore
             if auto_dismiss:
                 try:
-                    res = auto_dismiss(only_known=True)
+                    res = auto_dismiss(only_known=False, target_processes_only=True)
                     if res.get("handled_count"):
                         dismissed.extend(res.get("handled") or [])
                 except Exception:

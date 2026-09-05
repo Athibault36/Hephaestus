@@ -827,7 +827,7 @@ def try_direct_cc5_author(
                 character_name=name,
                 project_root=project_root,
                 # Create avatar + Free Resource morphs + Unreal FBX can take several minutes
-                timeout_seconds=300,
+                timeout_seconds=600,
                 prompt=message or "",
                 appearance=plan,
             )

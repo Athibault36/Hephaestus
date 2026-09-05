@@ -243,61 +243,133 @@ def openplugin_template_dir() -> Path:
     return Path(__file__).resolve().parent / "templates" / "cc5_openplugin" / "HephaestusExport"
 
 
+def openplugin_live_dir() -> Path:
+    """User-writable OpenPlugin source of truth (no Admin required)."""
+    home = Path(os.environ.get("HEPHAESTUS_HOME") or (Path.home() / ".hephaestus"))
+    return home / "cc5_openplugin_live" / "HephaestusExport"
+
+
+def openplugin_bootstrap_text() -> str:
+    boot = Path(__file__).resolve().parent / "templates" / "cc5_openplugin" / "HephaestusExport" / "bootstrap_main.py"
+    if boot.is_file():
+        return boot.read_text(encoding="utf-8")
+    # Inline fallback if template missing
+    return (
+        "# HEPHAESTUS_OPENPLUGIN_BOOTSTRAP 1\n"
+        "from pathlib import Path\n"
+        "import importlib.util, os, sys\n"
+        "live = Path(os.environ.get('HEPHAESTUS_CC5_PLUGIN') or "
+        "(Path.home()/'.hephaestus'/'cc5_openplugin_live'/'HephaestusExport'/'main.py'))\n"
+        "spec = importlib.util.spec_from_file_location('hephaestus_cc5_live', live)\n"
+        "mod = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(mod)\n"
+        "initialize_plugin = mod.initialize_plugin\n"
+    )
+
+
+def _is_bootstrap(text: str) -> bool:
+    return "HEPHAESTUS_OPENPLUGIN_BOOTSTRAP" in (text or "")
+
+
 def install_cc5_openplugin(*, force: bool = False) -> dict:
     """
-    Copy HephaestusExport OpenPlugin into CC5 Bin64/OpenPlugin.
-    May require admin if Program Files is locked.
-    Always stages a copy under ~/.hephaestus/cc5_openplugin_staging for manual install.
+    Install / refresh HephaestusExport OpenPlugin without Admin elevation.
+
+    Always writes the full plugin to ~/.hephaestus/cc5_openplugin_live/.
+    Program Files gets a tiny bootstrap stub when writable; otherwise an existing
+    bootstrap or full install is left alone (no UAC prompts).
     """
     src = openplugin_template_dir()
     if not (src / "main.py").is_file():
         return {"ok": False, "error": f"Template missing: {src}"}
 
-    home = Path(os.environ.get("HEPHAESTUS_HOME") or (Path.home() / ".hephaestus"))
-    staging = home / "cc5_openplugin_staging" / "HephaestusExport"
+    live = openplugin_live_dir()
     try:
+        live.mkdir(parents=True, exist_ok=True)
+        (live / "main.py").write_text((src / "main.py").read_text(encoding="utf-8"), encoding="utf-8")
+        # Keep staging alias for older docs / manual copies
+        home = Path(os.environ.get("HEPHAESTUS_HOME") or (Path.home() / ".hephaestus"))
+        staging = home / "cc5_openplugin_staging" / "HephaestusExport"
         staging.mkdir(parents=True, exist_ok=True)
-        (staging / "main.py").write_text((src / "main.py").read_text(encoding="utf-8"), encoding="utf-8")
-    except OSError:
-        staging = src
+        (staging / "main.py").write_text((live / "main.py").read_text(encoding="utf-8"), encoding="utf-8")
+    except OSError as exc:
+        return {"ok": False, "error": f"Cannot write live plugin: {exc}", "live_path": str(live)}
 
     cc5 = find_cc5()
     if not cc5:
         return {
-            "ok": False,
-            "error": "CC5 not found",
-            "staged_path": str(staging),
-            "next_steps": [
-                "Install Character Creator 5 or set CC5_EXECUTABLE",
-                f"Then copy {staging} → {{CC5}}/Bin64/OpenPlugin/HephaestusExport",
-            ],
+            "ok": True,
+            "live_path": str(live),
+            "path": str(live),
+            "program_files": None,
+            "detail": "live_only_cc5_not_found",
+            "warning": "CC5 executable not found; live plugin updated only",
         }
+
     dest = Path(cc5).parent / "OpenPlugin" / "HephaestusExport"
+    target = dest / "main.py"
+    bootstrap = openplugin_bootstrap_text()
+    result: dict = {
+        "ok": True,
+        "live_path": str(live),
+        "path": str(live),
+        "program_files": str(dest),
+        "admin_required": False,
+        "elevated": False,
+    }
+
     try:
         dest.mkdir(parents=True, exist_ok=True)
-        target = dest / "main.py"
-        if target.is_file() and not force:
-            return {
-                "ok": True,
-                "path": str(dest),
-                "skipped": True,
-                "detail": "already installed",
-                "staged_path": str(staging),
-            }
-        target.write_text((src / "main.py").read_text(encoding="utf-8"), encoding="utf-8")
-        return {"ok": True, "path": str(dest), "skipped": False, "staged_path": str(staging)}
-    except PermissionError as exc:
-        return {
-            "ok": False,
-            "error": f"Permission denied writing {dest}: {exc}",
-            "staged_path": str(staging),
-            "next_steps": [
-                f"As Admin, copy {staging} → {dest}",
-                "Restart Character Creator after install",
-            ],
-        }
+        existing = target.read_text(encoding="utf-8") if target.is_file() else ""
+        if target.is_file() and _is_bootstrap(existing) and not force:
+            result["skipped"] = True
+            result["detail"] = "bootstrap_present_live_updated"
+            result["path"] = str(dest)
+            return result
+        # Prefer bootstrap so future updates never need Program Files writes
+        target.write_text(bootstrap, encoding="utf-8")
+        result["skipped"] = False
+        result["detail"] = "bootstrap_installed"
+        result["path"] = str(dest)
+        return result
+    except PermissionError:
+        # Never elevate — check whether an existing install can still run
+        if target.is_file():
+            try:
+                existing = target.read_text(encoding="utf-8")
+            except OSError:
+                existing = ""
+            if _is_bootstrap(existing):
+                result["detail"] = "live_updated_bootstrap_ok"
+                result["path"] = str(dest)
+                result["program_files_writable"] = False
+                return result
+            # Full copy already present (from an older install) — live updated for
+            # when bootstrap can be placed; exports still use Program Files code.
+            result["detail"] = "live_updated_program_files_locked"
+            result["path"] = str(dest)
+            result["program_files_writable"] = False
+            result["warning"] = (
+                "Program Files OpenPlugin is not writable. Live copy updated at "
+                f"{live}. To unlock no-Admin updates forever, once make "
+                f"{target} writable or replace it with the bootstrap stub "
+                "(no UAC from Hephaestus — set folder permissions yourself or "
+                "install CC5 outside Program Files)."
+            )
+            return result
+        result["ok"] = False
+        result["error"] = f"Permission denied writing {dest} and no existing plugin found"
+        result["next_steps"] = [
+            f"Copy {live} → {dest} using File Explorer (may prompt once), OR",
+            "Install Character Creator outside Program Files so OpenPlugin is user-writable",
+            "Then restart Character Creator",
+        ]
+        return result
     except OSError as exc:
-        return {"ok": False, "error": str(exc), "staged_path": str(staging)}
+        result["ok"] = False
+        result["error"] = str(exc)
+        result["live_path"] = str(live)
+        return result
 
 
 def ensure_cc5_running(*, wait_s: float = 8.0) -> dict:
@@ -461,7 +533,7 @@ def export_character_fbx(
         fbx_path = out_dir / f"{safe}.fbx"
 
     # Preferred: GUI OpenPlugin job queue (CharacterCreatorpy cannot host RLPy headless)
-    install_cc5_openplugin(force=False)
+    install_cc5_openplugin(force=True)
     job = _export_via_job_queue(
         character_name=character_name,
         fbx_path=fbx_path,

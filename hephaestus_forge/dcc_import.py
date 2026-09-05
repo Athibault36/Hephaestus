@@ -174,8 +174,23 @@ def import_fbx_timeout_seconds(source_path: Path | str, *, minimum: float = 120.
     except OSError:
         size_mb = 0.0
     scaled = 90.0 + (size_mb / 25.0) * 45.0
-    return float(min(900.0, max(minimum, scaled)))
+    return float(min(1200.0, max(minimum, scaled)))
 
+
+def fbm_sidecar_status(source_path: Path | str) -> dict[str, Any]:
+    """Report sibling {stem}.fbm presence and Diffuse map count for CC5 imports."""
+    path = Path(source_path)
+    fbm = path.parent / f"{path.stem}.fbm"
+    if not fbm.is_dir():
+        return {"exists": False, "path": str(fbm), "files": 0, "diffuse": 0}
+    files = [p for p in fbm.iterdir() if p.is_file()]
+    diffuse = sum(1 for p in files if "diffuse" in p.name.lower())
+    return {
+        "exists": True,
+        "path": str(fbm),
+        "files": len(files),
+        "diffuse": diffuse,
+    }
 
 def editor_import_fbx(
     source_path: Path | str,
@@ -234,6 +249,18 @@ def dcc_import_to_pie(
         return {"success": False, "error": str(exc), "steps": steps}
 
     steps.append({"step": "resolve_fbx", "ok": True, "path": str(fbx_path)})
+    fbm_status = fbm_sidecar_status(fbx_path)
+    steps.append({"step": "fbm_sidecar", "ok": True, **fbm_status})
+    if import_as_skeletal and not fbm_status.get("diffuse"):
+        # Soft warning only — bridge may still bind if embeds resolved later.
+        steps.append(
+            {
+                "step": "fbm_warn",
+                "ok": True,
+                "warning": "no Diffuse maps in sibling .fbm — skin may look pale/white",
+                **fbm_status,
+            }
+        )
 
     # Stop PIE if up — wait until both :8765 is down and editor reports pie_active=false
     pie_up, _, _ = pie_online(timeout=1.0)
@@ -273,10 +300,14 @@ def dcc_import_to_pie(
 
     asset_path = ""
     skeletal = False
+    materials_bound = 0
+    fbm_textures_imported = 0
     try:
         inner = json.loads(import_res.get("result_json") or "{}")
         bridge_path = str(inner.get("asset_path") or inner.get("path") or "")
         skeletal = bool(inner.get("skeletal"))
+        materials_bound = int(inner.get("materials_bound") or 0)
+        fbm_textures_imported = int(inner.get("fbm_textures_imported") or 0)
         paths = inner.get("asset_paths") or []
         preferred = fbx_path.stem
         if isinstance(paths, list) and paths:
@@ -302,6 +333,14 @@ def dcc_import_to_pie(
         asset_path = ""
     if not asset_path:
         asset_path = f"{destination_path.rstrip('/')}/{fbx_path.stem}.{fbx_path.stem}"
+    steps.append(
+        {
+            "step": "materials_bind",
+            "ok": True,
+            "materials_bound": materials_bound,
+            "fbm_textures_imported": fbm_textures_imported,
+        }
+    )
 
     play_res = play()
     wait_ok, wait_health, wait_detail = wait_for_pie(project_root, timeout_s=wait_pie_s)
@@ -361,6 +400,9 @@ def dcc_import_to_pie(
         "fbx": str(fbx_path),
         "asset_path": asset_path,
         "skeletal": skeletal or import_as_skeletal,
+        "materials_bound": materials_bound,
+        "fbm_textures_imported": fbm_textures_imported,
+        "fbm": fbm_status,
         "steps": steps,
         "spawn_results": spawn_results,
     }
