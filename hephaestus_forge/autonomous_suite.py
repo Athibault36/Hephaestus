@@ -329,9 +329,14 @@ def _direct_locomotion_suite(remote_api: str, scenario_id: str = "E2") -> SuiteS
         })
     ok = bool(play.get("success"))
     if ok and mode == "transform":
-        detail = f"Transform walk on {actor} (no AnimSequence — displaced)"
+        detail = (
+            f"mode=transform mesh={mesh} — Transform walk on {actor} "
+            f"(no AnimSequence — displaced)"
+        )
+        if mesh.startswith("/Game/"):
+            detail += " [warn: /Game mesh without walk anim]"
     elif ok:
-        detail = f"Playing walk on {actor}"
+        detail = f"mode=anim mesh={mesh} anim={anim} — Playing walk on {actor}"
     else:
         detail = f"Could not walk {actor}: {play.get('error', 'failed')}"
     return SuiteStepResult(
