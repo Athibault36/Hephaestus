@@ -679,7 +679,8 @@ def _export_avatar(avatar, out_path: str) -> tuple[bool, str]:
                 "EExportFbxOptions_AutoSkinRigidMesh",
                 "EExportFbxOptions_ExportRootMotion",
                 "EExportFbxOptions_ZeroMotionRoot",
-                "EExportFbxOptions_EmbedTexture",
+                # Prefer sibling .fbm textures over EmbedTexture — UE bind only
+                # reads {stem}.fbm; embeds alone leave pale/white skin.
             ):
                 if hasattr(RLPy, flag):
                     opt = opt | getattr(RLPy, flag)
@@ -707,7 +708,8 @@ def _export_avatar(avatar, out_path: str) -> tuple[bool, str]:
                 "",
             )
             if _ok():
-                return True, "ExportFbxFile(unreal_preset)"
+                fbm_info = _ensure_fbm_sidecar(out_path)
+                return True, f"ExportFbxFile(unreal_preset); fbm={fbm_info}"
             attempts.append("ExportFbxFile(unreal_preset): no file")
         except Exception as exc:
             attempts.append(f"ExportFbxFile(unreal_preset): {exc}")
@@ -716,7 +718,8 @@ def _export_avatar(avatar, out_path: str) -> tuple[bool, str]:
         try:
             RLPy.RFileIO.ExportFbxFile(avatar, out_path)
             if _ok():
-                return True, "ExportFbxFile(avatar,path)"
+                fbm_info = _ensure_fbm_sidecar(out_path)
+                return True, f"ExportFbxFile(avatar,path); fbm={fbm_info}"
             attempts.append("ExportFbxFile(avatar,path): no file")
         except Exception as exc:
             attempts.append(f"ExportFbxFile(avatar,path): {exc}")
@@ -737,7 +740,8 @@ def _export_avatar(avatar, out_path: str) -> tuple[bool, str]:
             try:
                 RLPy.RFileIO.ExportFbx(*args)
                 if _ok():
-                    return True, label
+                    fbm_info = _ensure_fbm_sidecar(out_path)
+                    return True, f"{label}; fbm={fbm_info}"
                 attempts.append(f"{label}: no file")
             except Exception as exc:
                 attempts.append(f"{label}: {exc}")
@@ -748,6 +752,43 @@ def _export_avatar(avatar, out_path: str) -> tuple[bool, str]:
         if "xport" in m.lower() or "fbx" in m.lower() or "save" in m.lower()
     ]
     return False, " | ".join(attempts + [f"RFileIO methods: {methods}"])
+
+
+def _ensure_fbm_sidecar(out_path: str) -> dict:
+    """
+    Confirm sibling {stem}.fbm exists with Diffuse maps for UE material bind.
+
+    Bridge ImportFbmTextures only reads this folder — embedded FBX textures alone
+    leave pale skin.
+    """
+    p = Path(out_path)
+    fbm = p.parent / f"{p.stem}.fbm"
+    info: dict = {"dir": str(fbm), "exists": False, "files": 0, "diffuse": 0}
+    if not fbm.is_dir():
+        # CC5 sometimes writes textures next to the FBX without the .fbm suffix.
+        loose = [
+            x
+            for x in p.parent.iterdir()
+            if x.is_file()
+            and x.suffix.lower() in (".jpg", ".jpeg", ".png", ".tga", ".bmp")
+            and p.stem.lower() in x.name.lower()
+        ]
+        if loose:
+            try:
+                fbm.mkdir(parents=True, exist_ok=True)
+                for src in loose:
+                    dest = fbm / src.name
+                    if not dest.exists():
+                        dest.write_bytes(src.read_bytes())
+            except OSError as exc:
+                info["error"] = str(exc)
+                return info
+    if fbm.is_dir():
+        files = [x for x in fbm.iterdir() if x.is_file()]
+        info["exists"] = True
+        info["files"] = len(files)
+        info["diffuse"] = sum(1 for x in files if "diffuse" in x.name.lower())
+    return info
 
 
 def _process_job(job_path: Path) -> None:
@@ -849,7 +890,51 @@ def _write_result(job_path: Path, success: bool, **extra) -> None:
     print(f"HephaestusExport result -> {out} success={success}")
 
 
+def _try_reload_from_live() -> None:
+    """If a newer live plugin exists, rebind handlers from it (bootstrap / updates)."""
+    try:
+        home = Path(os.environ.get("HEPHAESTUS_HOME") or (Path.home() / ".hephaestus"))
+        live = Path(os.environ.get("HEPHAESTUS_CC5_PLUGIN") or "") if os.environ.get("HEPHAESTUS_CC5_PLUGIN") else (
+            home / "cc5_openplugin_live" / "HephaestusExport" / "main.py"
+        )
+        if not live.is_file():
+            return
+        # Only reload when running from Program Files bootstrap or older copy
+        here = Path(__file__).resolve()
+        if live.resolve() == here.resolve():
+            return
+        if live.stat().st_mtime <= here.stat().st_mtime + 0.5:
+            # Still allow explicit force flag
+            if not (home / "cc5_plugin_force_reload").is_file():
+                return
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("hephaestus_cc5_live_reload", live)
+        if spec is None or spec.loader is None:
+            return
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        g = globals()
+        for name in (
+            "_process_job",
+            "_export_avatar",
+            "_apply_appearance",
+            "_ensure_avatar",
+            "_ensure_fbm_sidecar",
+        ):
+            if hasattr(mod, name):
+                g[name] = getattr(mod, name)
+        try:
+            (home / "cc5_plugin_force_reload").unlink(missing_ok=True)
+        except OSError:
+            pass
+        print(f"HephaestusExport reloaded live plugin from {live}")
+    except Exception as exc:
+        print(f"HephaestusExport live reload skipped: {exc}")
+
+
 def _poll_once() -> None:
+    _try_reload_from_live()
     jobs = _jobs_dir()
     for job in sorted(jobs.glob("*.job.json")):
         print(f"HephaestusExport processing {job.name}")

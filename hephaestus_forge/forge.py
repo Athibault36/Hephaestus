@@ -1276,17 +1276,20 @@ def dialog_click_cmd(
 def dialog_auto_cmd(
     all_dialogs: Annotated[
         bool,
-        typer.Option("--all/--known", help="Dismiss all matching prompts, or only known UE blockers"),
-    ] = False,
+        typer.Option(
+            "--all/--known",
+            help="Process-scoped UE/CC5 modals (default) or only named known dialogs",
+        ),
+    ] = True,
     as_json: Annotated[bool, typer.Option("--json")] = False,
 ):
-    """Auto-dismiss known Unreal/Hephaestus blockers (Restore Packages, etc.)."""
+    """Auto-dismiss Unreal/CC5 dialog boxes (Restore Packages, FBX Import, Message Log, …)."""
     try:
         from dialog_control import auto_dismiss
     except ImportError:
         from hephaestus_forge.dialog_control import auto_dismiss  # type: ignore
 
-    result = auto_dismiss(only_known=not all_dialogs)
+    result = auto_dismiss(only_known=not all_dialogs, target_processes_only=True)
     if as_json:
         console.print_json(data=result)
     else:
@@ -1302,10 +1305,10 @@ def dialog_auto_cmd(
 def dialog_watch_cmd(
     duration: Annotated[float, typer.Option("--duration", "-d", help="Seconds to watch")] = 60.0,
     interval: Annotated[float, typer.Option("--interval", "-i", help="Poll seconds")] = 1.5,
-    all_dialogs: Annotated[bool, typer.Option("--all/--known")] = False,
+    all_dialogs: Annotated[bool, typer.Option("--all/--known")] = True,
     as_json: Annotated[bool, typer.Option("--json")] = False,
 ):
-    """Poll and auto-dismiss dialogs for a while (useful during editor launch)."""
+    """Poll and auto-dismiss UE/CC5 dialogs (useful during editor launch / FBX import)."""
     try:
         from dialog_control import watch_and_dismiss
     except ImportError:
@@ -1571,7 +1574,7 @@ def cc5_install_plugin_cmd(
     force: Annotated[bool, typer.Option("--force", help="Overwrite existing OpenPlugin")] = False,
     as_json: Annotated[bool, typer.Option("--json")] = False,
 ):
-    """Install HephaestusExport OpenPlugin into CC5 Bin64/OpenPlugin (may need Admin)."""
+    """Install HephaestusExport OpenPlugin (user live dir + optional Program Files bootstrap; never elevates)."""
     try:
         from cc5_bridge import install_cc5_openplugin
     except ImportError:
@@ -1584,9 +1587,15 @@ def cc5_install_plugin_cmd(
         typer.echo(_json.dumps(res, indent=2, ensure_ascii=True))
         raise typer.Exit(0 if res.get("ok") else 1)
     if res.get("ok"):
-        detail = "already present" if res.get("skipped") else "installed"
-        console.print(f"[green]✓ CC5 OpenPlugin {detail}[/green] → {res.get('path')}")
-        console.print("[dim]Restart Character Creator, open a character, then forge cc5 export[/dim]")
+        detail = res.get("detail") or ("already present" if res.get("skipped") else "installed")
+        console.print(f"[green]✓ CC5 OpenPlugin {detail}[/green]")
+        if res.get("live_path"):
+            console.print(f"[dim]live → {res.get('live_path')}[/dim]")
+        if res.get("program_files"):
+            console.print(f"[dim]program files → {res.get('program_files')}[/dim]")
+        if res.get("warning"):
+            console.print(f"[yellow]{res.get('warning')}[/yellow]")
+        console.print("[dim]Restart Character Creator, then forge cc5 export[/dim]")
         raise typer.Exit(0)
     console.print(f"[red]✗ CC5 OpenPlugin install[/red]: {res.get('error')}")
     for step in res.get("next_steps") or []:

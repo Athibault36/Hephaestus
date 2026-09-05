@@ -17,15 +17,70 @@ from typing import Any, Optional
 
 # Preferred button labels for semantic actions (first match wins).
 ACTION_BUTTONS: dict[str, tuple[str, ...]] = {
-    "accept": ("OK", "&OK", "Yes", "&Yes", "Accept", "Continue", "Allow", "Retry", "Open", "Save", "Apply"),
-    "ok": ("OK", "&OK"),
+    "accept": (
+        "OK",
+        "&OK",
+        "Yes",
+        "&Yes",
+        "Accept",
+        "Continue",
+        "Allow",
+        "Retry",
+        "Open",
+        "Save",
+        "Apply",
+        "Import",
+        "Export",
+        "Overwrite",
+        "Replace",
+        "Update",
+        "Ignore",
+        "Skip",
+        "Proceed",
+        "I Agree",
+        "Agree",
+        "Finish",
+        "Close",
+    ),
+    "ok": ("OK", "&OK", "Close"),
     "yes": ("Yes", "&Yes", "OK", "&OK"),
-    "cancel": ("Cancel", "&Cancel", "No", "&No", "Close", "Don't Restore", "Don't Save", "Discard"),
+    "cancel": (
+        "Cancel",
+        "&Cancel",
+        "No",
+        "&No",
+        "Close",
+        "Don't Restore",
+        "Don't Save",
+        "Discard",
+        "Abort",
+        "Ignore",
+    ),
     "no": ("No", "&No", "Cancel", "&Cancel"),
-    "dismiss": ("Cancel", "&Cancel", "No", "&No", "Close", "Don't Restore", "Don't Save", "OK"),
+    "dismiss": (
+        "Cancel",
+        "&Cancel",
+        "No",
+        "&No",
+        "Close",
+        "Don't Restore",
+        "Don't Save",
+        "Discard",
+        "OK",
+        "Ignore",
+        "Skip",
+    ),
 }
 
-# Known Hephaestus / UE dialogs and the preferred click (in order).
+# Processes Hephaestus is allowed to dismiss dialogs for (never touch Cursor/browsers).
+TARGET_PROCESSES: tuple[str, ...] = (
+    "UnrealEditor",
+    "UE4Editor",
+    "CrashReportClient",
+    "CharacterCreator",
+)
+
+# Known Hephaestus / UE / CC5 dialogs and the preferred click (in order).
 KNOWN_DIALOGS: tuple[dict[str, Any], ...] = (
     {
         "id": "ue_restore_packages",
@@ -49,6 +104,36 @@ KNOWN_DIALOGS: tuple[dict[str, Any], ...] = (
         "reason": "Generic Unreal MessageBox",
     },
     {
+        "id": "ue_message_log",
+        "title_re": r"^Message Log$",
+        "process_re": r"UnrealEditor",
+        "buttons": (),
+        "close": True,
+        "reason": "Message Log panel steals focus during automation",
+    },
+    {
+        "id": "ue_output_log",
+        "title_re": r"^Output Log$",
+        "process_re": r"UnrealEditor",
+        "buttons": (),
+        "close": True,
+        "reason": "Output Log floating window",
+    },
+    {
+        "id": "ue_fbx_import",
+        "title_re": r"FBX Import|Import Options|Import Content|Import Summary",
+        "process_re": r"UnrealEditor",
+        "buttons": ("Import", "OK", "Yes", "Continue", "Close"),
+        "reason": "FBX import options block editor.import_fbx",
+    },
+    {
+        "id": "ue_overwrite",
+        "title_re": r"Overwrite|Already Exists|Replace|Save Package",
+        "process_re": r"UnrealEditor",
+        "buttons": ("Yes", "Overwrite", "Replace", "OK", "Continue"),
+        "reason": "Overwrite prompts during asset import",
+    },
+    {
         "id": "ue_crash_report",
         "title_re": r"Crash Report|Send Unattended|Unreal Engine.*Crash",
         "process_re": r"UnrealEditor|CrashReportClient",
@@ -56,11 +141,62 @@ KNOWN_DIALOGS: tuple[dict[str, Any], ...] = (
         "reason": "Crash reporter blocks automation",
     },
     {
+        "id": "ue_shader",
+        "title_re": r"Shader Compile|Compiling Shaders|Global Shaders",
+        "process_re": r"UnrealEditor",
+        "buttons": ("OK", "Close", "Cancel"),
+        "reason": "Shader compile dialog",
+    },
+    {
+        "id": "ue_slow_task",
+        "title_re": r"Slow Task|Please Wait|Progress",
+        "process_re": r"UnrealEditor",
+        "buttons": ("Cancel", "Close"),
+        "reason": "Slow task dialog — cancel only if stuck",
+        "skip_auto": True,
+    },
+    {
+        "id": "ue_datasmith",
+        "title_re": r"Datasmith|Interchange",
+        "process_re": r"UnrealEditor",
+        "buttons": ("OK", "Import", "Yes", "Continue", "Close"),
+        "reason": "Interchange/Datasmith import prompts",
+    },
+    {
+        "id": "ue_missing_asset",
+        "title_re": r"Missing|Failed to Load|Warning|Error",
+        "process_re": r"UnrealEditor",
+        "buttons": ("OK", "Yes", "Continue", "Ignore", "Close", "Cancel"),
+        "reason": "Missing asset / warning MessageBox",
+    },
+    {
         "id": "windows_uac_style_save",
-        "title_re": r"Save.*\?|Save Changes",
+        "title_re": r"Save.*\?|Save Changes|Save Level",
         "process_re": r"UnrealEditor|CharacterCreator",
         "buttons": ("Don't Save", "No", "Cancel"),
         "reason": "Save-prompt during quit/restart",
+    },
+    {
+        "id": "cc5_export",
+        "title_re": r"Export FBX|FBX Export|Export Options|Exporting|Overwrite File|File Exists",
+        "process_re": r"CharacterCreator",
+        "buttons": ("OK", "Yes", "Export", "Continue", "Overwrite", "Replace", "Close"),
+        "reason": "CC5 export / overwrite prompts",
+    },
+    {
+        "id": "cc5_message",
+        "title_re": r"^Message$|^Warning$|^Error$|^Confirm$|^Information$",
+        "process_re": r"CharacterCreator",
+        "buttons": ("OK", "Yes", "Continue", "Close", "Cancel"),
+        "reason": "CC5 MessageBox",
+    },
+    {
+        "id": "reallusion_hub",
+        "title_re": r"Update Available|Download Update|^Reallusion Hub$",
+        "process_re": r"Reallusion",
+        "buttons": ("Cancel", "Close", "No", "Later", "OK"),
+        "close": True,
+        "reason": "Hub window / update prompts distract automation",
     },
 )
 
@@ -309,31 +445,34 @@ def list_dialogs(*, include_main_windows: bool = False) -> dict[str, Any]:
 
 
 def _click_button_pywinauto(hwnd: int, button_text: str) -> dict[str, Any]:
+    # Prefer win32 BM_CLICK first — click_input fails across integrity levels
+    # when Unreal was started elevated and forge was not (UIPI).
+    win32_res = _click_button_win32(hwnd, button_text)
+    if win32_res.get("ok"):
+        win32_res["method"] = "BM_CLICK_first"
+        return win32_res
+    # Avoid click_input when UIPI blocks — it hangs with Admin warnings.
+    err = str(win32_res.get("error") or "")
+    if "not found" not in err.lower():
+        return {
+            "ok": False,
+            "error": f"win32 click failed (skipping click_input to avoid UIPI hang): {err}",
+            "wanted": button_text,
+        }
     from pywinauto import Application
 
     app = Application(backend="win32").connect(handle=hwnd)
     win = app.window(handle=hwnd)
-    win.set_focus()
-    # Exact then fuzzy
     try:
-        win.child_window(title=button_text, class_name="Button").click_input()
-        return {"ok": True, "clicked": button_text, "method": "title"}
-    except Exception:
-        pass
-    try:
-        win.child_window(title_re=f".*{re.escape(button_text)}.*", class_name="Button").click_input()
-        return {"ok": True, "clicked": button_text, "method": "title_re"}
+        # .click() uses messages; less likely to hang than click_input()
+        win.child_window(title=button_text, class_name="Button").click()
+        return {"ok": True, "clicked": button_text, "method": "title_click"}
     except Exception as exc:
-        # Fallback: enumerate
-        for ctrl in win.descendants(class_name="Button"):
-            try:
-                text = (ctrl.window_text() or "").strip()
-                if _normalize(text) == _normalize(button_text) or _normalize(button_text) in _normalize(text):
-                    ctrl.click_input()
-                    return {"ok": True, "clicked": text, "method": "enumerate"}
-            except Exception:
-                continue
-        return {"ok": False, "error": f"button not clickable: {exc}", "wanted": button_text}
+        return {
+            "ok": False,
+            "error": f"button not clickable: {exc}; win32={err}",
+            "wanted": button_text,
+        }
 
 
 def _click_button_win32(hwnd: int, button_text: str) -> dict[str, Any]:
@@ -446,9 +585,11 @@ def click_dialog(
 
     assert click_label is not None
     handle = int(chosen["hwnd"])
-    if backend == "pywinauto":
+    # Always try win32 BM_CLICK first (works when click_input is blocked by UIPI).
+    result = _click_button_win32(handle, click_label)
+    if not result.get("ok") and backend == "pywinauto":
         result = _click_button_pywinauto(handle, click_label)
-    else:
+    elif not result.get("ok"):
         result = _click_button_win32(handle, click_label)
 
     result.update(
@@ -463,26 +604,123 @@ def click_dialog(
     return result
 
 
-def auto_dismiss(*, only_known: bool = True) -> dict[str, Any]:
-    """Click through known (or all matching) dialogs using preferred buttons."""
-    listing = list_dialogs(include_main_windows=True)
+def _target_process(process_name: str) -> bool:
+    pn = (process_name or "").lower()
+    if not pn:
+        return False
+    return any(t.lower() in pn for t in TARGET_PROCESSES)
+
+
+def _close_window(hwnd: int) -> dict[str, Any]:
+    """WM_CLOSE for panels like Message Log that have no buttons."""
+    try:
+        import win32con
+        import win32gui
+
+        win32gui.PostMessage(int(hwnd), win32con.WM_CLOSE, 0, 0)
+        return {"ok": True, "clicked": "WM_CLOSE", "method": "close"}
+    except Exception as exc:
+        try:
+            from pywinauto import Application
+
+            app = Application(backend="win32").connect(handle=int(hwnd))
+            app.window(handle=int(hwnd)).close()
+            return {"ok": True, "clicked": "close", "method": "pywinauto_close"}
+        except Exception as exc2:
+            return {"ok": False, "error": f"close failed: {exc}; {exc2}"}
+
+
+def auto_dismiss(*, only_known: bool = True, target_processes_only: bool = True) -> dict[str, Any]:
+    """
+    Dismiss Hephaestus-relevant dialogs.
+
+    - Known UE/CC5 dialogs (Restore Packages, FBX Import, Message Log, …)
+    - Any #32770 modal from UnrealEditor / CharacterCreator when only_known=False
+      or when it has standard OK/Yes/Import buttons (process-scoped safe auto)
+    Never touches Cursor, browsers, or unrelated apps.
+    """
+    listing = list_dialogs(include_main_windows=False)
     if not listing.get("ok"):
-        return listing
+        # Fallback: include dialogish titles from target processes
+        listing = list_dialogs(include_main_windows=True)
+        if not listing.get("ok"):
+            return listing
 
     handled: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     for d in listing.get("dialogs") or []:
         title = d.get("title") or ""
         process = d.get("process_name") or ""
-        spec = _known_match(title, process)
-        if only_known and not spec:
+        class_name = d.get("class_name") or ""
+        if target_processes_only and process and not _target_process(process):
+            continue
+        if target_processes_only and not process:
+            # Keep known titles even without process attribution
+            if not _known_match(title, "UnrealEditor.exe"):
+                continue
+
+        spec = _known_match(title, process or "UnrealEditor.exe")
+        if spec and spec.get("skip_auto"):
+            skipped.append({"title": title, "hwnd": d.get("hwnd"), "reason": "skip_auto"})
+            continue
+
+        # Process-scoped: treat UE/CC5 #32770 modals as dismissible even if not named
+        is_target_modal = _target_process(process) and (
+            class_name == "#32770"
+            or bool(d.get("buttons"))
+            or bool(spec)
+            or any(
+                k in title.lower()
+                for k in (
+                    "restore",
+                    "save",
+                    "crash",
+                    "error",
+                    "warning",
+                    "confirm",
+                    "message",
+                    "import",
+                    "export",
+                    "overwrite",
+                    "fbx",
+                    "plugin",
+                )
+            )
+        )
+
+        if only_known and not spec and not is_target_modal:
             skipped.append({"title": title, "hwnd": d.get("hwnd"), "reason": "not_known"})
             continue
+        if not only_known and target_processes_only and not is_target_modal and not spec:
+            skipped.append({"title": title, "hwnd": d.get("hwnd"), "reason": "not_target_modal"})
+            continue
+
+        if spec and spec.get("close"):
+            res = _close_window(int(d["hwnd"]))
+            if res.get("ok"):
+                handled.append(
+                    {
+                        "known_id": spec.get("id"),
+                        "title": title,
+                        "result": res,
+                        "reason": spec.get("reason"),
+                    }
+                )
+                continue
+            # fall through to button clicks if close failed
+
         buttons_pref: tuple[str, ...]
-        if spec:
+        if spec and spec.get("buttons"):
             buttons_pref = tuple(spec.get("buttons") or ())
+        elif is_target_modal:
+            # Prefer accept/import for automation blockers; cancel for save prompts
+            if any(k in title.lower() for k in ("save", "restore")):
+                buttons_pref = ACTION_BUTTONS["dismiss"]
+            else:
+                buttons_pref = ACTION_BUTTONS["accept"] + ACTION_BUTTONS["dismiss"]
         else:
             buttons_pref = ACTION_BUTTONS["dismiss"]
+
         available = list(d.get("buttons") or [])
         clicked = None
         last_err = None
@@ -495,13 +733,27 @@ def auto_dismiss(*, only_known: bool = True) -> dict[str, Any]:
                 clicked = res
                 break
             last_err = res
+        if clicked is None and not available:
+            # No enumerated buttons — try OK then close
+            for label in ("OK", "Yes", "Close", "Cancel"):
+                res = click_dialog(hwnd=int(d["hwnd"]), button=label)
+                if res.get("ok"):
+                    clicked = res
+                    break
+                last_err = res
+            if clicked is None:
+                res = _close_window(int(d["hwnd"]))
+                if res.get("ok"):
+                    clicked = res
+                else:
+                    last_err = res
         if clicked:
             handled.append(
                 {
                     "known_id": (spec or {}).get("id"),
                     "title": title,
                     "result": clicked,
-                    "reason": (spec or {}).get("reason"),
+                    "reason": (spec or {}).get("reason") or "target_modal",
                 }
             )
         else:
@@ -528,15 +780,15 @@ def watch_and_dismiss(
     *,
     duration_s: float = 60.0,
     interval_s: float = 1.5,
-    only_known: bool = True,
+    only_known: bool = False,
 ) -> dict[str, Any]:
     """Poll for dialogs and auto-dismiss until duration expires."""
     deadline = time.time() + max(0.0, duration_s)
     events: list[dict[str, Any]] = []
     while time.time() < deadline:
-        res = auto_dismiss(only_known=only_known)
+        res = auto_dismiss(only_known=only_known, target_processes_only=True)
         if res.get("handled_count"):
-            events.append({"t": time.time(), **res})
+            events.append({"t": time.time(), **{k: res[k] for k in ("handled_count", "handled")}})
         time.sleep(max(0.2, interval_s))
     return {
         "ok": True,
@@ -568,7 +820,7 @@ def dismiss_while(
             last_pred = False
         if last_pred:
             return {"ok": True, "ready": True, "dismissed": dismissed}
-        res = auto_dismiss(only_known=only_known)
+        res = auto_dismiss(only_known=False, target_processes_only=True)
         if res.get("handled_count"):
             dismissed.extend(res.get("handled") or [])
         time.sleep(poll_s)

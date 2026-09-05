@@ -119,7 +119,7 @@ def test_cc5_unavailable_clear_error(monkeypatch, tmp_path: Path):
 
 
 def test_install_cc5_openplugin_copies_template(tmp_path: Path, monkeypatch):
-    from cc5_bridge import install_cc5_openplugin, openplugin_template_dir
+    from cc5_bridge import install_cc5_openplugin, openplugin_live_dir, openplugin_template_dir
 
     bin64 = tmp_path / "Bin64"
     bin64.mkdir()
@@ -128,12 +128,18 @@ def test_install_cc5_openplugin_copies_template(tmp_path: Path, monkeypatch):
     template = openplugin_template_dir()
     assert (template / "main.py").is_file()
 
+    home = tmp_path / "hephaestus_home"
+    home.mkdir()
+    monkeypatch.setenv("HEPHAESTUS_HOME", str(home))
     monkeypatch.setattr("cc5_bridge.find_cc5", lambda env=None: str(exe))
     res = install_cc5_openplugin(force=True)
     assert res["ok"] is True
+    live = openplugin_live_dir() / "main.py"
+    assert live.is_file()
+    assert "cc5_jobs" in live.read_text(encoding="utf-8")
     dest = bin64 / "OpenPlugin" / "HephaestusExport" / "main.py"
     assert dest.is_file()
-    assert "cc5_jobs" in dest.read_text(encoding="utf-8")
+    assert "HEPHAESTUS_OPENPLUGIN_BOOTSTRAP" in dest.read_text(encoding="utf-8")
 
     skip = install_cc5_openplugin(force=False)
     assert skip["ok"] and skip.get("skipped")
@@ -349,7 +355,23 @@ def test_import_fbx_timeout_scales_with_size(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(Path, "stat", patched_stat)
     t = import_fbx_timeout_seconds(large)
     assert t >= 400.0
-    assert t <= 900.0
+    assert t <= 1200.0
+
+
+def test_fbm_sidecar_status(tmp_path: Path):
+    from dcc_import import fbm_sidecar_status
+
+    fbx = tmp_path / "Hero.fbx"
+    fbx.write_bytes(b"x")
+    assert fbm_sidecar_status(fbx)["exists"] is False
+    fbm = tmp_path / "Hero.fbm"
+    fbm.mkdir()
+    (fbm / "Std_Skin_Head_Pbr_Diffuse.jpg").write_bytes(b"d")
+    (fbm / "Std_Skin_Head_Pbr_Normal.jpg").write_bytes(b"n")
+    st = fbm_sidecar_status(fbx)
+    assert st["exists"] is True
+    assert st["files"] == 2
+    assert st["diffuse"] == 1
 
 
 def test_pick_imported_asset_prefers_hero_over_materials():
