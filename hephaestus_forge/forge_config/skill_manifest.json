@@ -471,6 +471,13 @@
       "description": "Blender background Python execution"
     },
     {
+      "name": "forge.blender-export",
+      "command": "forge",
+      "args": ["blender-export"],
+      "timeout_seconds": 180,
+      "description": "Factory CLI: Blender primitive → FBX under {project}/.hephaestus_forge/dcc_exports (import to UE only editor-time / out of PIE)"
+    },
+    {
       "name": "cc5",
       "command": "rlpython",
       "args": [],

@@ -47,6 +47,7 @@ def rebuild_checklist(project_root: Optional[Path] = None) -> list[str]:
         f"forge observe {target}  # Mission Control on :3000",
         f"forge build-mc {target}  # optional React UI (Node.js)",
         "forge pie stop  # disengage PIE when done",
+        f"Optional DCC: forge blender-export {target}  # FBX under .hephaestus_forge/dcc_exports; import only out of PIE",
         "Optional CI: GitHub Actions → Live E2E (self-hosted) with PIE on runner — docs/LIVE_E2E.md",
     ]
 

@@ -370,30 +370,11 @@ class SystemScanner:
         return None, None
 
     def _find_blender(self) -> tuple[Optional[str], Optional[str]]:
-        candidates = [
-            ("blender", "Blender in PATH"),
-            (Path("C:/Program Files/Blender Foundation/Blender 4.2/blender.exe"), "Windows default"),
-            (Path("C:/Program Files/Blender Foundation/Blender 4.1/blender.exe"), "Windows default"),
-            (Path("/usr/bin/blender"), "Linux default"),
-            (Path("/Applications/Blender.app/Contents/MacOS/Blender"), "macOS default"),
-        ]
-
-        for path, desc in candidates:
-            try:
-                if isinstance(path, Path):
-                    if not path.exists():
-                        continue
-                    cmd = [str(path), "--version"]
-                else:
-                    cmd = [path, "--version"]
-
-                output = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL).strip()
-                version = output.splitlines()[0].replace("Blender ", "")
-                return str(path) if isinstance(path, Path) else path, version
-            except Exception:
-                continue
-
-        return None, None
+        try:
+            from blender_bridge import find_blender
+        except ImportError:
+            from hephaestus_forge.blender_bridge import find_blender  # type: ignore
+        return find_blender()
 
     def _find_cc5(self) -> Optional[str]:
         # Character Creator 5 typical install paths
@@ -907,6 +888,12 @@ class ProjectScaffold:
                     "command": "blender",
                     "args": ["--background", "--python-expr"],
                     "timeout_seconds": 300,
+                },
+                {
+                    "name": "forge.blender-export",
+                    "command": "forge",
+                    "args": ["blender-export"],
+                    "timeout_seconds": 180,
                 },
                 {
                     "name": "cc5",
@@ -3330,6 +3317,80 @@ def agent_loop_cmd(
     )
     if failed or not grade.met:
         raise typer.Exit(2)
+
+
+@app.command("blender-export")
+def blender_export_cmd(
+    project_path: Annotated[
+        Optional[Path],
+        typer.Argument(help="Adopted UE project root (writes under .hephaestus_forge/dcc_exports)"),
+    ] = None,
+    shape: Annotated[
+        str,
+        typer.Option("--shape", "-s", help="Primitive: cube, uv_sphere, cylinder, cone, plane"),
+    ] = "cube",
+    name: Annotated[str, typer.Option("--name", "-n", help="Output asset / object name")] = "HephaestusPrimitive",
+    output: Annotated[
+        Optional[Path],
+        typer.Option("--output", "-o", help="Explicit .fbx path (overrides default export dir)"),
+    ] = None,
+    blender: Annotated[
+        Optional[str],
+        typer.Option("--blender", help="Blender executable (else BLENDER_EXECUTABLE / detect)"),
+    ] = None,
+    json_out: Annotated[bool, typer.Option("--json", help="Emit result as JSON")] = False,
+):
+    """
+    Forge → Blender background → FBX on disk under a target-agnostic path.
+
+    Does not import into Unreal. AssetTools FBX import is refused during PIE;
+    stop Play (or use Content Browser) then import, then spawn in PIE.
+    """
+    try:
+        from blender_bridge import export_primitive_fbx, find_blender
+    except ImportError:
+        from hephaestus_forge.blender_bridge import export_primitive_fbx, find_blender  # type: ignore
+
+    project_root = project_path
+    if project_root is None:
+        try:
+            from project_registry import ProjectRegistry
+
+            reg = ProjectRegistry()
+            if reg.active_path:
+                project_root = Path(reg.active_path)
+        except Exception:
+            project_root = None
+
+    result = export_primitive_fbx(
+        shape=shape,
+        name=name,
+        project_root=project_root,
+        output_path=output,
+        blender_executable=blender,
+    )
+    if json_out:
+        import json as _json
+
+        typer.echo(_json.dumps(result.to_dict(), indent=2))
+        raise typer.Exit(0 if result.success else 1)
+
+    if result.success:
+        console.print(f"[green]✓ Blender export[/green] {result.shape} → {result.output_path}")
+        console.print(f"[dim]Blender {result.blender_version} ({result.blender_path})[/dim]")
+        console.print("[bold]Next (UE import — not during PIE):[/bold]")
+        for step in result.next_steps:
+            console.print(f"  • {step}")
+        raise typer.Exit(0)
+
+    path, ver = find_blender(blender)
+    detail = f" (found {ver} at {path})" if path else ""
+    console.print(f"[red]✗ Blender export failed[/red]{detail}: {result.error}")
+    if result.stderr:
+        console.print(f"[dim]{result.stderr[-800:]}[/dim]")
+    for step in result.next_steps:
+        console.print(f"  • {step}")
+    raise typer.Exit(1)
 
 
 @app.command("smoke-spawn")
