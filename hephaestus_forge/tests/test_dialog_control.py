@@ -45,11 +45,11 @@ def test_known_match_requires_process_when_set():
     assert spec is None
 
 
-def test_known_match_message_log_closes():
-    spec = dc._known_match("Message Log", "UnrealEditor.exe")
+def test_known_match_cc5_unsaved_project():
+    spec = dc._known_match("Character Creator 5", "CharacterCreator.exe")
     assert spec is not None
-    assert spec["id"] == "ue_message_log"
-    assert spec.get("close") is True
+    assert spec["id"] == "cc5_unsaved_project"
+    assert "Cancel" in spec["buttons"]
 
 
 def test_auto_dismiss_closes_message_log(monkeypatch):

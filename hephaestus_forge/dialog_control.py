@@ -177,6 +177,15 @@ KNOWN_DIALOGS: tuple[dict[str, Any], ...] = (
         "reason": "Save-prompt during quit/restart",
     },
     {
+        "id": "cc5_unsaved_project",
+        "title_re": r"^Character Creator 5$",
+        "process_re": r"CharacterCreator",
+        "buttons": ("Cancel", "No", "OK"),
+        "reason": "CC5 unsaved-project recovery prompt",
+        "prefer_small": True,
+        "body_re": r"Unsaved project|unsaved changes",
+    },
+    {
         "id": "cc5_export",
         "title_re": r"Export FBX|FBX Export|Export Options|Exporting|Overwrite File|File Exists",
         "process_re": r"CharacterCreator",
@@ -189,6 +198,14 @@ KNOWN_DIALOGS: tuple[dict[str, Any], ...] = (
         "process_re": r"CharacterCreator",
         "buttons": ("OK", "Yes", "Continue", "Close", "Cancel"),
         "reason": "CC5 MessageBox",
+    },
+    {
+        "id": "cc5_qt_modal",
+        "title_re": r"^Character Creator 5$",
+        "process_re": r"CharacterCreator",
+        "buttons": ("Cancel", "OK", "No", "Yes", "Close"),
+        "reason": "CC5 Qt modal with generic title",
+        "prefer_small": True,
     },
     {
         "id": "reallusion_hub",
@@ -286,6 +303,14 @@ def _list_via_pywinauto() -> list[DialogInfo]:
                 class_name = w.class_name() or ""
             except Exception:
                 pass
+            width = height = 0
+            try:
+                rect = w.rectangle()
+                width, height = int(rect.width()), int(rect.height())
+            except Exception:
+                pass
+            is_qt = "qt" in class_name.lower()
+            is_small = 0 < height < 500 and 0 < width < 900
             # Prefer modal-ish / dialog classes, but keep titled top-levels that look like prompts
             is_dialogish = (
                 "dialog" in class_name.lower()
@@ -295,15 +320,12 @@ def _list_via_pywinauto() -> list[DialogInfo]:
                     k in title.lower()
                     for k in ("restore", "save", "crash", "error", "warning", "confirm", "message")
                 )
+                or (is_qt and is_small)
             )
             if not is_dialogish and class_name not in ("#32770",):
-                # Still include small top-level windows with few controls that look like MessageBoxes
-                try:
-                    rect = w.rectangle()
-                    if (rect.width() > 900 and rect.height() > 700) and "Unreal" in title:
-                        continue  # main editor frame
-                except Exception:
-                    pass
+                # Skip huge main frames
+                if height > 700 and width > 900:
+                    continue
             pid = 0
             process_name = ""
             try:
@@ -327,6 +349,7 @@ def _list_via_pywinauto() -> list[DialogInfo]:
                     process_name = ""
 
             buttons: list[str] = []
+            body = ""
             try:
                 for ctrl in w.descendants():
                     try:
@@ -340,8 +363,27 @@ def _list_via_pywinauto() -> list[DialogInfo]:
                         continue
             except Exception:
                 pass
+            # CC5 Qt modals need UIA to see OK/Cancel
+            if (not buttons) and (
+                is_qt or "charactercreator" in (process_name or "").lower()
+            ):
+                buttons, body = _uia_buttons_and_body(int(w.handle))
 
             known = _known_match(title, process_name) or {}
+            # Prefer unsaved-project spec when body text matches
+            if body and re.search(r"Unsaved project|unsaved changes", body, re.I):
+                for spec in KNOWN_DIALOGS:
+                    if spec.get("id") == "cc5_unsaved_project":
+                        known = spec
+                        break
+            # Skip large main windows for prefer_small known dialogs
+            if known.get("prefer_small") and not is_small and height > 500:
+                known = {}
+                # Still keep if UIA found OK/Cancel on a mid-size window
+                if not (buttons and any(_normalize(b) in ("ok", "cancel") for b in buttons)):
+                    if title.lower() == "character creator 5" and height > 500:
+                        continue
+
             out.append(
                 DialogInfo(
                     hwnd=int(w.handle),
@@ -434,6 +476,11 @@ def list_dialogs(*, include_main_windows: bool = False) -> dict[str, Any]:
                 for k in ("restore", "save", "crash", "error", "warning", "confirm", "message")
             ):
                 filtered.append(d)
+            elif "qt" in (d.class_name or "").lower() and "charactercreator" in (
+                d.process_name or ""
+            ).lower():
+                # Small CC5 Qt windows (exact title "Character Creator 5") are modals
+                filtered.append(d)
         dialogs = filtered
 
     return {
@@ -444,6 +491,68 @@ def list_dialogs(*, include_main_windows: bool = False) -> dict[str, Any]:
     }
 
 
+def _uia_buttons_and_body(hwnd: int) -> tuple[list[str], str]:
+    """Enumerate Qt/UIA buttons and static text (CC5 modals are not win32 Buttons)."""
+    buttons: list[str] = []
+    body_bits: list[str] = []
+    try:
+        from pywinauto import Application
+
+        app = Application(backend="uia").connect(handle=int(hwnd))
+        win = app.window(handle=int(hwnd))
+        for ctrl in win.descendants():
+            try:
+                ctype = (ctrl.element_info.control_type or "").lower()
+                text = (ctrl.window_text() or "").strip()
+                if not text:
+                    continue
+                if ctype == "button" and text not in buttons:
+                    buttons.append(text)
+                elif ctype in ("text", "document", "edit") and len(text) > 8:
+                    body_bits.append(text)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return buttons, " ".join(body_bits)
+
+
+def _click_button_uia(hwnd: int, button_text: str) -> dict[str, Any]:
+    try:
+        from pywinauto import Application
+
+        app = Application(backend="uia").connect(handle=int(hwnd))
+        win = app.window(handle=int(hwnd))
+        try:
+            win.set_focus()
+        except Exception:
+            pass
+        # Exact title
+        try:
+            btn = win.child_window(title=button_text, control_type="Button")
+            if btn.exists(timeout=0.5):
+                btn.invoke()
+                return {"ok": True, "clicked": button_text, "method": "uia_invoke"}
+        except Exception:
+            pass
+        for ctrl in win.descendants(control_type="Button"):
+            try:
+                text = (ctrl.window_text() or "").strip()
+                if _normalize(text) == _normalize(button_text) or _normalize(button_text) in _normalize(
+                    text
+                ):
+                    try:
+                        ctrl.invoke()
+                    except Exception:
+                        ctrl.click()
+                    return {"ok": True, "clicked": text, "method": "uia_enumerate"}
+            except Exception:
+                continue
+        return {"ok": False, "error": f"uia button not found: {button_text}", "wanted": button_text}
+    except Exception as exc:
+        return {"ok": False, "error": f"uia click failed: {exc}", "wanted": button_text}
+
+
 def _click_button_pywinauto(hwnd: int, button_text: str) -> dict[str, Any]:
     # Prefer win32 BM_CLICK first — click_input fails across integrity levels
     # when Unreal was started elevated and forge was not (UIPI).
@@ -451,12 +560,18 @@ def _click_button_pywinauto(hwnd: int, button_text: str) -> dict[str, Any]:
     if win32_res.get("ok"):
         win32_res["method"] = "BM_CLICK_first"
         return win32_res
-    # Avoid click_input when UIPI blocks — it hangs with Admin warnings.
+    # Qt (CC5) dialogs expose buttons only via UIA.
+    uia_res = _click_button_uia(hwnd, button_text)
+    if uia_res.get("ok"):
+        return uia_res
     err = str(win32_res.get("error") or "")
     if "not found" not in err.lower():
         return {
             "ok": False,
-            "error": f"win32 click failed (skipping click_input to avoid UIPI hang): {err}",
+            "error": (
+                f"win32 click failed (skipping click_input to avoid UIPI hang): {err}; "
+                f"uia={uia_res.get('error')}"
+            ),
             "wanted": button_text,
         }
     from pywinauto import Application
@@ -464,13 +579,12 @@ def _click_button_pywinauto(hwnd: int, button_text: str) -> dict[str, Any]:
     app = Application(backend="win32").connect(handle=hwnd)
     win = app.window(handle=hwnd)
     try:
-        # .click() uses messages; less likely to hang than click_input()
         win.child_window(title=button_text, class_name="Button").click()
         return {"ok": True, "clicked": button_text, "method": "title_click"}
     except Exception as exc:
         return {
             "ok": False,
-            "error": f"button not clickable: {exc}; win32={err}",
+            "error": f"button not clickable: {exc}; win32={err}; uia={uia_res.get('error')}",
             "wanted": button_text,
         }
 
@@ -587,10 +701,10 @@ def click_dialog(
     handle = int(chosen["hwnd"])
     # Always try win32 BM_CLICK first (works when click_input is blocked by UIPI).
     result = _click_button_win32(handle, click_label)
+    if not result.get("ok"):
+        result = _click_button_uia(handle, click_label)
     if not result.get("ok") and backend == "pywinauto":
         result = _click_button_pywinauto(handle, click_label)
-    elif not result.get("ok"):
-        result = _click_button_win32(handle, click_label)
 
     result.update(
         {
