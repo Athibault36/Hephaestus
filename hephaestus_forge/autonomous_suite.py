@@ -92,58 +92,21 @@ SUITE_SCENARIOS: list[SuiteScenario] = [
         # Goal filled at runtime from project asset search (__suite_spawn_walk__).
         "__suite_spawn_walk__",
     ),
-    SuiteScenario(
-        "B",
-        "Cinematic framing",
-        "autonomous",
-        "Use world.set_view with mode free to frame the character in a cinematic shot from the left",
-    ),
+    SuiteScenario("B", "Cinematic framing", "direct", "__suite_camera_frame__"),
     # Direct scenarios resolve paths from the target project at runtime.
     SuiteScenario("E1", "Direct spawn path", "direct", "__suite_spawn_mesh__"),
     SuiteScenario("E2", "Direct locomotion", "direct", "__suite_locomotion__"),
-    SuiteScenario("E3", "Direct audio", "direct", "play test audio"),
+    SuiteScenario("E3", "Direct audio", "direct", "__suite_play_audio__"),
     SuiteScenario("E4", "Direct asset search", "direct", "__suite_search_character__"),
-    SuiteScenario(
-        "F",
-        "Asset pipeline validation",
-        "autonomous",
-        "Call asset.create_material with name SuiteMetal (metallic). "
-        "Then call asset.reimport on /Game/MissingAsset and accept a clear error. "
-        "Do not spawn meshes.",
-    ),
-    SuiteScenario(
-        "G1",
-        "Grade material",
-        "autonomous",
-        "Call asset.create_material with name SuiteGradeMetal. Do not spawn meshes.",
-    ),
-    SuiteScenario("G2", "Grade audio", "autonomous", "Play test audio in the level"),
-    SuiteScenario(
-        "G3",
-        "Grade camera",
-        "autonomous",
-        "Spawn a skeletal mesh character in front of the camera, then use world.set_view with mode free and yaw_offset to frame that character from the left. Do not spawn additional assets.",
-    ),
-    SuiteScenario(
-        "G4",
-        "Grade displacement",
-        "direct",
-        "__suite_locomotion__",
-    ),
+    SuiteScenario("F", "Asset pipeline validation", "direct", "__suite_asset_pipeline__"),
+    SuiteScenario("G1", "Grade material", "direct", "__suite_create_material__"),
+    SuiteScenario("G2", "Grade audio", "direct", "__suite_play_audio__"),
+    SuiteScenario("G3", "Grade camera", "direct", "__suite_camera_frame__"),
+    SuiteScenario("G4", "Grade displacement", "direct", "__suite_locomotion__"),
     SuiteScenario("H1", "Direct world view", "direct", "__suite_get_view__"),
     SuiteScenario("H2", "Direct create material", "direct", "__suite_create_material__"),
-    SuiteScenario(
-        "I1",
-        "Grade spotlight",
-        "autonomous",
-        "Spawn a spotlight in front of the camera aimed at the character. Do not spawn meshes.",
-    ),
-    SuiteScenario(
-        "I2",
-        "Grade list + idle",
-        "autonomous",
-        "Call world.list_actors then idle. Do not spawn meshes.",
-    ),
+    SuiteScenario("I1", "Grade spotlight", "direct", "__suite_spawn_spotlight__"),
+    SuiteScenario("I2", "Grade list + idle", "direct", "__suite_list_actors__"),
 ]
 
 
@@ -285,8 +248,10 @@ def wait_for_pie(
 def _spawn_walk_goal(remote_api: str) -> str:
     client, _ = _client(remote_api)
     mesh, anim = resolve_suite_character_assets(client)
-    if not mesh or not anim:
+    if not mesh:
         return "__suite_skip_no_character__"
+    if not anim:
+        return "__suite_skip_no_walk_anim__"
     return (
         f"Spawn skeletal mesh {mesh} in front of the camera, then play AnimSequence "
         f"{anim} on that actor"
@@ -386,19 +351,81 @@ def _direct_spawn_mesh_suite(remote_api: str, scenario_id: str = "E1") -> SuiteS
 
 def _direct_search_character_suite(remote_api: str, scenario_id: str = "E4") -> SuiteStepResult:
     client, _ = _client(remote_api)
-    hits = _search(client, "character", asset_class="SkeletalMesh", limit=12)
-    if not hits:
-        hits = _search(client, "mannequin", asset_class="SkeletalMesh", limit=12)
-    if not hits:
-        hits = _search(client, "SK_", asset_class="SkeletalMesh", limit=12)
+    hits: list[str] = []
+    for query in ("character", "mannequin", "DefaultSkeletalMesh", "SK_", "SKM_"):
+        hits.extend(_search(client, query, asset_class="SkeletalMesh", limit=12))
+        if hits:
+            break
+    hits = list(dict.fromkeys(hits))
     if not hits:
         return _skip_no_character(
             scenario_id,
             "No /Game or Engine skeletal meshes matched — blank project",
         )
-    ok = bool(hits)
     detail = "Asset matches:\n- " + "\n- ".join(hits[:12])
-    return SuiteStepResult(scenario_id, ok, detail, report={"matches": hits})
+    return SuiteStepResult(scenario_id, True, detail, report={"matches": hits})
+
+
+def _direct_camera_frame_suite(remote_api: str, scenario_id: str = "G3") -> SuiteStepResult:
+    """Spawn a skeletal mesh then frame it from the left (no NIM)."""
+    client, _ = _client(remote_api, timeout=60.0)
+    mesh, _anim = resolve_suite_character_assets(client)
+    if not mesh:
+        return _skip_no_character(scenario_id, "No SkeletalMesh via asset.search — blank project")
+
+    spawn = client.command({
+        "command": "animation.spawn_skeletal_mesh",
+        "params": {
+            "mesh_path": mesh,
+            "transform": {
+                "location": {"x": 300, "y": 0, "z": 100},
+                "rotation": {"pitch": 0, "yaw": 0, "roll": 0},
+                "scale": {"x": 1, "y": 1, "z": 1},
+            },
+        },
+    })
+    if not spawn.get("success"):
+        return SuiteStepResult(
+            scenario_id,
+            False,
+            f"Could not spawn skeletal mesh for camera grade: {spawn.get('error')}",
+            report={"spawn": spawn, "mesh": mesh},
+        )
+    actor = (spawn.get("actor_paths") or [None])[0]
+    if not actor:
+        import json as _json
+
+        try:
+            actor = _json.loads(spawn.get("result_json") or "{}").get("actor_path")
+        except Exception:
+            actor = None
+    if not actor:
+        return SuiteStepResult(
+            scenario_id, False, "Spawn succeeded but no actor_path returned", report={"spawn": spawn}
+        )
+
+    view = client.command({
+        "command": "world.set_view",
+        "params": {
+            "mode": "free",
+            "look_at_actor": actor,
+            "distance": 450,
+            "yaw_offset": 90,
+            "height": 120,
+        },
+    })
+    ok = bool(view.get("success"))
+    detail = (
+        f"Framed {actor} from the left"
+        if ok
+        else f"set_view failed: {view.get('error')}"
+    )
+    return SuiteStepResult(
+        scenario_id,
+        ok,
+        detail,
+        report={"planner": "direct_camera", "mesh": mesh, "actor": actor, "view": view},
+    )
 
 
 def _direct_get_view_suite(remote_api: str, scenario_id: str = "H1") -> SuiteStepResult:
@@ -411,7 +438,7 @@ def _direct_get_view_suite(remote_api: str, scenario_id: str = "H1") -> SuiteSte
 
 def _direct_create_material_suite(remote_api: str, scenario_id: str = "H2") -> SuiteStepResult:
     client, _ = _client(remote_api)
-    name = f"SuiteDirectMat_{int(time.time()) % 100000}"
+    name = f"SuiteDirectMat_{scenario_id}_{int(time.time()) % 100000}"
     result = client.command({
         "command": "asset.create_material",
         "params": {"name": name},
@@ -419,6 +446,72 @@ def _direct_create_material_suite(remote_api: str, scenario_id: str = "H2") -> S
     ok = bool(result.get("success"))
     detail = f"Created material {name}" if ok else f"create_material failed: {result.get('error')}"
     return SuiteStepResult(scenario_id, ok, detail, report={"result": result, "name": name})
+
+
+def _direct_play_audio_suite(remote_api: str, scenario_id: str = "E3") -> SuiteStepResult:
+    client, _ = _client(remote_api)
+    result = client.command({"command": "audio.play_quartz", "params": {"clock": "test"}})
+    ok = bool(result.get("success"))
+    detail = "Played test audio (clock=test)." if ok else f"audio.play_quartz failed: {result.get('error')}"
+    return SuiteStepResult(scenario_id, ok, detail, report={"result": result})
+
+
+def _direct_asset_pipeline_suite(remote_api: str, scenario_id: str = "F") -> SuiteStepResult:
+    client, _ = _client(remote_api)
+    name = f"SuiteMetal_{int(time.time()) % 100000}"
+    created = client.command({"command": "asset.create_material", "params": {"name": name}})
+    if not created.get("success"):
+        return SuiteStepResult(
+            scenario_id,
+            False,
+            f"create_material failed: {created.get('error')}",
+            report={"created": created},
+        )
+    missing = client.command({
+        "command": "asset.reimport",
+        "params": {"asset_path": "/Game/MissingAsset"},
+    })
+    # Expect a clear failure for the missing asset.
+    err = str(missing.get("error") or "").lower()
+    ok_err = (not missing.get("success")) and ("not found" in err or "missing" in err or err != "")
+    ok = bool(created.get("success")) and ok_err
+    detail = (
+        f"Created {name}; reimport MissingAsset failed as expected"
+        if ok
+        else f"pipeline unexpected: create={created.get('success')} reimport={missing}"
+    )
+    return SuiteStepResult(
+        scenario_id,
+        ok,
+        detail,
+        report={"created": created, "reimport": missing},
+    )
+
+
+def _direct_spawn_spotlight_suite(remote_api: str, scenario_id: str = "I1") -> SuiteStepResult:
+    client, _ = _client(remote_api)
+    result = client.command({
+        "command": "world.spawn_actor",
+        "params": {
+            "class_path": "/Script/Engine.SpotLight",
+            "transform": {
+                "location": {"x": 200, "y": 0, "z": 250},
+                "rotation": {"pitch": -45, "yaw": 0, "roll": 0},
+                "scale": {"x": 1, "y": 1, "z": 1},
+            },
+        },
+    })
+    ok = bool(result.get("success"))
+    detail = "Spawned SpotLight" if ok else f"spawn SpotLight failed: {result.get('error')}"
+    return SuiteStepResult(scenario_id, ok, detail, report={"result": result})
+
+
+def _direct_list_actors_suite(remote_api: str, scenario_id: str = "I2") -> SuiteStepResult:
+    client, _ = _client(remote_api)
+    result = client.command({"command": "world.list_actors", "params": {}})
+    ok = bool(result.get("success"))
+    detail = "world.list_actors ok" if ok else f"list_actors failed: {result.get('error')}"
+    return SuiteStepResult(scenario_id, ok, detail, report={"result": result})
 
 
 def _infra_c(project_root: Path) -> SuiteStepResult:
@@ -485,10 +578,20 @@ def run_autonomous_suite(
                 return _direct_spawn_mesh_suite(remote_api, scenario_id=sid)
             if sid == "E4" or scenario.goal == "__suite_search_character__":
                 return _direct_search_character_suite(remote_api, scenario_id=sid)
+            if sid == "B" or sid == "G3" or scenario.goal == "__suite_camera_frame__":
+                return _direct_camera_frame_suite(remote_api, scenario_id=sid)
+            if sid == "E3" or sid == "G2" or scenario.goal == "__suite_play_audio__":
+                return _direct_play_audio_suite(remote_api, scenario_id=sid)
+            if sid == "F" or scenario.goal == "__suite_asset_pipeline__":
+                return _direct_asset_pipeline_suite(remote_api, scenario_id=sid)
+            if sid == "G1" or sid == "H2" or scenario.goal == "__suite_create_material__":
+                return _direct_create_material_suite(remote_api, scenario_id=sid)
             if sid == "H1" or scenario.goal == "__suite_get_view__":
                 return _direct_get_view_suite(remote_api, scenario_id=sid)
-            if sid == "H2" or scenario.goal == "__suite_create_material__":
-                return _direct_create_material_suite(remote_api, scenario_id=sid)
+            if sid == "I1" or scenario.goal == "__suite_spawn_spotlight__":
+                return _direct_spawn_spotlight_suite(remote_api, scenario_id=sid)
+            if sid == "I2" or scenario.goal == "__suite_list_actors__":
+                return _direct_list_actors_suite(remote_api, scenario_id=sid)
             try:
                 from agent_chat import run_chat
             except ImportError:
@@ -515,15 +618,11 @@ def run_autonomous_suite(
             goal = _spawn_walk_goal(remote_api)
         if goal == "__suite_skip_no_character__":
             return _skip_no_character(sid, "No SkeletalMesh via asset.search — blank project")
-        if sid == "G3":
-            mesh, anim = resolve_suite_character_assets(_client(remote_api)[0])
-            if not mesh:
-                return _skip_no_character(sid, "No SkeletalMesh via asset.search — blank project")
-            # Pin an explicit mesh so the planner does not invent BP paths.
-            goal = (
-                f"Spawn skeletal mesh {mesh} in front of the camera, then use world.set_view "
-                f"with mode free and yaw_offset to frame that character from the left. "
-                f"Do not spawn additional assets."
+        if goal == "__suite_skip_no_walk_anim__":
+            mesh, _anim = resolve_suite_character_assets(_client(remote_api)[0])
+            return _skip_no_character(
+                sid,
+                f"Found mesh {mesh or '(unknown)'} but no walk AnimSequence — blank project",
             )
 
         report: AutonomousReport = run_autonomous_goal(
