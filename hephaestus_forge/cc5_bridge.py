@@ -194,7 +194,11 @@ def cc5_jobs_dir() -> Path:
     return d
 
 
-def find_default_cc5_template(env: Optional[dict] = None) -> Optional[str]:
+def find_default_cc5_template(
+    env: Optional[dict] = None,
+    *,
+    preference: str = "",
+) -> Optional[str]:
     """Path to a built-in mannequin / neutral avatar for auto-create."""
     environ = env if env is not None else os.environ
     explicit = (environ.get("CC5_TEMPLATE") or environ.get("HEPHAESTUS_CC5_TEMPLATE") or "").strip()
@@ -204,11 +208,31 @@ def find_default_cc5_template(env: Optional[dict] = None) -> Optional[str]:
     if not cc5:
         return None
     root = Path(cc5).resolve().parent.parent  # Bin64 → Character Creator 5
-    for rel in (
+    pref = (preference or "").lower()
+    body = Path("Resource") / "CCHeadshot" / "ccAvatarBodyType"
+    # NeutralAvatar first — Headshot body-types can hang on load in some CC5 setups
+    order: list[Path] = [
+        Path("Program") / "CCBaseData" / "NeutralAvatar" / "HD" / "RL_CC3_Plus.ccAvatar",
+        Path("Program") / "CCBaseData" / "NeutralAvatar" / "RL_CC3_Plus.ccAvatar",
+        Path("Program") / "CCBaseData" / "NeutralAvatar" / "RL_G6_Standard_Series.ccAvatar",
+    ]
+    if pref == "female":
+        order += [
+            body / "RL_CC3_Plus Female.ccAvatar",
+            body / "RL_CC3_Plus Male.ccAvatar",
+        ]
+    else:
+        order += [
+            body / "RL_CC3_Plus Male.ccAvatar",
+            body / "RL_CC3_Plus Female.ccAvatar",
+        ]
+    order += [
+        body / "RL_CC3_Plus.ccAvatar",
         Path("Program") / "Default" / "Mannequin_Male.ccAvatar",
         Path("Program") / "Default" / "Mannequin_Female.ccAvatar",
         Path("Program") / "Default" / "DefDummyForMotion.iAvatar",
-    ):
+    ]
+    for rel in order:
         cand = root / rel
         if cand.is_file():
             return str(cand)
@@ -319,18 +343,34 @@ def _export_via_job_queue(
     character_name: str,
     fbx_path: Path,
     timeout_seconds: float,
+    appearance: Optional[dict] = None,
+    prompt: str = "",
 ) -> dict:
     """Write a job for the CC5 OpenPlugin and poll for .result.json."""
     jobs = cc5_jobs_dir()
     job_id = f"export_{int(time.time() * 1000)}"
     job_path = jobs / f"{job_id}.job.json"
     result_path = jobs / f"{job_id}.result.json"
+
+    plan = appearance
+    if plan is None:
+        try:
+            from cc5_appearance import infer_appearance
+        except ImportError:
+            from hephaestus_forge.cc5_appearance import infer_appearance  # type: ignore
+
+        plan = infer_appearance(prompt or "", character_name=character_name)
+
     payload = {
         "character_name": character_name,
         "output_path": str(fbx_path.resolve()),
         "created_at": time.time(),
+        "prompt": prompt or plan.get("prompt") or "",
+        "appearance": plan,
+        "force_new": True,
     }
-    template = find_default_cc5_template()
+    pref = str(plan.get("template_preference") or plan.get("gender") or "")
+    template = find_default_cc5_template(preference=pref)
     if template:
         payload["template_path"] = template
     job_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -360,6 +400,7 @@ def _export_via_job_queue(
                 "error": "" if ok else (result.get("error") or "CC5 job failed"),
                 "method": "openplugin_job",
                 "result": result,
+                "appearance": plan,
             }
         time.sleep(1.0)
     # cleanup stale job
@@ -387,6 +428,8 @@ def export_character_fbx(
     output_path: Optional[Path] = None,
     include_morphs: bool = True,
     timeout_seconds: int = 180,
+    prompt: str = "",
+    appearance: Optional[dict] = None,
 ) -> dict:
     cc5 = find_cc5()
     rlpy = find_rlpython()
@@ -423,6 +466,8 @@ def export_character_fbx(
         character_name=character_name,
         fbx_path=fbx_path,
         timeout_seconds=float(timeout_seconds),
+        appearance=appearance,
+        prompt=prompt,
     )
     if job.get("success"):
         next_steps = ue_import_next_steps(fbx_path)
@@ -436,6 +481,8 @@ def export_character_fbx(
             "asset_paths": [str(fbx_path)],
             "next_steps": next_steps,
             "method": "openplugin_job",
+            "appearance": job.get("appearance") or appearance,
+            "alter": (job.get("result") or {}).get("appearance"),
         }
 
     # CharacterCreatorpy crashes headless (access violation). Opt-in only for diagnostics.

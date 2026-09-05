@@ -760,16 +760,25 @@ def try_direct_cc5_author(
         except ImportError:
             from hephaestus_forge.cc5_bridge import export_character_fbx, cc5_available  # type: ignore
         if cc5_available():
+            try:
+                from cc5_appearance import infer_appearance, appearance_summary
+            except ImportError:
+                from hephaestus_forge.cc5_appearance import infer_appearance, appearance_summary  # type: ignore
+            plan = infer_appearance(message or "", character_name=name)
             export = export_character_fbx(
                 character_name=name,
                 project_root=project_root,
-                # Create mannequin + FBX export can take a minute on cold CC5
+                # Create mannequin + morph + FBX can take a minute on cold CC5
                 timeout_seconds=90,
+                prompt=message or "",
+                appearance=plan,
             )
             export_meta["cc5"] = export
+            export_meta["appearance"] = plan
             if export.get("success") and export.get("output_path"):
                 fbx = str(export["output_path"])
                 provider = "cc5"
+                export_meta["appearance_summary"] = appearance_summary(plan)
 
     # 2) NIM → Blender complex mesh (free path with NVIDIA_API_KEY)
     if fbx is None:
@@ -877,6 +886,8 @@ def try_direct_cc5_author(
         reply += f", framed {actor}"
     if anim_res and anim_res.get("success"):
         reply += f", animated ({anim_res.get('method')}/{anim_res.get('mode')})"
+    if provider == "cc5" and export_meta.get("appearance_summary"):
+        reply += f" [{export_meta['appearance_summary']}]"
     reply += "."
     return _chat_result(
         True,
