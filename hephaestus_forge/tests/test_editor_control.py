@@ -62,9 +62,27 @@ def test_bring_up_plays_when_editor_ready(tmp_path: Path):
                         "editor_control.wait_for_pie",
                         return_value=(True, {"ok": True}, "PIE match"),
                     ):
-                        out = editor_control.bring_up(tmp_path, open_if_needed=False)
+                        with patch("dcc_client.start_dcc_server", return_value={"ok": True}):
+                            out = editor_control.bring_up(tmp_path, open_if_needed=False)
     assert out["ok"] is True
     assert out["already_pie"] is False
+    assert out.get("dcc", {}).get("ok") is True
+
+
+def test_bring_up_skips_dcc_when_disabled(tmp_path: Path):
+    up = tmp_path / "Demo.uproject"
+    up.write_text("{}", encoding="utf-8")
+    health = {"ok": True, "project_name": "Demo", "project_dir": str(tmp_path)}
+    with patch("editor_control.editor_online", return_value=(True, health, "ed")):
+        with patch("editor_control.editor_matches_project", return_value=(True, "match")):
+            with patch("editor_control.pie_online", return_value=(True, {"ok": True}, "pie")):
+                with patch(
+                    "editor_control.status_snapshot",
+                    return_value={"pie_online": True, "pie_detail": "ok"},
+                ):
+                    out = editor_control.bring_up(tmp_path, open_if_needed=False, start_dcc=False)
+    assert out["ok"] is True
+    assert out.get("dcc", {}).get("skipped") is True
 
 
 def test_bring_down_stop_only():

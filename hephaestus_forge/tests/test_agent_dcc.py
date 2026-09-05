@@ -12,9 +12,12 @@ sys.path.insert(0, str(ROOT))
 
 from agent_dcc import (  # noqa: E402
     infer_dcc_shape,
+    last_dcc,
+    remember_dcc,
     try_direct_dcc_author,
     wants_dcc_export_only,
     wants_dcc_into_pie,
+    wants_spin,
 )
 
 
@@ -112,6 +115,58 @@ def test_try_direct_passes_color(monkeypatch, tmp_path: Path):
 
 def test_try_direct_skips_unrelated():
     assert try_direct_dcc_author("play idle on /Temp/Foo") is None
+
+
+def test_wants_spin():
+    assert wants_spin("make a red cube, frame it, and spin it slowly") is True
+    assert wants_spin("make a cube") is False
+
+
+def test_try_direct_passes_spin(tmp_path: Path):
+    fake = {
+        "success": True,
+        "asset_path": "/Game/X",
+        "actor_path": "/Temp/A",
+        "phase": "done",
+        "spin": {"success": True},
+        "frame": {"success": True},
+    }
+    with patch("agent_dcc.author_primitive_to_pie", return_value=fake) as auth:
+        out = try_direct_dcc_author(
+            "make a red cube, frame it, and spin it slowly",
+            project_root=tmp_path,
+        )
+    assert out and out["ok"]
+    assert auth.call_args.kwargs.get("spin") is True
+    assert auth.call_args.kwargs.get("color") is not None
+    assert "spun" in out["reply"].lower()
+    mem = last_dcc(tmp_path)
+    assert mem and mem.get("actor_path") == "/Temp/A"
+
+
+def test_followup_spin_uses_memory(tmp_path: Path):
+    remember_dcc(
+        tmp_path,
+        {"actor_path": "/Temp/Last.StaticMeshActor_0", "asset_path": "/Game/X", "shape": "cube"},
+    )
+    with patch("agent_dcc.spin_actor", return_value={"success": True, "actor_path": "/Temp/Last.StaticMeshActor_0"}) as sp:
+        out = try_direct_dcc_author("spin it slowly", project_root=tmp_path)
+    assert out and out["ok"]
+    assert out["planner"] == "direct_dcc_followup"
+    assert sp.called
+    assert "Spun" in out["reply"]
+
+
+def test_cc5_unavailable(tmp_path: Path):
+    with patch("cc5_bridge.cc5_available", return_value=False):
+        out = try_direct_dcc_author(
+            "make a character and put it in the scene",
+            project_root=tmp_path,
+        )
+    assert out is not None
+    assert out["ok"] is False
+    assert "cc5_unavailable" in out["reply"]
+    assert out["planner"] == "direct_cc5_author"
 
 
 def test_autonomous_runner_uses_dcc(monkeypatch, tmp_path: Path):
