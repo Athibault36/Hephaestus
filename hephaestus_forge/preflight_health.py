@@ -332,6 +332,36 @@ def _probe_ue_editor(timeout: float = 1.5) -> HealthCheck:
         return HealthCheck("ue_editor", False, str(exc), blocker=False)
 
 
+def _probe_dcc(timeout: float = 1.5) -> HealthCheck:
+    """Non-blocking: DCC control plane (:8084) for Blender/CC5."""
+    try:
+        try:
+            from dcc_client import dcc_online
+            from blender_bridge import find_blender
+        except ImportError:
+            from hephaestus_forge.dcc_client import dcc_online  # type: ignore
+            from hephaestus_forge.blender_bridge import find_blender  # type: ignore
+        ok, health, detail = dcc_online(timeout=timeout)
+        path, ver = find_blender()
+        blender_hint = f"Blender {ver}" if path else "Blender not installed"
+        if ok:
+            ready = bool(health.get("ready"))
+            return HealthCheck(
+                "dcc",
+                True,
+                f"{detail}; {blender_hint}" + ("" if ready else " (server up, Blender missing)"),
+                blocker=False,
+            )
+        return HealthCheck(
+            "dcc",
+            False,
+            f"{detail} — optional: forge dcc start ({blender_hint})",
+            blocker=False,
+        )
+    except Exception as exc:
+        return HealthCheck("dcc", False, str(exc), blocker=False)
+
+
 def run_preflight(
     remote_api: str = "http://127.0.0.1:8765",
     project_root: Optional[Path] = None,
@@ -344,6 +374,7 @@ def run_preflight(
         _probe_ue_editor(),
         _probe_ue(remote_api, project_root=project_root),
         _probe_bridge_capabilities(remote_api),
+        _probe_dcc(),
         _probe_nim_key(),
         _probe_planner(),
         _probe_vision_mode(),

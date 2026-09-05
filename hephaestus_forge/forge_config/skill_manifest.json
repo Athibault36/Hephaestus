@@ -428,31 +428,18 @@
     {
       "name": "hephaestus.blender_ipc",
       "functions": [
-        "exec_script",
-        "exec_expr",
-        "retopologize",
-        "uv_pack",
-        "bake_maps",
-        "rigify_character",
-        "export_fbx",
-        "geometry_nodes_eval"
+        "blender.exec",
+        "blender.export_fbx",
+        "blender.scene_info"
       ],
-      "description": "Blender Python script execution and DCC operations"
+      "description": "DCC :8084 Blender verbs (one-shot background executor)"
     },
     {
       "name": "hephaestus.dcc_bridge",
       "functions": [
-        "cc5_export_character",
-        "cc5_conform_cloth",
-        "cc5_accu_rig",
-        "cc5_facial_profile",
-        "cc5_retarget_motion",
-        "cc5_livelink_facial",
-        "meshy_generate",
-        "meshy_texture",
-        "meshy_import_to_ue"
+        "cc5.export"
       ],
-      "description": "Character Creator 5 and Meshy API integration"
+      "description": "Character Creator 5 export to dcc_exports when rlpython is available"
     }
   ],
   "external_tools": [
@@ -464,33 +451,39 @@
       "description": "Engage/disengage UE PIE via editor API :8766"
     },
     {
-      "name": "blender",
-      "command": "blender",
-      "args": ["--background", "--python-expr"],
-      "timeout_seconds": 300,
-      "description": "Blender background Python execution"
+      "name": "forge.dcc",
+      "command": "forge",
+      "args": ["dcc", "start|status"],
+      "timeout_seconds": 30,
+      "description": "Start/status for DCC control plane http://127.0.0.1:8084"
+    },
+    {
+      "name": "forge.blender",
+      "command": "forge",
+      "args": ["blender", "export|exec"],
+      "timeout_seconds": 180,
+      "description": "Author FBX via DCC blender.export_fbx / blender.exec"
     },
     {
       "name": "forge.blender-export",
       "command": "forge",
       "args": ["blender-export"],
       "timeout_seconds": 180,
-      "description": "Factory CLI: Blender primitive → FBX under {project}/.hephaestus_forge/dcc_exports (import to UE only editor-time / out of PIE)"
+      "description": "Alias: Blender primitive → FBX under {project}/.hephaestus_forge/dcc_exports"
     },
     {
-      "name": "cc5",
-      "command": "rlpython",
-      "args": [],
-      "timeout_seconds": 120,
-      "description": "Character Creator 5 Python automation"
+      "name": "forge.dcc-import",
+      "command": "forge",
+      "args": ["dcc-import"],
+      "timeout_seconds": 180,
+      "description": "Stop PIE → editor.import_fbx → Play → spawn in frustum"
     },
     {
-      "name": "meshy",
-      "type": "rest",
-      "base_url": "https://api.meshy.ai/v1",
-      "auth_header": "Authorization",
-      "timeout_seconds": 60,
-      "description": "Meshy 3D generation REST API"
+      "name": "forge.cc5",
+      "command": "forge",
+      "args": ["cc5", "export"],
+      "timeout_seconds": 180,
+      "description": "CC5/rlpython character FBX export into dcc_exports"
     }
   ]
 }
