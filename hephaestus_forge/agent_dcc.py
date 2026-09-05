@@ -8,6 +8,7 @@ in-viewport without the operator running forge blender / dcc-import by hand.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any, Optional
@@ -60,14 +61,15 @@ _FOLLOWUP_ONLY = re.compile(
     r"spin(?:\s+it)?(?:\s+slowly)?|"
     r"orbit(?:\s+it)?|"
     r"frame(?:\s+it)?(?:\s+a\s+shot)?|"
-    r"make\s+it\s+(\w+)|"
+    r"make\s+it\s+(\w+)(?:\s+and\s+spin(?:\s+it)?(?:\s+slowly)?)?|"
     r"tint(?:\s+it)?(?:\s+(\w+))?|"
-    r"look\s+at\s+it"
+    r"look\s+at\s+it|"
+    r"make\s+it\s+(\w+)\s+and\s+(?:spin|orbit|frame)(?:\s+it)?"
     r")\s*[.!?]?\s*$",
     re.IGNORECASE,
 )
 
-# In-process last DCC delivery (per project key)
+# In-process last DCC delivery (per project key); also mirrored to disk
 _LAST_DCC: dict[str, dict[str, Any]] = {}
 
 
@@ -75,18 +77,45 @@ def _project_key(project_root: Optional[Path]) -> str:
     return str(Path(project_root).resolve()) if project_root else ""
 
 
+def _last_dcc_path(project_root: Optional[Path]) -> Optional[Path]:
+    if not project_root:
+        return None
+    return Path(project_root).resolve() / ".hephaestus_forge" / "last_dcc.json"
+
+
 def remember_dcc(project_root: Optional[Path], meta: dict[str, Any]) -> None:
     key = _project_key(project_root)
-    _LAST_DCC[key] = {
+    payload = {
         "actor_path": meta.get("actor_path"),
         "asset_path": meta.get("asset_path"),
         "shape": meta.get("shape") or meta.get("dcc_shape"),
         "fbx": meta.get("fbx"),
     }
+    _LAST_DCC[key] = payload
+    disk = _last_dcc_path(project_root)
+    if disk is None:
+        return
+    try:
+        disk.parent.mkdir(parents=True, exist_ok=True)
+        disk.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    except OSError:
+        pass
 
 
 def last_dcc(project_root: Optional[Path] = None) -> Optional[dict[str, Any]]:
-    return _LAST_DCC.get(_project_key(project_root)) or None
+    key = _project_key(project_root)
+    if key in _LAST_DCC:
+        return _LAST_DCC[key]
+    disk = _last_dcc_path(project_root)
+    if disk and disk.is_file():
+        try:
+            data = json.loads(disk.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and data.get("actor_path"):
+                _LAST_DCC[key] = data
+                return data
+        except (OSError, json.JSONDecodeError, TypeError):
+            return None
+    return None
 
 
 def wants_spin(message: str) -> bool:
@@ -577,32 +606,59 @@ def try_direct_dcc_followup(
         return None
 
     color = infer_mesh_color(message)
-    # "make it blue" → color only
+    bits: list[str] = []
+    meta: dict[str, Any] = {"actor_path": actor}
+    ok = True
+
+    # Tint when asked (make it blue / tint red) — may combine with spin/orbit/frame
     if color and re.search(r"\bmake\s+it\b|\btint\b", message or "", re.I):
         tint = tint_actor(actor, color, remote_api=remote_api)
-        ok = bool(tint.get("success"))
-        reply = f"Tinted {actor}." if ok else f"Tint failed: {tint.get('error')}"
-        return _chat_result(ok, reply, str((remembered or {}).get("shape") or ""), planner="direct_dcc_followup", asset_path=str((remembered or {}).get("asset_path") or ""), meta={"tint": tint, "actor_path": actor})
+        meta["tint"] = tint
+        if tint.get("success"):
+            bits.append(f"Tinted {actor}")
+        else:
+            ok = False
+            bits.append(f"Tint failed: {tint.get('error')}")
 
     if wants_orbit(message):
         orb = orbit_camera(actor, remote_api=remote_api, duration=infer_spin_duration(message))
-        ok = bool(orb.get("success"))
-        reply = f"Orbited camera around {actor}." if ok else f"Orbit failed: {orb.get('error')}"
-        return _chat_result(ok, reply, str((remembered or {}).get("shape") or ""), planner="direct_dcc_followup", asset_path=str((remembered or {}).get("asset_path") or ""), meta={"orbit": orb, "actor_path": actor})
-
-    if wants_spin(message):
+        meta["orbit"] = orb
+        if orb.get("success"):
+            bits.append(f"Orbited camera around {actor}")
+        else:
+            ok = False
+            bits.append(f"Orbit failed: {orb.get('error')}")
+    elif wants_spin(message):
         sp = spin_actor(actor, remote_api=remote_api, duration=infer_spin_duration(message))
-        ok = bool(sp.get("success"))
-        reply = f"Spun {actor}." if ok else f"Spin failed: {sp.get('error')}"
-        return _chat_result(ok, reply, str((remembered or {}).get("shape") or ""), planner="direct_dcc_followup", asset_path=str((remembered or {}).get("asset_path") or ""), meta={"spin": sp, "actor_path": actor})
+        meta["spin"] = sp
+        if sp.get("success"):
+            bits.append(f"Spun {actor}")
+        else:
+            ok = False
+            bits.append(f"Spin failed: {sp.get('error')}")
 
-    if wants_frame_shot(message) or re.search(r"\bframe\b", message or "", re.I):
+    if wants_frame_shot(message) or re.search(r"\bframe(?:\s+it)?\b", message or "", re.I):
+        # Skip if the only match was "frame" inside a longer author phrase that we shouldn't hit here
         fr = frame_actor(actor, remote_api=remote_api, create_shot="shot" in (message or "").lower())
-        ok = bool(fr.get("success"))
-        reply = f"Framed {actor}." if ok else f"Frame failed: {fr.get('error')}"
-        return _chat_result(ok, reply, str((remembered or {}).get("shape") or ""), planner="direct_dcc_followup", asset_path=str((remembered or {}).get("asset_path") or ""), meta={"frame": fr, "actor_path": actor})
+        meta["frame"] = fr
+        if fr.get("success"):
+            bits.append(f"Framed {actor}")
+        else:
+            ok = False
+            bits.append(f"Frame failed: {fr.get('error')}")
 
-    return None
+    if not bits:
+        return None
+
+    reply = ". ".join(bits) + "."
+    return _chat_result(
+        ok,
+        reply,
+        str((remembered or {}).get("shape") or ""),
+        planner="direct_dcc_followup",
+        asset_path=str((remembered or {}).get("asset_path") or ""),
+        meta=meta,
+    )
 
 
 def try_direct_cc5_author(
