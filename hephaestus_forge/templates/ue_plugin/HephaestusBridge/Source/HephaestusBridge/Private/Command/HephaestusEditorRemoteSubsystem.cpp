@@ -32,6 +32,7 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
 #include "Factories/FbxImportUI.h"
+#include "Factories/FbxFactory.h"
 #include "Factories/FbxSkeletalMeshImportData.h"
 
 void UHephaestusEditorRemoteSubsystem::Initialize(FSubsystemCollectionBase& Collection)
@@ -260,7 +261,7 @@ bool UHephaestusEditorRemoteSubsystem::RequestImportFbx(
 		ImportUI->MeshTypeToImport = FBXIT_SkeletalMesh;
 		ImportUI->SkeletalMeshImportData->bImportMorphTargets = true;
 		ImportTask->Options = ImportUI;
-		ImportTask->FactoryName = TEXT("FbxFactory");
+		ImportTask->Factory = NewObject<UFbxFactory>();
 	}
 
 	TArray<UAssetImportTask*> Tasks;
