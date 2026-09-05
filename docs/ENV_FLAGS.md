@@ -69,7 +69,7 @@ These go through the agent DCC path (no NIM required for primitives):
 | `make a cube` | Blender export → import → spawn in frustum → frame |
 | `make a red cube, frame it, and spin it slowly` | tint + frame + in-place spin |
 | `make a blue sphere` | colored UV sphere in PIE |
-| `spin it` / `make it blue` | follow-up on last DCC actor (session memory) |
+| `spin it` / `make it blue` / `make it blue and spin it` | follow-up on last DCC actor (session + `.hephaestus_forge/last_dcc.json`) |
 | `orbit it` | camera orbit around last DCC actor |
 | `make a character` | CC5 export when available; else `cc5_unavailable` |
 | `export a cube fbx with blender` | export only (no import) |
