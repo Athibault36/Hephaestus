@@ -1208,6 +1208,119 @@ cc5_app = typer.Typer(
 )
 app.add_typer(cc5_app, name="cc5")
 
+dialog_app = typer.Typer(
+    name="dialog",
+    help="Control Windows / Unreal dialog boxes (list, click, auto-dismiss).",
+    no_args_is_help=True,
+)
+app.add_typer(dialog_app, name="dialog")
+
+
+@dialog_app.command("list")
+def dialog_list_cmd(
+    all_windows: Annotated[bool, typer.Option("--all", help="Include more top-level windows")] = False,
+    as_json: Annotated[bool, typer.Option("--json", help="Print JSON")] = False,
+):
+    """List visible dialog-like windows and their buttons."""
+    try:
+        from dialog_control import list_dialogs
+    except ImportError:
+        from hephaestus_forge.dialog_control import list_dialogs  # type: ignore
+
+    result = list_dialogs(include_main_windows=all_windows)
+    if as_json:
+        console.print_json(data=result)
+    elif not result.get("ok"):
+        console.print(f"[red]{result.get('error')}[/red]")
+    else:
+        console.print(f"[cyan]{result.get('count', 0)} dialog(s)[/cyan] (backend={result.get('backend')})")
+        for d in result.get("dialogs") or []:
+            known = f" [{d.get('known_id')}]" if d.get("known_id") else ""
+            btns = ", ".join(d.get("buttons") or []) or "(no buttons enumerated)"
+            console.print(f"  hwnd={d.get('hwnd')}  {d.get('title')}{known}")
+            console.print(f"    buttons: {btns}")
+    raise typer.Exit(0 if result.get("ok") else 1)
+
+
+@dialog_app.command("click")
+def dialog_click_cmd(
+    title: Annotated[Optional[str], typer.Option("--title", "-t", help="Substring of dialog title")] = None,
+    title_re: Annotated[Optional[str], typer.Option("--title-re", help="Regex for dialog title")] = None,
+    hwnd: Annotated[Optional[int], typer.Option("--hwnd", help="Window handle")] = None,
+    button: Annotated[Optional[str], typer.Option("--button", "-b", help="Exact/fuzzy button label")] = None,
+    action: Annotated[
+        Optional[str],
+        typer.Option("--action", "-a", help="Semantic action: accept|cancel|yes|no|ok|dismiss"),
+    ] = None,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+):
+    """Click Accept/Cancel/Yes/No or a named button on a dialog."""
+    try:
+        from dialog_control import click_dialog
+    except ImportError:
+        from hephaestus_forge.dialog_control import click_dialog  # type: ignore
+
+    result = click_dialog(title=title, title_re=title_re, hwnd=hwnd, button=button, action=action)
+    if as_json:
+        console.print_json(data=result)
+    elif result.get("ok"):
+        console.print(
+            f"[green]Clicked[/green] {result.get('clicked')!r} on {result.get('dialog_title')!r}"
+        )
+    else:
+        console.print(f"[red]{result.get('error')}[/red]")
+    raise typer.Exit(0 if result.get("ok") else 1)
+
+
+@dialog_app.command("auto")
+def dialog_auto_cmd(
+    all_dialogs: Annotated[
+        bool,
+        typer.Option("--all/--known", help="Dismiss all matching prompts, or only known UE blockers"),
+    ] = False,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+):
+    """Auto-dismiss known Unreal/Hephaestus blockers (Restore Packages, etc.)."""
+    try:
+        from dialog_control import auto_dismiss
+    except ImportError:
+        from hephaestus_forge.dialog_control import auto_dismiss  # type: ignore
+
+    result = auto_dismiss(only_known=not all_dialogs)
+    if as_json:
+        console.print_json(data=result)
+    else:
+        console.print(f"[green]Handled {result.get('handled_count', 0)}[/green]")
+        for h in result.get("handled") or []:
+            console.print(f"  {h.get('title')} → {((h.get('result') or {}).get('clicked'))}")
+        for s in result.get("skipped") or []:
+            console.print(f"  [dim]skip {s.get('title')}: {s.get('reason')}[/dim]")
+    raise typer.Exit(0 if result.get("ok") else 1)
+
+
+@dialog_app.command("watch")
+def dialog_watch_cmd(
+    duration: Annotated[float, typer.Option("--duration", "-d", help="Seconds to watch")] = 60.0,
+    interval: Annotated[float, typer.Option("--interval", "-i", help="Poll seconds")] = 1.5,
+    all_dialogs: Annotated[bool, typer.Option("--all/--known")] = False,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+):
+    """Poll and auto-dismiss dialogs for a while (useful during editor launch)."""
+    try:
+        from dialog_control import watch_and_dismiss
+    except ImportError:
+        from hephaestus_forge.dialog_control import watch_and_dismiss  # type: ignore
+
+    console.print(f"[cyan]Watching dialogs for {duration:.0f}s…[/cyan]")
+    result = watch_and_dismiss(
+        duration_s=duration, interval_s=interval, only_known=not all_dialogs
+    )
+    if as_json:
+        console.print_json(data=result)
+    else:
+        console.print(f"[green]Dismissed {result.get('dismissed_total', 0)}[/green] over {duration:.0f}s")
+    raise typer.Exit(0 if result.get("ok") else 1)
+
 
 @editor_app.command("open")
 def editor_open_cmd(

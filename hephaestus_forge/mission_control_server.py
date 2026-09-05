@@ -291,6 +291,47 @@ def make_handler(
                 except Exception as exc:
                     self._json_response(500, {"ok": False, "error": str(exc)})
                 return True
+            if path == "/agent/dialog" and self.command == "GET":
+                try:
+                    sys.path.insert(0, str(FORGE_ROOT))
+                    from dialog_control import list_dialogs
+
+                    self._json_response(200, list_dialogs(include_main_windows=False))
+                except Exception as exc:
+                    self._json_response(500, {"ok": False, "error": str(exc)})
+                return True
+            if path == "/agent/dialog" and self.command == "POST":
+                length = int(self.headers.get("Content-Length", "0") or 0)
+                raw = self.rfile.read(length) if length > 0 else b"{}"
+                try:
+                    body = json.loads(raw.decode("utf-8") or "{}")
+                except json.JSONDecodeError:
+                    self._json_response(400, {"ok": False, "error": "invalid_json"})
+                    return True
+                try:
+                    sys.path.insert(0, str(FORGE_ROOT))
+                    from dialog_control import auto_dismiss, click_dialog
+
+                    op = str(body.get("op") or body.get("action_type") or "auto").strip().lower()
+                    if op in ("auto", "dismiss", "auto_dismiss"):
+                        self._json_response(
+                            200,
+                            auto_dismiss(only_known=not bool(body.get("all", False))),
+                        )
+                        return True
+                    self._json_response(
+                        200,
+                        click_dialog(
+                            title=body.get("title"),
+                            title_re=body.get("title_re"),
+                            hwnd=body.get("hwnd"),
+                            button=body.get("button"),
+                            action=body.get("action") or body.get("choice"),
+                        ),
+                    )
+                except Exception as exc:
+                    self._json_response(500, {"ok": False, "error": str(exc)})
+                return True
             if path in ("/agent/step", "/agent/loop") and self.command == "POST":
                 length = int(self.headers.get("Content-Length", "0") or 0)
                 raw = self.rfile.read(length) if length > 0 else b"{}"
