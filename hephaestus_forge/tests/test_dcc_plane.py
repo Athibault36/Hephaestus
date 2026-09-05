@@ -139,6 +139,27 @@ def test_install_cc5_openplugin_copies_template(tmp_path: Path, monkeypatch):
     assert skip["ok"] and skip.get("skipped")
 
 
+def test_infer_appearance_tall_muscular_male():
+    from cc5_appearance import infer_appearance
+
+    plan = infer_appearance("make a tall muscular man named Rex", character_name="Rex")
+    assert plan["gender"] == "male"
+    assert plan["template_preference"] == "male"
+    assert "tall" in plan["traits"]
+    assert "muscular" in plan["traits"]
+    assert plan["morphs"]["height"] < 0
+    assert plan["morphs"]["muscle"] > 0.5
+    assert plan["force_new"] is True
+
+
+def test_infer_appearance_unique_by_name():
+    from cc5_appearance import infer_appearance
+
+    a = infer_appearance("make a person", character_name="Alex")
+    b = infer_appearance("make a person", character_name="Blake")
+    assert a["morphs"] != b["morphs"]
+
+
 def test_find_default_cc5_template(tmp_path: Path, monkeypatch):
     from cc5_bridge import find_default_cc5_template
 
@@ -146,13 +167,15 @@ def test_find_default_cc5_template(tmp_path: Path, monkeypatch):
     bin64.mkdir()
     exe = bin64 / "CharacterCreator.exe"
     exe.write_bytes(b"x")
-    default = tmp_path / "Program" / "Default"
-    default.mkdir(parents=True)
-    mannequin = default / "Mannequin_Male.ccAvatar"
-    mannequin.write_bytes(b"avatar")
+    neutral = tmp_path / "Program" / "CCBaseData" / "NeutralAvatar"
+    neutral.mkdir(parents=True)
+    base = neutral / "RL_CC3_Plus.ccAvatar"
+    base.write_bytes(b"avatar")
     monkeypatch.setattr("cc5_bridge.find_cc5", lambda env=None: str(exe))
-    assert find_default_cc5_template() == str(mannequin)
+    assert find_default_cc5_template(preference="male") == str(base)
 
+
+def test_cc5_job_queue_timeout(monkeypatch, tmp_path: Path):
     from cc5_bridge import _export_via_job_queue
 
     monkeypatch.setattr("cc5_bridge.cc5_jobs_dir", lambda: tmp_path)

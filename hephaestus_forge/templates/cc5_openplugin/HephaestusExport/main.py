@@ -33,29 +33,38 @@ def _cc5_program_root() -> Path:
         return here.parent
 
 
-def _default_avatar_candidates(name_hint: str = "") -> list[Path]:
-    """Built-in CC5 templates Hephaestus can load without user interaction."""
+def _default_avatar_candidates(name_hint: str = "", preference: str = "") -> list[Path]:
+    """Prefer reliable NeutralAvatar first; optional gendered Headshot body types."""
     root = _cc5_program_root()
     default_dir = root / "Program" / "Default"
     neutral = root / "Program" / "CCBaseData" / "NeutralAvatar"
+    body = root / "Resource" / "CCHeadshot" / "ccAvatarBodyType"
     hint = (name_hint or "").lower()
-    female = any(w in hint for w in ("female", "woman", "girl", "lady"))
-    male_first = [
-        default_dir / "Mannequin_Male.ccAvatar",
-        default_dir / "Mannequin_Female.ccAvatar",
-    ]
-    female_first = [
-        default_dir / "Mannequin_Female.ccAvatar",
-        default_dir / "Mannequin_Male.ccAvatar",
-    ]
-    ordered = female_first if female else male_first
-    extras = [
-        default_dir / "DefDummyForMotion.iAvatar",
+    pref = (preference or "").lower()
+    female = pref == "female" or any(w in hint for w in ("female", "woman", "girl", "lady"))
+    young = any(w in hint for w in ("child", "kid", "baby"))
+
+    # Known-good NeutralAvatar (loads without modal). Body-types can hang on some installs.
+    morph_bases = [
+        neutral / "HD" / "RL_CC3_Plus.ccAvatar",
         neutral / "RL_CC3_Plus.ccAvatar",
-        root / "Program" / "Assets" / "Creator" / "Default.ccProject",
+        neutral / "RL_G6_Standard_Series.ccAvatar",
+        neutral / "RL_CharacterCreator_Base_Std_G3.ccAvatar",
     ]
-    # Job may pass an explicit template
-    return [p for p in ordered + extras if p]
+    gendered = []
+    if young:
+        gendered.append(body / "RL_CC3_Plus Baby.ccAvatar")
+    if female:
+        gendered += [body / "RL_CC3_Plus Female.ccAvatar", body / "RL_CC3_Plus Male.ccAvatar"]
+    else:
+        gendered += [body / "RL_CC3_Plus Male.ccAvatar", body / "RL_CC3_Plus Female.ccAvatar"]
+    mannequins = (
+        [default_dir / "Mannequin_Female.ccAvatar", default_dir / "Mannequin_Male.ccAvatar"]
+        if female
+        else [default_dir / "Mannequin_Male.ccAvatar", default_dir / "Mannequin_Female.ccAvatar"]
+    )
+    # Neutral first for reliability; gendered second for when they load cleanly
+    return morph_bases + gendered + mannequins + [default_dir / "DefDummyForMotion.iAvatar"]
 
 
 def _list_avatars():
@@ -64,15 +73,12 @@ def _list_avatars():
     try:
         if hasattr(RLPy.RScene, "GetAvatars"):
             raw = RLPy.RScene.GetAvatars()
-            # Some builds require EAvatarType_All
             if raw is None and hasattr(RLPy, "EAvatarType_All"):
                 raw = RLPy.RScene.GetAvatars(RLPy.EAvatarType_All)
             return list(raw or [])
     except TypeError:
         try:
-            import RLPy as _rl
-
-            return list(_rl.RScene.GetAvatars(_rl.EAvatarType_All) or [])
+            return list(RLPy.RScene.GetAvatars(RLPy.EAvatarType_All) or [])
         except Exception:
             return []
     except Exception:
@@ -100,31 +106,363 @@ def _load_template(path: Path):
         except Exception as exc:
             print(f"HephaestusExport LoadFile: {exc}")
             return None
-    # Prefer returned object if it's an avatar; else take first in scene
     avatars = _list_avatars()
-    if obj is not None and avatars:
-        # Newly loaded is often last
-        return avatars[-1]
     if avatars:
         return avatars[-1]
     return obj
 
 
-def _ensure_avatar(name_hint: str = "", template_path: str = ""):
-    """Return an avatar, creating/loading a default mannequin if the scene is empty."""
+def _clear_avatars() -> int:
+    """Remove existing avatars so each job can create a fresh character."""
+    import RLPy
+
+    removed = 0
+    for avatar in list(_list_avatars()):
+        try:
+            if hasattr(RLPy.RScene, "DeleteObject"):
+                RLPy.RScene.DeleteObject(avatar)
+            elif hasattr(RLPy.RScene, "RemoveObject"):
+                RLPy.RScene.RemoveObject(avatar)
+            else:
+                break
+            removed += 1
+        except Exception as exc:
+            print(f"HephaestusExport clear avatar: {exc}")
+    return removed
+
+
+def _apply_scale_shape(avatar, appearance: dict) -> dict:
+    """
+    Visibly alter the character when body morph packs aren't installed:
+    non-uniform scale from traits (tall/short/muscular/thin/heavy).
+    """
+    import RLPy
+
+    traits = {str(t).lower() for t in ((appearance or {}).get("traits") or [])}
+    morphs = (appearance or {}).get("morphs") or {}
+    sx = sy = sz = 1.0
+
+    # Height from trait or morph needle
+    h = float(morphs.get("height") or 0.0)
+    if "tall" in traits or h < -0.2:
+        sy *= 1.08 + min(0.12, abs(h) * 0.1)
+    elif "short" in traits or h > 0.2:
+        sy *= 0.92 - min(0.08, abs(h) * 0.08)
+
+    if "muscular" in traits:
+        sx *= 1.08
+        sz *= 1.08
+        sy *= 1.02
+    elif "thin" in traits:
+        sx *= 0.92
+        sz *= 0.92
+    elif "heavy" in traits:
+        sx *= 1.12
+        sz *= 1.12
+        sy *= 0.98
+    else:
+        # Seeded mild variation from unused morph weights
+        m = float(morphs.get("muscle") or 0.0)
+        t = float(morphs.get("thin") or 0.0)
+        hv = float(morphs.get("heavy") or 0.0)
+        sx *= 1.0 + m * 0.06 - t * 0.05 + hv * 0.07
+        sz *= 1.0 + m * 0.06 - t * 0.05 + hv * 0.07
+
+    # Clamp
+    sx = max(0.82, min(1.25, sx))
+    sy = max(0.82, min(1.25, sy))
+    sz = max(0.82, min(1.25, sz))
+    if abs(sx - 1.0) < 0.01 and abs(sy - 1.0) < 0.01 and abs(sz - 1.0) < 0.01:
+        return {"scaled": False, "scale": [1.0, 1.0, 1.0]}
+
+    errors: list[str] = []
+    try:
+        # RIObject.SetScale if present
+        if hasattr(avatar, "SetScale"):
+            avatar.SetScale(RLPy.RVector3(sx, sy, sz) if hasattr(RLPy, "RVector3") else (sx, sy, sz))
+            return {"scaled": True, "scale": [sx, sy, sz], "method": "SetScale"}
+    except Exception as exc:
+        errors.append(f"SetScale:{exc}")
+
+    try:
+        if hasattr(avatar, "LocalScaled") or hasattr(avatar, "SetLocalScale"):
+            meth = getattr(avatar, "SetLocalScale", None) or getattr(avatar, "LocalScaled", None)
+            if callable(meth):
+                meth(sx, sy, sz)
+                return {"scaled": True, "scale": [sx, sy, sz], "method": "LocalScale"}
+    except Exception as exc:
+        errors.append(f"LocalScale:{exc}")
+
+    try:
+        # Transform control
+        ctrl = avatar.GetControl("Transform") if hasattr(avatar, "GetControl") else None
+        if ctrl is not None and hasattr(ctrl, "SetData"):
+            # Best-effort; APIs vary by build
+            data = ctrl.GetData() if hasattr(ctrl, "GetData") else None
+            if data is not None and hasattr(data, "SetScale"):
+                data.SetScale(RLPy.RVector3(sx, sy, sz))
+                ctrl.SetData(data)
+                return {"scaled": True, "scale": [sx, sy, sz], "method": "TransformControl"}
+    except Exception as exc:
+        errors.append(f"Transform:{exc}")
+
+    try:
+        wt = avatar.WorldTransform() if hasattr(avatar, "WorldTransform") else None
+        if wt is not None:
+            if hasattr(wt, "SetScale"):
+                wt.SetScale(RLPy.RVector3(sx, sy, sz) if hasattr(RLPy, "RVector3") else sx)
+            if hasattr(avatar, "SetWorldTransform"):
+                avatar.SetWorldTransform(wt)
+                return {"scaled": True, "scale": [sx, sy, sz], "method": "WorldTransform"}
+    except Exception as exc:
+        errors.append(f"WorldTransform:{exc}")
+
+    return {"scaled": False, "scale": [sx, sy, sz], "errors": errors}
+
+
+def _load_outfit(avatar, appearance: dict) -> dict:
+    """Best-effort load of default cloth/hair templates onto the character."""
+    import RLPy
+
+    root = _cc5_program_root()
+    cloth_dir = root / "Program" / "CCBaseData" / "AutoSkin" / "RL_CC3_Plus"
+    loaded: list[str] = []
+    errors: list[str] = []
+    # Prefer a full-body or dress for female; cloak/other for variety by seed
+    gender = str((appearance or {}).get("gender") or "")
+    seed = str((appearance or {}).get("seed") or "x")
+    picks = []
+    if gender == "female":
+        picks = ["Dress.ccCloth", "Hair.ccHair", "Shoe.ccShoes"]
+    else:
+        picks = ["Full_Body.ccCloth", "Hair.ccHair", "Shoe.ccShoes"]
+    # Mild variety
+    if abs(hash(seed)) % 2 == 0 and (cloth_dir / "Cloak.ccCloth").is_file():
+        picks.insert(0, "Cloak.ccCloth")
+
+    for name in picks:
+        path = cloth_dir / name
+        if not path.is_file():
+            continue
+        try:
+            obj = RLPy.RFileIO.LoadObject(str(path))
+            if obj is not None:
+                loaded.append(name)
+                try:
+                    if hasattr(RLPy, "RCloth") and hasattr(RLPy.RCloth, "Conform"):
+                        RLPy.RCloth.Conform(obj, avatar)
+                except Exception as exc:
+                    errors.append(f"conform {name}:{exc}")
+        except Exception as exc:
+            errors.append(f"load {name}:{exc}")
+    return {"loaded": loaded, "errors": errors}
+
+
+def _apply_morphs(avatar, appearance: dict) -> dict:
+    """
+    Alter shaping morphs from an appearance plan when morph packs are installed.
+    """
+    import re
+    import RLPy
+
+    applied: list[str] = []
+    missed: list[str] = []
+    morphs = (appearance or {}).get("morphs") or {}
+    if not morphs:
+        return {"applied": [], "missed": [], "morph_count": 0}
+
+    try:
+        shaping = avatar.GetAvatarShapingComponent()
+    except Exception as exc:
+        return {"applied": [], "missed": list(morphs.keys()), "error": str(exc), "morph_count": 0}
+    if shaping is None:
+        return {"applied": [], "missed": list(morphs.keys()), "error": "no shaping component", "morph_count": 0}
+
+    catalog: dict[str, object] = {}
+    try:
+        categories = shaping.GetShapingMorphCatergoryNames()
+    except Exception:
+        try:
+            categories = shaping.GetShapingMorphCategoryNames()
+        except Exception as exc:
+            return {"applied": [], "missed": list(morphs.keys()), "error": f"categories: {exc}", "morph_count": 0}
+
+    cat_summary: dict[str, int] = {}
+    for cat in categories or []:
+        try:
+            ids = list(shaping.GetShapingMorphIDs(cat) or [])
+            names = list(shaping.GetShapingMorphDisplayNames(cat) or [])
+        except Exception:
+            continue
+        cat_l = str(cat).strip().lower()
+        cat_summary[str(cat)] = len(names)
+        for i, name in enumerate(names):
+            if i >= len(ids):
+                break
+            key = str(name).strip().lower()
+            catalog[key] = ids[i]
+            catalog[f"{cat_l}/{key}"] = ids[i]
+            leaf = key.rsplit("/", 1)[-1].strip()
+            if leaf and leaf not in catalog:
+                catalog[leaf] = ids[i]
+
+    useful: list[str] = []
+    try:
+        home = Path(os.environ.get("HEPHAESTUS_HOME") or (Path.home() / ".hephaestus"))
+        non_micro = sorted(
+            k
+            for k in catalog
+            if not any(x in k for x in ("eyeocclusion", "eo ", "/eo ", "tear line", "tearline", "tl "))
+        )
+        useful = [
+            k
+            for k in non_micro
+            if any(
+                t in k
+                for t in (
+                    "height",
+                    "muscle",
+                    "body",
+                    "thin",
+                    "heavy",
+                    "age",
+                    "jaw",
+                    "nose",
+                    "brow",
+                    "cheek",
+                    "mouth",
+                    "chin",
+                    "slacker",
+                    "athletic",
+                    "face",
+                    "character",
+                    "head",
+                    "neck",
+                    "shoulder",
+                    "chest",
+                    "waist",
+                    "hip",
+                    "arm",
+                    "leg",
+                )
+            )
+        ][:200]
+        (home / "cc5_morphs_sample.json").write_text(
+            json.dumps(
+                {
+                    "count": len(catalog),
+                    "categories": cat_summary,
+                    "non_micro_n": len(non_micro),
+                    "non_micro_sample": non_micro[:80],
+                    "useful": useful,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+    except Exception:
+        useful = []
+
+    def _find_id(needle: str):
+        n = needle.strip().lower()
+        words = [w for w in re.split(r"[^a-z0-9]+", n) if len(w) > 2]
+        best = None
+        best_score = 0
+        for k, v in catalog.items():
+            if any(x in k for x in ("eyeocclusion", "eo ", "/eo ", "tearline", "tl ")):
+                continue
+            score = 0
+            if n == k:
+                return v
+            if n in k:
+                score = 500 - min(len(k), 400)
+            elif words:
+                hits = sum(1 for w in words if w in k)
+                if not hits:
+                    continue
+                score = hits * 40
+            else:
+                continue
+            if any(t in k for t in ("full body", "character", "actor/body", "body/", "head/", "face")):
+                score += 80
+            if score > best_score:
+                best_score = score
+                best = v
+        return best if best_score >= 40 else None
+
+    for name, weight in morphs.items():
+        mid = _find_id(str(name))
+        if mid is None:
+            missed.append(str(name))
+            continue
+        try:
+            shaping.SetShapingMorphWeight(mid, float(weight))
+            applied.append(f"{name}={float(weight):.2f}")
+        except Exception as exc:
+            missed.append(f"{name}({exc})")
+
+    try:
+        flags = RLPy.EObjectModifiedType_Attribute
+        if hasattr(RLPy, "EObjectModifiedType_Transform"):
+            flags = flags | RLPy.EObjectModifiedType_Transform
+        RLPy.RGlobal.ObjectModified(avatar, flags)
+    except Exception as exc:
+        print(f"HephaestusExport ObjectModified: {exc}")
+
+    return {
+        "applied": applied,
+        "missed": missed,
+        "morph_count": len(catalog),
+        "categories": cat_summary,
+        "sample_useful": useful[:40],
+        "body_morph_pack": any(
+            "body" in str(c).lower() or "character" in str(c).lower() or "actor/" in str(c).lower()
+            for c in cat_summary
+            if "parts" not in str(c).lower()
+        ),
+    }
+
+
+def _apply_appearance(avatar, appearance: dict) -> dict:
+    """Create a distinct character: body-type base + scale + morphs + outfit."""
+    if not appearance:
+        return {"skipped": True}
+    scale = _apply_scale_shape(avatar, appearance)
+    morphs = _apply_morphs(avatar, appearance)
+    outfit = _load_outfit(avatar, appearance)
+    return {
+        "traits": list(appearance.get("traits") or []),
+        "gender": appearance.get("gender"),
+        "scale": scale,
+        "morphs": morphs,
+        "outfit": outfit,
+        "applied": list(morphs.get("applied") or [])
+        + ([f"scale={scale.get('scale')}"] if scale.get("scaled") else [])
+        + [f"outfit:{n}" for n in (outfit.get("loaded") or [])],
+        "missed": list(morphs.get("missed") or []),
+        "morph_count": morphs.get("morph_count") or 0,
+    }
+
+
+def _ensure_avatar(name_hint: str = "", template_path: str = "", preference: str = "", force_new: bool = True):
+    """Return an avatar, creating/loading a default mannequin if needed."""
+    if force_new:
+        _clear_avatars()
+
     avatars = _list_avatars()
     avatar = None
-    if name_hint:
-        for a in avatars:
-            try:
-                n = a.GetName() if hasattr(a, "GetName") else str(a)
-                if n and name_hint.lower() in n.lower():
-                    avatar = a
-                    break
-            except Exception:
-                pass
-    if avatar is None and avatars:
-        avatar = avatars[0]
+    if not force_new:
+        if name_hint:
+            for a in avatars:
+                try:
+                    n = a.GetName() if hasattr(a, "GetName") else str(a)
+                    if n and name_hint.lower() in n.lower():
+                        avatar = a
+                        break
+                except Exception:
+                    pass
+        if avatar is None and avatars:
+            avatar = avatars[0]
 
     if avatar is not None:
         return avatar, "existing"
@@ -132,7 +470,7 @@ def _ensure_avatar(name_hint: str = "", template_path: str = ""):
     candidates: list[Path] = []
     if template_path and Path(template_path).is_file():
         candidates.append(Path(template_path))
-    candidates.extend(_default_avatar_candidates(name_hint))
+    candidates.extend(_default_avatar_candidates(name_hint, preference))
 
     errors: list[str] = []
     for path in candidates:
@@ -260,11 +598,44 @@ def _process_job(job_path: Path) -> None:
     out_path = str(job.get("output_path") or "")
     name_hint = str(job.get("character_name") or "")
     template_path = str(job.get("template_path") or "")
-    if not out_path:
+    appearance = job.get("appearance") if isinstance(job.get("appearance"), dict) else {}
+    preference = str(
+        appearance.get("template_preference")
+        or appearance.get("gender")
+        or job.get("template_preference")
+        or ""
+    )
+    force_new = bool(appearance.get("force_new", True) if appearance else job.get("force_new", True))
+    if not out_path and str(job.get("action") or "") != "probe":
         _write_result(job_path, False, error="output_path required")
         return
 
-    avatar, how = _ensure_avatar(name_hint=name_hint, template_path=template_path)
+    # Diagnostic probe — dump avatar API surface after loading a base
+    if str(job.get("action") or "") == "probe":
+        appearance = job.get("appearance") if isinstance(job.get("appearance"), dict) else {}
+        preference = str(appearance.get("template_preference") or "male")
+        avatar, how = _ensure_avatar(
+            name_hint="Probe",
+            template_path=str(job.get("template_path") or ""),
+            preference=preference,
+            force_new=True,
+        )
+        info = {"created": how, "methods": [], "scale_try": None}
+        if avatar is not None:
+            info["methods"] = sorted(
+                m for m in dir(avatar) if any(t in m.lower() for t in ("scale", "transform", "control", "set", "world", "local"))
+            )[:80]
+            info["scale_try"] = _apply_scale_shape(avatar, appearance or {"traits": ["tall", "muscular"], "morphs": {"height": -0.8}})
+            info["type"] = type(avatar).__name__
+        _write_result(job_path, avatar is not None, **info)
+        return
+
+    avatar, how = _ensure_avatar(
+        name_hint=name_hint,
+        template_path=template_path,
+        preference=preference,
+        force_new=force_new,
+    )
     if avatar is None:
         _write_result(
             job_path,
@@ -276,9 +647,18 @@ def _process_job(job_path: Path) -> None:
         )
         return
 
+    alter = _apply_appearance(avatar, appearance) if appearance else {"applied": [], "skipped": True}
+
     ok, export_how = _export_avatar(avatar, out_path)
     if ok:
-        _write_result(job_path, True, output_path=out_path, created=how, export=export_how)
+        _write_result(
+            job_path,
+            True,
+            output_path=out_path,
+            created=how,
+            export=export_how,
+            appearance=alter,
+        )
     else:
         _write_result(
             job_path,
@@ -286,6 +666,7 @@ def _process_job(job_path: Path) -> None:
             error=f"ExportFbx failed — {export_how}",
             created=how,
             export=export_how,
+            appearance=alter,
         )
 
 
@@ -310,7 +691,19 @@ def _poll_once() -> None:
     jobs = _jobs_dir()
     for job in sorted(jobs.glob("*.job.json")):
         print(f"HephaestusExport processing {job.name}")
-        _process_job(job)
+        try:
+            log = Path(os.environ.get("HEPHAESTUS_HOME") or (Path.home() / ".hephaestus")) / "cc5_plugin.log"
+            with log.open("a", encoding="utf-8") as fh:
+                fh.write(f"poll {job.name} {time.time()}\n")
+        except Exception:
+            pass
+        try:
+            _process_job(job)
+        except Exception as exc:
+            try:
+                _write_result(job, False, error=f"plugin exception: {exc}")
+            except Exception:
+                print(f"HephaestusExport fatal: {exc}")
 
 
 # Timer / thread handle kept alive for the CC5 session
@@ -322,6 +715,14 @@ def initialize_plugin() -> None:
     """CC5 OpenPlugin entrypoint — start a lightweight poll loop."""
     global _timer, _poll_thread
     import threading
+
+    try:
+        log = Path(os.environ.get("HEPHAESTUS_HOME") or (Path.home() / ".hephaestus")) / "cc5_plugin.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with log.open("a", encoding="utf-8") as fh:
+            fh.write(f"initialize_plugin {time.time()}\n")
+    except Exception:
+        pass
 
     print("HephaestusExport: plugin loaded — watching ~/.hephaestus/cc5_jobs")
 
