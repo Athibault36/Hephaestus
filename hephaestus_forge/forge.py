@@ -869,25 +869,28 @@ class ProjectScaffold:
                 {
                     "name": "hephaestus.blender_ipc",
                     "functions": [
-                        "exec_script", "retopologize", "uv_pack", "bake_maps",
-                        "rigify_character", "export_fbx", "geometry_nodes_eval",
+                        "blender.exec", "blender.export_fbx", "blender.scene_info",
                     ],
                 },
                 {
                     "name": "hephaestus.dcc_bridge",
                     "functions": [
-                        "cc5_export_character", "cc5_conform_cloth", "cc5_accu_rig",
-                        "cc5_facial_profile", "cc5_retarget_motion", "cc5_livelink_facial",
-                        "meshy_generate", "meshy_texture", "meshy_import_to_ue",
+                        "cc5.export",
                     ],
                 },
             ],
             "external_tools": [
                 {
-                    "name": "blender",
-                    "command": "blender",
-                    "args": ["--background", "--python-expr"],
-                    "timeout_seconds": 300,
+                    "name": "forge.dcc",
+                    "command": "forge",
+                    "args": ["dcc", "start|status"],
+                    "timeout_seconds": 30,
+                },
+                {
+                    "name": "forge.blender",
+                    "command": "forge",
+                    "args": ["blender", "export|exec"],
+                    "timeout_seconds": 180,
                 },
                 {
                     "name": "forge.blender-export",
@@ -896,17 +899,16 @@ class ProjectScaffold:
                     "timeout_seconds": 180,
                 },
                 {
-                    "name": "cc5",
-                    "command": "rlpython",
-                    "args": [],
-                    "timeout_seconds": 120,
+                    "name": "forge.dcc-import",
+                    "command": "forge",
+                    "args": ["dcc-import"],
+                    "timeout_seconds": 180,
                 },
                 {
-                    "name": "meshy",
-                    "type": "rest",
-                    "base_url": "https://api.meshy.ai/v1",
-                    "auth_header": "Authorization",
-                    "timeout_seconds": 60,
+                    "name": "forge.cc5",
+                    "command": "forge",
+                    "args": ["cc5", "export"],
+                    "timeout_seconds": 180,
                 },
             ],
         }
@@ -1185,6 +1187,27 @@ editor_app = typer.Typer(
 )
 app.add_typer(editor_app, name="editor")
 
+dcc_app = typer.Typer(
+    name="dcc",
+    help="DCC control plane (:8084) — Blender/CC5 health and lifecycle.",
+    no_args_is_help=True,
+)
+app.add_typer(dcc_app, name="dcc")
+
+blender_app = typer.Typer(
+    name="blender",
+    help="Author meshes via DCC :8084 (export / exec).",
+    no_args_is_help=True,
+)
+app.add_typer(blender_app, name="blender")
+
+cc5_app = typer.Typer(
+    name="cc5",
+    help="Character Creator 5 export via DCC / rlpython.",
+    no_args_is_help=True,
+)
+app.add_typer(cc5_app, name="cc5")
+
 
 @editor_app.command("open")
 def editor_open_cmd(
@@ -1271,6 +1294,237 @@ def forge_down(
     else:
         console.print(f"[red]down failed[/red]: {result}")
     raise typer.Exit(0 if result.get("ok") else 2)
+
+
+def _resolve_active_project(project_path: Optional[Path]) -> Optional[Path]:
+    if project_path is not None:
+        return project_path.expanduser().resolve()
+    try:
+        from project_registry import ProjectRegistry
+
+        reg = ProjectRegistry()
+        if reg.active_path:
+            return Path(reg.active_path)
+    except Exception:
+        pass
+    return None
+
+
+@dcc_app.command("status")
+def dcc_status_cmd(
+    as_json: Annotated[bool, typer.Option("--json", help="Print JSON")] = False,
+):
+    """Report DCC control plane (:8084) health — honest Blender/CC5 availability."""
+    try:
+        from dcc_client import dcc_online, dcc_api_base
+    except ImportError:
+        from hephaestus_forge.dcc_client import dcc_online, dcc_api_base  # type: ignore
+
+    ok, health, detail = dcc_online()
+    payload = {"ok": ok, "detail": detail, "api": dcc_api_base(), "health": health}
+    if as_json:
+        console.print_json(data=payload)
+        raise typer.Exit(0 if ok else 1)
+    if ok:
+        blender = (health or {}).get("blender") or {}
+        console.print(f"[green]DCC online[/green]: {detail}")
+        if blender.get("path"):
+            console.print(f"[dim]Blender {blender.get('version')} @ {blender.get('path')}[/dim]")
+        else:
+            console.print("[yellow]Blender not detected — export will fail until installed[/yellow]")
+    else:
+        console.print(f"[yellow]DCC offline[/yellow]: {detail}")
+        console.print("[dim]Start with: forge dcc start[/dim]")
+        raise typer.Exit(1)
+
+
+@dcc_app.command("start")
+def dcc_start_cmd(
+    host: Annotated[str, typer.Option("--host", help="Bind host")] = "127.0.0.1",
+    port: Annotated[int, typer.Option("--port", help="Bind port")] = 8084,
+    wait: Annotated[float, typer.Option("--wait", help="Seconds to wait for /v1/health")] = 15.0,
+    as_json: Annotated[bool, typer.Option("--json", help="Print JSON")] = False,
+):
+    """Start the factory DCC FastAPI server in the background (if not already up)."""
+    try:
+        from dcc_client import start_dcc_server
+    except ImportError:
+        from hephaestus_forge.dcc_client import start_dcc_server  # type: ignore
+
+    result = start_dcc_server(host=host, port=port, wait_s=wait)
+    if as_json:
+        console.print_json(data=result)
+        raise typer.Exit(0 if result.get("ok") else 1)
+    if result.get("ok"):
+        launched = "launched" if result.get("launched") else "already running"
+        console.print(f"[green]DCC {launched}[/green]: {result.get('detail')}")
+        if result.get("pid"):
+            console.print(f"[dim]pid={result['pid']}[/dim]")
+        raise typer.Exit(0)
+    console.print(f"[red]DCC start failed[/red]: {result.get('error') or result.get('detail')}")
+    raise typer.Exit(1)
+
+
+@blender_app.command("export")
+def blender_export_via_dcc_cmd(
+    project_path: Annotated[
+        Optional[Path],
+        typer.Argument(help="Adopted UE project root (writes under .hephaestus_forge/dcc_exports)"),
+    ] = None,
+    shape: Annotated[str, typer.Option("--shape", "-s")] = "cube",
+    name: Annotated[str, typer.Option("--name", "-n")] = "HephaestusPrimitive",
+    output: Annotated[Optional[Path], typer.Option("--output", "-o")] = None,
+    direct: Annotated[
+        bool,
+        typer.Option("--direct", help="Call blender_bridge locally instead of DCC :8084"),
+    ] = False,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+):
+    """Export a primitive FBX via DCC :8084 (or --direct local Blender)."""
+    project_root = _resolve_active_project(project_path)
+    if direct:
+        return blender_export_cmd(  # type: ignore[misc]
+            project_path=project_root,
+            shape=shape,
+            name=name,
+            output=output,
+            blender=None,
+            json_out=as_json,
+        )
+    try:
+        from dcc_client import DccClient, dcc_online, start_dcc_server
+    except ImportError:
+        from hephaestus_forge.dcc_client import DccClient, dcc_online, start_dcc_server  # type: ignore
+
+    ok, _, _ = dcc_online()
+    if not ok:
+        start_dcc_server()
+    params: dict = {"shape": shape, "name": name}
+    if project_root:
+        params["project_root"] = str(project_root)
+    if output:
+        params["output_path"] = str(output)
+    res = DccClient(timeout=180.0).command("blender.export_fbx", params)
+    if as_json:
+        import json as _json
+
+        typer.echo(_json.dumps(res, indent=2, ensure_ascii=True))
+        raise typer.Exit(0 if res.get("success") else 1)
+    if res.get("success"):
+        path = res.get("output_path") or (res.get("asset_paths") or [None])[0]
+        console.print(f"[green]✓ blender.export_fbx[/green] → {path}")
+        raise typer.Exit(0)
+    console.print(f"[red]✗ blender.export_fbx[/red]: {res.get('error')}")
+    raise typer.Exit(1)
+
+
+@blender_app.command("exec")
+def blender_exec_cmd(
+    script: Annotated[Optional[Path], typer.Argument(help="Python script file for Blender")] = None,
+    expr: Annotated[Optional[str], typer.Option("--expr", "-e", help="Inline Python snippet")] = None,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+):
+    """Run a Blender Python script via DCC blender.exec."""
+    if not script and not expr:
+        console.print("[red]Provide a script path or --expr[/red]")
+        raise typer.Exit(1)
+    code = expr if expr else Path(script).read_text(encoding="utf-8")  # type: ignore[arg-type]
+    try:
+        from dcc_client import DccClient, dcc_online, start_dcc_server
+    except ImportError:
+        from hephaestus_forge.dcc_client import DccClient, dcc_online, start_dcc_server  # type: ignore
+
+    ok, _, _ = dcc_online()
+    if not ok:
+        start_dcc_server()
+    res = DccClient(timeout=180.0).command("blender.exec", {"script": code})
+    if as_json:
+        console.print_json(data=res)
+        raise typer.Exit(0 if res.get("success") else 1)
+    if res.get("success"):
+        console.print("[green]✓ blender.exec[/green]")
+        raise typer.Exit(0)
+    console.print(f"[red]✗ blender.exec[/red]: {res.get('error')}")
+    raise typer.Exit(1)
+
+
+@cc5_app.command("export")
+def cc5_export_cmd(
+    project_path: Annotated[
+        Optional[Path],
+        typer.Argument(help="Adopted UE project root for dcc_exports"),
+    ] = None,
+    name: Annotated[str, typer.Option("--name", "-n", help="Character / output name")] = "Character",
+    output: Annotated[Optional[Path], typer.Option("--output", "-o")] = None,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+):
+    """Export character FBX via CC5/rlpython into .hephaestus_forge/dcc_exports."""
+    project_root = _resolve_active_project(project_path)
+    try:
+        from cc5_bridge import export_character_fbx
+    except ImportError:
+        from hephaestus_forge.cc5_bridge import export_character_fbx  # type: ignore
+
+    res = export_character_fbx(
+        character_name=name,
+        project_root=project_root,
+        output_path=output,
+    )
+    if as_json:
+        import json as _json
+
+        typer.echo(_json.dumps(res, indent=2, ensure_ascii=True))
+        raise typer.Exit(0 if res.get("success") else 1)
+    if res.get("success"):
+        console.print(f"[green]✓ CC5 export[/green] → {res.get('output_path')}")
+        raise typer.Exit(0)
+    console.print(f"[red]✗ CC5 export[/red]: {res.get('error')}")
+    for step in res.get("next_steps") or []:
+        console.print(f"  • {step}")
+    raise typer.Exit(1)
+
+
+@app.command("dcc-import")
+def dcc_import_cmd(
+    project_path: Annotated[
+        Optional[Path],
+        typer.Argument(help="Adopted UE project root"),
+    ] = None,
+    fbx: Annotated[Optional[Path], typer.Option("--fbx", help="Explicit FBX path")] = None,
+    name: Annotated[Optional[str], typer.Option("--name", "-n", help="FBX stem under dcc_exports")] = None,
+    destination: Annotated[
+        str,
+        typer.Option("--dest", help="UE content destination path"),
+    ] = "/Game/Hephaestus/DccImports",
+    no_spawn: Annotated[bool, typer.Option("--no-spawn", help="Import + PIE only, skip frustum spawn")] = False,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+):
+    """Stop PIE → editor.import_fbx (:8766) → Play → spawn asset in camera frustum."""
+    project_root = _resolve_active_project(project_path)
+    try:
+        from dcc_import import dcc_import_to_pie
+    except ImportError:
+        from hephaestus_forge.dcc_import import dcc_import_to_pie  # type: ignore
+
+    result = dcc_import_to_pie(
+        project_root=project_root,
+        fbx=fbx,
+        name=name,
+        destination_path=destination,
+        spawn=not no_spawn,
+    )
+    if as_json:
+        import json as _json
+
+        typer.echo(_json.dumps(result, indent=2, ensure_ascii=True))
+        raise typer.Exit(0 if result.get("success") else 1)
+    if result.get("success"):
+        console.print(
+            f"[green]✓ dcc-import[/green] {result.get('fbx')} → {result.get('asset_path')}"
+        )
+        raise typer.Exit(0)
+    console.print(f"[red]✗ dcc-import[/red]: {result.get('error')}")
+    raise typer.Exit(1)
 
 
 @pie_app.command("status")

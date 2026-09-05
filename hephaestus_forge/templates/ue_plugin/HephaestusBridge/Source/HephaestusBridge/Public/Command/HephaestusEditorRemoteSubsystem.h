@@ -9,6 +9,7 @@
 #include "EditorSubsystem.h"
 #include "HttpRouteHandle.h"
 #include "HttpResultCallback.h"
+#include "Dom/JsonObject.h"
 #include "HephaestusEditorRemoteSubsystem.generated.h"
 
 class IHttpRouter;
@@ -21,7 +22,7 @@ struct FHttpServerRequest;
  * Default port 8766 (override: -HephaestusEditorPort=).
  *
  *   GET  /v1/health
- *   POST /v1/command   { "command": "editor.play"|"editor.stop", "params": {} }
+ *   POST /v1/command   { "command": "editor.play"|"editor.stop"|"editor.import_fbx", "params": {} }
  */
 UCLASS()
 class HEPHAESTUSBRIDGE_API UHephaestusEditorRemoteSubsystem : public UEditorSubsystem
@@ -48,6 +49,11 @@ private:
 	static bool IsPieActive();
 	static bool RequestPlay();
 	static bool RequestStop();
+	/** Editor-time AssetTools FBX import. Refuses while PIE is active. */
+	static bool RequestImportFbx(
+		const TSharedPtr<FJsonObject>& Params,
+		FString& OutAssetPath,
+		FString& OutError);
 
 	int32 ListenPort = 8766;
 	bool bIsListening = false;

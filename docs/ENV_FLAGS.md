@@ -10,8 +10,9 @@
 | `HEPHAESTUS_NIM_REPAIR` | off | `1` to run a short repair loop when grading fails |
 | `HEPHAESTUS_NIM_PARALLEL_REPAIR` | off | `1` to fetch a NIM parallel hint before repair loop |
 | `HEPHAESTUS_HEURISTIC_REPAIR` | off | `1` to run repair loop without requiring NIM (heuristic follow-up) |
-| `HEPHAESTUS_EDITOR_API` | `http://127.0.0.1:8766` | Editor control plane for `forge pie start` / `stop` |
+| `HEPHAESTUS_EDITOR_API` | `http://127.0.0.1:8766` | Editor control plane for `forge pie start` / `stop` / `editor.import_fbx` |
 | `HEPHAESTUS_UE_API` | `http://127.0.0.1:8765` | PIE world API (commands / frame) |
+| `HEPHAESTUS_DCC_API` | `http://127.0.0.1:8084` | DCC control plane (Blender/CC5) for `forge dcc` / `forge blender` |
 
 ## PIE engage / disengage (bridge ≥ 1.0.1)
 
@@ -41,11 +42,22 @@ forge pie stop
 | `UE_PATH` | auto-detect | Engine root for `forge editor open` / `forge up` |
 | `HEPHAESTUS_EDITOR_API` | `http://127.0.0.1:8766` | Editor control plane |
 | `HEPHAESTUS_UE_API` | `http://127.0.0.1:8765` | PIE world API |
+| `HEPHAESTUS_DCC_API` | `http://127.0.0.1:8084` | DCC Blender/CC5 plane |
+| `BLENDER_EXECUTABLE` | auto-detect | Override Blender path |
+| `CC5_EXECUTABLE` / `RLPYTHON` | auto-detect | Character Creator / rlpython |
 
 | Port | Lifetime | Role |
 |------|----------|------|
-| **8766** | Editor open (`-HephaestusEditorPort=` override) | `editor.play` / `editor.stop` |
+| **8766** | Editor open (`-HephaestusEditorPort=` override) | `editor.play` / `editor.stop` / `editor.import_fbx` |
 | **8765** | Only while PIE (`-HephaestusRemotePort=`) | World / animation / vision commands |
+| **8084** | `forge dcc start` | `blender.export_fbx` / `blender.exec` / `cc5.export` |
+
+```powershell
+forge dcc start
+forge blender export <PATH-TO-UE-PROJECT> --shape cube
+forge dcc-import <PATH-TO-UE-PROJECT> --name HephaestusPrimitive
+forge cc5 export <PATH-TO-UE-PROJECT> --name Character
+```
 
 `editor.stop` / `pie.stop` also work on `:8765` while PIE is live.
 

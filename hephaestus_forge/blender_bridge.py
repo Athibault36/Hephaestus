@@ -152,9 +152,9 @@ def ue_import_next_steps(
         "}}"
     )
     return [
-        "Stop PIE if Play is active — AssetTools FBX import is refused during PIE.",
+        "Stop PIE if Play is active - AssetTools FBX import is refused during PIE.",
         f"Editor-time import (Remote API while not playing): forge command --json '{import_json}'",
-        "Or Content Browser → Import → pick the FBX under .hephaestus_forge/dcc_exports.",
+        "Or Content Browser -> Import -> pick the FBX under .hephaestus_forge/dcc_exports.",
         f"After import, start PIE and spawn: forge spawn-asset {destination_path}/{name}",
         "Do not call asset.import_fbx while PIE is running.",
     ]

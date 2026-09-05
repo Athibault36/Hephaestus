@@ -14,7 +14,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 
 import requests
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 import uvicorn
 
@@ -207,12 +208,45 @@ async def run_blender_script(script: str, args: List[str] = None, timeout: int =
 # ─── CC5 Execution ────────────────────────────────────────────────────────────
 
 async def run_cc5_script(script: str, timeout: int = None) -> Dict[str, Any]:
-    """Execute CC5 rlpython script."""
+    """Execute CC5 rlpython script when rlpython is installed."""
     timeout = timeout or Config.cc5_timeout
-    
-    # CC5 uses COM automation or rlpython TCP server
-    # This is a stub - real implementation connects to CC5's Python server
-    return {"success": True, "result": "CC5 stub executed"}
+    try:
+        from hephaestus_forge.cc5_bridge import find_rlpython
+    except ImportError:
+        find_rlpython = None  # type: ignore
+    rlpy = find_rlpython() if find_rlpython else None
+    if not rlpy:
+        return {
+            "success": False,
+            "error": "cc5_unavailable — rlpython not found (set RLPYTHON / install Character Creator 5)",
+        }
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as f:
+        f.write(script)
+        script_path = f.name
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            rlpy,
+            script_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            proc.kill()
+            return {"success": False, "error": f"rlpython timed out after {timeout}s"}
+        return {
+            "success": proc.returncode == 0,
+            "stdout": (stdout or b"").decode("utf-8", errors="replace"),
+            "stderr": (stderr or b"").decode("utf-8", errors="replace"),
+            "return_code": proc.returncode,
+            "error": "" if proc.returncode == 0 else "rlpython failed",
+        }
+    finally:
+        try:
+            os.unlink(script_path)
+        except OSError:
+            pass
 
 
 # ─── Meshy API ────────────────────────────────────────────────────────────────
@@ -276,17 +310,57 @@ mesh_client = MeshyClient()
 app = FastAPI(title="Hephaestus DCC Bridge", version="1.0.0")
 
 
-# Health
+def _probe_blender_exe() -> dict:
+    """Honest Blender detection (not always 'available')."""
+    try:
+        from hephaestus_forge.blender_bridge import find_blender
+        path, version = find_blender()
+        return {"available": bool(path), "path": path, "version": version}
+    except Exception:
+        import shutil
+        exe = shutil.which(Config.blender_executable) or shutil.which("blender")
+        return {"available": bool(exe), "path": exe, "version": None}
+
+
+# Health — prefer factory dcc_server via `forge dcc start`; this scaffold stays for adopt copies.
 @app.get("/health")
+@app.get("/v1/health")
 async def health():
+    blender = _probe_blender_exe()
     return {
-        "status": "healthy",
+        "ok": True,
+        "status": "healthy" if blender["available"] else "degraded",
+        "service": "hephaestus-dcc-scaffold",
+        "ready": blender["available"],
+        "blender": blender,
         "services": {
-            "blender": "available",
-            "cc5": "available",
-            "meshy": "configured" if Config.meshy_api_key else "no_api_key"
-        }
+            "blender": "available" if blender["available"] else "missing",
+            "cc5": "probe_via_forge_cc5",
+            "meshy": "configured" if Config.meshy_api_key else "no_api_key",
+        },
+        "hint": "Prefer `forge dcc start` (factory hephaestus_forge.dcc_server) for /v1/command verbs",
     }
+
+
+@app.post("/v1/command")
+async def v1_command(request: Request):
+    """UE-like command surface; delegates to factory route_command when importable."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "Invalid JSON")
+    cmd = body.get("command") or ""
+    params = body.get("params") or body.get("args") or {}
+    try:
+        from hephaestus_forge.dcc_server import route_command
+        result = route_command(str(cmd), params if isinstance(params, dict) else {})
+        status = 200 if result.get("success") else 400
+        return JSONResponse(result, status_code=status)
+    except ImportError:
+        raise HTTPException(
+            501,
+            "Factory dcc_server not on PYTHONPATH — run: forge dcc start",
+        )
 
 
 # Blender Endpoints

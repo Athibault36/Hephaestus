@@ -58,7 +58,12 @@ Registered targets are stored in `%USERPROFILE%\.hephaestus\projects.json`.
 
 | Path | Role |
 |------|------|
-| `hephaestus_forge/forge.py` | CLI: init, adopt, desktop, observe, loop, sync-plugin, nim-parallel |
+| `hephaestus_forge/dcc_server.py` | DCC control plane `:8084` (`blender.*` / `cc5.export`) |
+| `hephaestus_forge/dcc_client.py` | HTTP client + `forge dcc start` |
+| `hephaestus_forge/dcc_import.py` | Stop PIE → `editor.import_fbx` → Play → spawn |
+| `hephaestus_forge/cc5_bridge.py` | CC5/rlpython detect + character FBX export |
+| `hephaestus_forge/blender_bridge.py` | One-shot Blender primitive → FBX under `dcc_exports` |
+| `hephaestus_forge/forge.py` | CLI: init, adopt, desktop, observe, loop, sync-plugin, nim-parallel, dcc, blender, cc5, dcc-import |
 | `hephaestus_forge/desktop_app.py` | Desktop shell (pywebview + project registry) |
 | `hephaestus_forge/project_registry.py` | `~/.hephaestus/projects.json` |
 | `hephaestus_forge/plugin_sync.py` | Template → `{target}/Plugins/HephaestusBridge` |

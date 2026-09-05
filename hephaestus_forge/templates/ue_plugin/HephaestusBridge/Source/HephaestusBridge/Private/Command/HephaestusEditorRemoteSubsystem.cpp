@@ -8,6 +8,9 @@
 #include "HephaestusVersion.h"
 
 #include "Async/Async.h"
+#include "AssetToolsModule.h"
+#include "AssetImportTask.h"
+#include "AutomatedAssetImportData.h"
 #include "Editor.h"
 #include "Editor/UnrealEdEngine.h"
 #include "HttpPath.h"
@@ -20,6 +23,7 @@
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
+#include "Modules/ModuleManager.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
@@ -38,7 +42,7 @@ void UHephaestusEditorRemoteSubsystem::Initialize(FSubsystemCollectionBase& Coll
 	if (StartHttpServer())
 	{
 		UE_LOG(LogHephaestusBridge, Log,
-			TEXT("HephaestusEditorRemote: listening on http://127.0.0.1:%d  (editor.play / editor.stop)"),
+			TEXT("HephaestusEditorRemote: listening on http://127.0.0.1:%d  (editor.play / editor.stop / editor.import_fbx)"),
 			ListenPort);
 	}
 	else
@@ -173,6 +177,88 @@ bool UHephaestusEditorRemoteSubsystem::RequestStop()
 	return true;
 }
 
+bool UHephaestusEditorRemoteSubsystem::RequestImportFbx(
+	const TSharedPtr<FJsonObject>& Params,
+	FString& OutAssetPath,
+	FString& OutError)
+{
+	OutAssetPath.Reset();
+	OutError.Reset();
+
+	if (IsPieActive())
+	{
+		OutError = TEXT("editor.import_fbx refused while PIE is active — stop Play first");
+		return false;
+	}
+
+	FString FilePath;
+	FString DestinationPath = TEXT("/Game/Hephaestus/DccImports");
+	if (Params.IsValid())
+	{
+		Params->TryGetStringField(TEXT("source_path"), FilePath);
+		if (FilePath.IsEmpty())
+		{
+			Params->TryGetStringField(TEXT("file_path"), FilePath);
+		}
+		FString Dest;
+		if (Params->TryGetStringField(TEXT("destination_path"), Dest) && !Dest.IsEmpty())
+		{
+			DestinationPath = Dest;
+		}
+	}
+	if (FilePath.IsEmpty())
+	{
+		OutError = TEXT("editor.import_fbx requires params.source_path or params.file_path");
+		return false;
+	}
+	if (!FPaths::FileExists(FilePath))
+	{
+		OutError = FString::Printf(TEXT("editor.import_fbx: file not found: %s"), *FilePath);
+		return false;
+	}
+
+	UAutomatedAssetImportData* ImportData = NewObject<UAutomatedAssetImportData>();
+	ImportData->Filenames.Add(FilePath);
+	ImportData->DestinationPath = DestinationPath;
+	ImportData->bReplaceExisting = true;
+	ImportData->bSkipReadOnly = true;
+	ImportData->GroupName = TEXT("HephaestusEditorImport");
+
+	FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools");
+	TArray<UObject*> Imported = AssetToolsModule.Get().ImportAssetsAutomated(ImportData);
+
+	if (Imported.Num() == 0)
+	{
+		UAssetImportTask* ImportTask = NewObject<UAssetImportTask>();
+		ImportTask->Filename = FilePath;
+		ImportTask->DestinationPath = DestinationPath;
+		ImportTask->bAutomated = true;
+		ImportTask->bSave = true;
+		ImportTask->bReplaceExisting = true;
+		ImportTask->bReplaceExistingSettings = true;
+		TArray<UAssetImportTask*> Tasks;
+		Tasks.Add(ImportTask);
+		AssetToolsModule.Get().ImportAssetTasks(Tasks);
+		for (const FString& Path : ImportTask->ImportedObjectPaths)
+		{
+			if (UObject* Obj = FSoftObjectPath(Path).TryLoad())
+			{
+				Imported.Add(Obj);
+			}
+		}
+	}
+
+	if (Imported.Num() == 0)
+	{
+		OutError = TEXT("editor.import_fbx: AssetTools produced no assets");
+		return false;
+	}
+
+	OutAssetPath = Imported[0]->GetPathName();
+	UE_LOG(LogHephaestusBridge, Log, TEXT("editor.import_fbx: %s -> %s"), *FilePath, *OutAssetPath);
+	return true;
+}
+
 bool UHephaestusEditorRemoteSubsystem::HandleHealth(const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete)
 {
 	TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
@@ -214,6 +300,7 @@ bool UHephaestusEditorRemoteSubsystem::HandleCommand(const FHttpServerRequest& R
 		bool bSuccess = false;
 		FString Error;
 		FString Action;
+		FString ResultJson = TEXT("{}");
 
 		TSharedPtr<FJsonObject> JsonObject;
 		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(CommandJSON);
@@ -224,6 +311,17 @@ bool UHephaestusEditorRemoteSubsystem::HandleCommand(const FHttpServerRequest& R
 		else
 		{
 			Action = JsonObject->GetStringField(TEXT("command"));
+			const TSharedPtr<FJsonObject>* ParamsPtr = nullptr;
+			TSharedPtr<FJsonObject> Params;
+			if (JsonObject->TryGetObjectField(TEXT("params"), ParamsPtr) && ParamsPtr)
+			{
+				Params = *ParamsPtr;
+			}
+			else if (JsonObject->TryGetObjectField(TEXT("args"), ParamsPtr) && ParamsPtr)
+			{
+				Params = *ParamsPtr;
+			}
+
 			if (Action.Equals(TEXT("editor.play"), ESearchCase::IgnoreCase)
 				|| Action.Equals(TEXT("pie.start"), ESearchCase::IgnoreCase)
 				|| Action.Equals(TEXT("pie.play"), ESearchCase::IgnoreCase))
@@ -232,6 +330,12 @@ bool UHephaestusEditorRemoteSubsystem::HandleCommand(const FHttpServerRequest& R
 				if (!bSuccess)
 				{
 					Error = TEXT("Failed to request Play session (is UnrealEd available?)");
+				}
+				else
+				{
+					ResultJson = FString::Printf(
+						TEXT("{\"action\":\"%s\",\"pie_active\":%s}"),
+						*Action, IsPieActive() ? TEXT("true") : TEXT("false"));
 				}
 			}
 			else if (Action.Equals(TEXT("editor.stop"), ESearchCase::IgnoreCase)
@@ -242,11 +346,34 @@ bool UHephaestusEditorRemoteSubsystem::HandleCommand(const FHttpServerRequest& R
 				{
 					Error = TEXT("Failed to request End Play (is UnrealEd available?)");
 				}
+				else
+				{
+					ResultJson = FString::Printf(
+						TEXT("{\"action\":\"%s\",\"pie_active\":%s}"),
+						*Action, IsPieActive() ? TEXT("true") : TEXT("false"));
+				}
+			}
+			else if (Action.Equals(TEXT("editor.import_fbx"), ESearchCase::IgnoreCase)
+				|| Action.Equals(TEXT("editor.import"), ESearchCase::IgnoreCase)
+				|| Action.Equals(TEXT("asset.import_fbx"), ESearchCase::IgnoreCase))
+			{
+				FString AssetPath;
+				bSuccess = WeakThis.IsValid() && RequestImportFbx(Params, AssetPath, Error);
+				if (bSuccess)
+				{
+					FString Escaped = AssetPath;
+					Escaped.ReplaceInline(TEXT("\\"), TEXT("/"));
+					ResultJson = FString::Printf(
+						TEXT("{\"action\":\"editor.import_fbx\",\"asset_path\":\"%s\",\"pie_active\":%s}"),
+						*Escaped,
+						IsPieActive() ? TEXT("true") : TEXT("false"));
+				}
 			}
 			else
 			{
 				Error = FString::Printf(
-					TEXT("Unknown editor command '%s' (use editor.play or editor.stop)"), *Action);
+					TEXT("Unknown editor command '%s' (use editor.play, editor.stop, or editor.import_fbx)"),
+					*Action);
 			}
 		}
 
@@ -255,10 +382,7 @@ bool UHephaestusEditorRemoteSubsystem::HandleCommand(const FHttpServerRequest& R
 		Out->SetStringField(TEXT("error"), Error);
 		Out->SetStringField(TEXT("command"), Action);
 		Out->SetBoolField(TEXT("pie_active"), IsPieActive());
-		Out->SetStringField(TEXT("result_json"), bSuccess
-			? FString::Printf(TEXT("{\"action\":\"%s\",\"pie_active\":%s}"),
-				*Action, IsPieActive() ? TEXT("true") : TEXT("false"))
-			: TEXT("{}"));
+		Out->SetStringField(TEXT("result_json"), bSuccess ? ResultJson : TEXT("{}"));
 
 		FString ResponseBody;
 		TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&ResponseBody);
