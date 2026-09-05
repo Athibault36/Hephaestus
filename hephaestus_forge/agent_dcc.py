@@ -589,6 +589,60 @@ def author_primitive_to_pie(
     return out
 
 
+def animate_authored_actor(
+    actor_path: str,
+    *,
+    remote_api: str = "http://127.0.0.1:8765",
+    mode: str = "idle",
+) -> dict[str, Any]:
+    """
+    Best-effort motion after DCC spawn: locomotion idle/walk, else short transform nudge.
+    """
+    try:
+        from ue_agent_loop import RemoteUeClient
+    except ImportError:
+        from hephaestus_forge.ue_agent_loop import RemoteUeClient  # type: ignore
+
+    client = RemoteUeClient(remote_api, timeout=30.0)
+    loco = client.command({
+        "command": "animation.play_locomotion",
+        "params": {"actor_path": actor_path, "mode": mode, "loop": True},
+    })
+    if loco.get("success"):
+        return {"success": True, "method": "play_locomotion", "mode": mode, "result": loco}
+
+    # Transform "alive" motion — small forward walk
+    import json as _json
+
+    loc = {"x": 0.0, "y": 0.0, "z": 100.0}
+    got = client.command({"command": "world.get_actor", "params": {"actor_path": actor_path}})
+    if got.get("success"):
+        try:
+            inner = _json.loads(got.get("result_json") or "{}")
+            t = inner.get("transform") or inner
+            if isinstance(t.get("location"), dict):
+                loc = {k: float(t["location"].get(k, loc[k])) for k in ("x", "y", "z")}
+        except (TypeError, ValueError, _json.JSONDecodeError):
+            pass
+    target = {"x": loc["x"] + 120.0, "y": loc["y"], "z": loc["z"]}
+    move = client.command({
+        "command": "animation.play_transform_sequence",
+        "params": {
+            "actor_path": actor_path,
+            "target_location": target,
+            "duration": 2.0,
+        },
+    })
+    return {
+        "success": bool(move.get("success")),
+        "method": "play_transform_sequence" if move.get("success") else "none",
+        "mode": mode,
+        "locomotion": loco,
+        "result": move,
+        "error": "" if move.get("success") else (move.get("error") or loco.get("error") or "animate failed"),
+    }
+
+
 def try_direct_dcc_followup(
     message: str,
     *,
@@ -706,7 +760,12 @@ def try_direct_cc5_author(
         except ImportError:
             from hephaestus_forge.cc5_bridge import export_character_fbx, cc5_available  # type: ignore
         if cc5_available():
-            export = export_character_fbx(character_name=name, project_root=project_root)
+            export = export_character_fbx(
+                character_name=name,
+                project_root=project_root,
+                # Short wait — if OpenPlugin/GUI not ready, fall through to NIM/Blender
+                timeout_seconds=20,
+            )
             export_meta["cc5"] = export
             if export.get("success") and export.get("output_path"):
                 fbx = str(export["output_path"])
@@ -790,8 +849,12 @@ def try_direct_cc5_author(
 
     actor = _spawned_actor_path(imported)
     frame_res = None
+    anim_res = None
     if actor:
         frame_res = frame_actor(actor, create_shot=False)
+        # People / animals should move after landing
+        anim_mode = "walk" if wants_spin(message) or "walk" in (message or "").lower() else "idle"
+        anim_res = animate_authored_actor(actor, mode=anim_mode)
     meta = {
         "shape": kind,
         "kind": kind,
@@ -803,6 +866,7 @@ def try_direct_cc5_author(
         "export": export_meta,
         "import": imported,
         "frame": frame_res,
+        "animate": anim_res,
     }
     remember_dcc(project_root, meta)
     reply = (
@@ -811,6 +875,8 @@ def try_direct_cc5_author(
     )
     if frame_res and frame_res.get("success"):
         reply += f", framed {actor}"
+    if anim_res and anim_res.get("success"):
+        reply += f", animated ({anim_res.get('method')}/{anim_res.get('mode')})"
     reply += "."
     return _chat_result(
         True,
