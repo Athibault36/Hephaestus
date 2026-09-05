@@ -43,6 +43,58 @@ _WANT_SEQUENCE_SHOT = re.compile(
     re.IGNORECASE,
 )
 
+_COLOR_NAMES: dict[str, tuple[float, float, float]] = {
+    "red": (0.85, 0.12, 0.12),
+    "green": (0.15, 0.75, 0.2),
+    "blue": (0.15, 0.35, 0.9),
+    "yellow": (0.95, 0.85, 0.15),
+    "orange": (0.95, 0.45, 0.1),
+    "purple": (0.55, 0.2, 0.85),
+    "pink": (0.95, 0.4, 0.7),
+    "cyan": (0.15, 0.85, 0.9),
+    "white": (0.95, 0.95, 0.95),
+    "black": (0.05, 0.05, 0.05),
+    "gray": (0.45, 0.45, 0.45),
+    "grey": (0.45, 0.45, 0.45),
+    "gold": (0.85, 0.7, 0.2),
+}
+
+
+def infer_mesh_color(message: str) -> Optional[dict[str, float]]:
+    """Parse a named color from the goal (e.g. 'red cube')."""
+    text = (message or "").lower()
+    # Prefer "a red cube" / "red sphere" adjacent to shape words
+    for name, rgb in _COLOR_NAMES.items():
+        if re.search(rf"\b{name}\b", text):
+            return {"r": rgb[0], "g": rgb[1], "b": rgb[2], "a": 1.0}
+    return None
+
+
+def tint_actor(
+    actor_path: str,
+    color: dict[str, float],
+    *,
+    remote_api: str = "http://127.0.0.1:8765",
+) -> dict[str, Any]:
+    """world.set_mesh_color on a StaticMeshActor."""
+    try:
+        from ue_agent_loop import RemoteUeClient
+    except ImportError:
+        from hephaestus_forge.ue_agent_loop import RemoteUeClient  # type: ignore
+
+    client = RemoteUeClient(remote_api, timeout=30.0)
+    res = client.command({
+        "command": "world.set_mesh_color",
+        "params": {"actor_path": actor_path, "color": color},
+    })
+    return {
+        "success": bool(res.get("success")),
+        "error": "" if res.get("success") else (res.get("error") or "set_mesh_color failed"),
+        "result": res,
+        "color": color,
+        "actor_path": actor_path,
+    }
+
 
 def wants_frame_shot(message: str) -> bool:
     """True when the user asked to frame/camera the result (also default for into-PIE)."""
@@ -156,10 +208,11 @@ def author_primitive_to_pie(
     name: Optional[str] = None,
     frame: bool = True,
     create_shot: bool = False,
+    color: Optional[dict[str, float]] = None,
     remote_api: str = "http://127.0.0.1:8765",
 ) -> dict[str, Any]:
     """
-    DCC export → editor.import_fbx → PIE → spawn in frustum → optional frame shot.
+    DCC export → editor.import_fbx → PIE → spawn → optional tint → optional frame.
 
     Ensures DCC :8084 is up when possible.
     """
@@ -217,6 +270,24 @@ def author_primitive_to_pie(
         }
 
     actor_path = _spawned_actor_path(imported)
+    tint_result: Optional[dict[str, Any]] = None
+    if color and actor_path:
+        tint_result = tint_actor(actor_path, color, remote_api=remote_api)
+        if not tint_result.get("success"):
+            return {
+                "success": False,
+                "error": tint_result.get("error") or "tint failed",
+                "phase": "tint",
+                "shape": shape,
+                "name": asset_name,
+                "fbx": fbx,
+                "asset_path": imported.get("asset_path"),
+                "actor_path": actor_path,
+                "export": export,
+                "import": imported,
+                "tint": tint_result,
+            }
+
     frame_result: Optional[dict[str, Any]] = None
     if frame and actor_path:
         frame_result = frame_actor(
@@ -236,6 +307,7 @@ def author_primitive_to_pie(
                 "actor_path": actor_path,
                 "export": export,
                 "import": imported,
+                "tint": tint_result,
                 "frame": frame_result,
             }
 
@@ -250,6 +322,7 @@ def author_primitive_to_pie(
         "actor_path": actor_path,
         "export": export,
         "import": imported,
+        "tint": tint_result,
         "frame": frame_result,
     }
 
@@ -312,11 +385,13 @@ def try_direct_dcc_author(
     do_shot = bool(_WANT_SEQUENCE_SHOT.search(message or "")) or (
         wants_frame_shot(message) and "shot" in (message or "").lower()
     )
+    color = infer_mesh_color(message)
     result = author_primitive_to_pie(
         project_root=project_root,
         shape=shape,
         frame=do_frame,
         create_shot=do_shot,
+        color=color,
     )
     ok = bool(result.get("success"))
     if ok:
@@ -325,6 +400,8 @@ def try_direct_dcc_author(
             f"imported to {result.get('asset_path')}",
             "spawned in camera frustum",
         ]
+        if result.get("tint") and (result["tint"] or {}).get("success"):
+            bits.append("tinted")
         if result.get("frame") and (result["frame"] or {}).get("success"):
             bits.append(f"framed {result.get('actor_path')}")
             if (result["frame"] or {}).get("create_shot"):
