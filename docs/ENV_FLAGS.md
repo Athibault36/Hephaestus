@@ -45,7 +45,7 @@ forge pie stop
 | `HEPHAESTUS_UE_API` | `http://127.0.0.1:8765` | PIE world API |
 | `HEPHAESTUS_DCC_API` | `http://127.0.0.1:8084` | DCC Blender/CC5 plane |
 | `BLENDER_EXECUTABLE` | auto-detect | Override Blender path |
-| `CC5_EXECUTABLE` / `RLPYTHON` | auto-detect | Character Creator / rlpython |
+| `CC5_EXECUTABLE` / `RLPYTHON` | auto-detect | Character Creator + `CharacterCreatorpy.exe` (or rlpython) |
 | `MESHY_API_KEY` | — | Only used when `HEPHAESTUS_USE_MESHY=1` (optional paid path) |
 | `HEPHAESTUS_USE_MESHY` | off | Set `1` to enable Meshy; default is NIM→Blender + CC5 |
 

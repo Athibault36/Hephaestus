@@ -22,10 +22,24 @@ except ImportError:
 
 
 _CC5_CANDIDATES = (
+    # CC5 nested installer layout (common on Windows)
+    Path(r"C:\Program Files\Reallusion\Character Creator 5\Character Creator 5\Bin64\CharacterCreator.exe"),
     Path(r"C:\Program Files\Reallusion\Character Creator 5\Bin64\CharacterCreator.exe"),
     Path(r"C:\Program Files\Reallusion\Character Creator 4\Bin64\CharacterCreator.exe"),
-    Path(r"C:\Program Files\Reallusion\Bin64\rlpython.exe"),
+)
+
+_RLPYTHON_CANDIDATES = (
+    Path(r"C:\Program Files\Reallusion\Character Creator 5\Character Creator 5\Bin64\CharacterCreatorpy.exe"),
+    Path(r"C:\Program Files\Reallusion\Character Creator 5\Bin64\CharacterCreatorpy.exe"),
+    Path(r"C:\Program Files\Reallusion\Character Creator 5\Character Creator 5\Bin64\rlpython.exe"),
     Path(r"C:\Program Files\Reallusion\Character Creator 5\Bin64\rlpython.exe"),
+    Path(r"C:\Program Files\Reallusion\Bin64\rlpython.exe"),
+)
+
+_RLPY_SIBLING_NAMES = (
+    "CharacterCreatorpy.exe",
+    "rlpython.exe",
+    "iClonePython.exe",
 )
 
 
@@ -68,26 +82,34 @@ def find_cc5(env: Optional[dict] = None) -> Optional[str]:
 
 def find_rlpython(env: Optional[dict] = None) -> Optional[str]:
     environ = env if env is not None else os.environ
-    explicit = (environ.get("RLPYTHON") or environ.get("CC5_RLPYTHON") or "").strip()
+    explicit = (
+        environ.get("RLPYTHON")
+        or environ.get("CC5_RLPYTHON")
+        or environ.get("CC5_PYTHON")
+        or ""
+    ).strip()
     if explicit and Path(explicit).exists():
         return str(Path(explicit))
-    # Beside CC5 or on PATH
+    # Beside CC5 (CharacterCreatorpy.exe is the CC5 Python host)
     cc5 = find_cc5(environ)
     if cc5:
-        sibling = Path(cc5).parent / "rlpython.exe"
-        if sibling.exists():
-            return str(sibling)
+        parent = Path(cc5).parent
+        for name in _RLPY_SIBLING_NAMES:
+            sibling = parent / name
+            if sibling.exists():
+                return str(sibling)
     try:
-        out = subprocess.check_output(["where" if os.name == "nt" else "which", "rlpython"], text=True, timeout=10)
+        out = subprocess.check_output(
+            ["where" if os.name == "nt" else "which", "rlpython"],
+            text=True,
+            timeout=10,
+        )
         line = out.splitlines()[0].strip()
         if line and Path(line).exists():
             return line
     except Exception:
         pass
-    for path in (
-        Path(r"C:\Program Files\Reallusion\Bin64\rlpython.exe"),
-        Path(r"C:\Program Files\Reallusion\Character Creator 5\Bin64\rlpython.exe"),
-    ):
+    for path in _RLPYTHON_CANDIDATES:
         if path.exists():
             return str(path)
     return None
@@ -205,8 +227,8 @@ def export_character_fbx(
         return {
             "success": False,
             "error": (
-                "cc5_unavailable - Character Creator found but rlpython.exe missing; "
-                "cannot automate export"
+                "cc5_unavailable - Character Creator found but Python host missing "
+                "(CharacterCreatorpy.exe / rlpython); cannot automate export"
             ),
             "cc5_path": cc5,
             "rlpython_path": None,
@@ -214,7 +236,7 @@ def export_character_fbx(
             "asset_paths": [],
             "next_steps": [
                 f"CC5 at {cc5}",
-                "Install/enable Reallusion Python (rlpython) for automation",
+                "Set RLPYTHON to CharacterCreatorpy.exe beside CharacterCreator.exe",
                 "Or export FBX manually to .hephaestus_forge/dcc_exports then forge dcc-import",
             ],
         }
