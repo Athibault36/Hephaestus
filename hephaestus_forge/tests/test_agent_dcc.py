@@ -232,6 +232,41 @@ def test_creature_author_uses_blender_kit(tmp_path: Path):
     assert "Authored quadruped" in out["reply"] or "quadruped" in out["reply"].lower()
 
 
+def test_meshy_opt_in_only(monkeypatch):
+    from meshy_bridge import meshy_available
+
+    monkeypatch.setenv("MESHY_API_KEY", "msy_test")
+    monkeypatch.delenv("HEPHAESTUS_USE_MESHY", raising=False)
+    assert meshy_available() is False
+    monkeypatch.setenv("HEPHAESTUS_USE_MESHY", "1")
+    assert meshy_available() is True
+
+
+def test_nim_prop_author_mocked(tmp_path: Path):
+    (tmp_path / "chair.fbx").write_bytes(b"fbx")
+    fake = {
+        "success": True,
+        "output_path": str(tmp_path / "chair.fbx"),
+        "provider": "nim_blender",
+    }
+    imported = {
+        "success": True,
+        "asset_path": "/Game/Hephaestus/DccImports/chair",
+        "spawn_results": [{"success": True, "actor_paths": ["/Temp/Chair.StaticMeshActor_0"]}],
+    }
+    with patch("blender_nim_author.nim_available", return_value=True):
+        with patch("blender_nim_author.author_mesh_fbx", return_value=fake):
+            with patch("dcc_import.dcc_import_to_pie", return_value=imported):
+                with patch("agent_dcc.frame_actor", return_value={"success": True}):
+                    out = try_direct_dcc_author(
+                        "make a wooden chair and put it in the scene",
+                        project_root=tmp_path,
+                    )
+    assert out and out["ok"]
+    assert out["planner"] == "direct_nim_prop_author"
+    assert "nim_blender" in out["reply"]
+
+
 def test_autonomous_runner_uses_dcc(monkeypatch, tmp_path: Path):
     from autonomous_runner import run_autonomous_goal
 

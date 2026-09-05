@@ -673,8 +673,8 @@ def try_direct_cc5_author(
     """
     Author a person / animal / creature into PIE.
 
-    Priority: Meshy (if MESHY_API_KEY) → CC5 (humanoid + installed) → Blender creature kit.
-    Always creates an asset — never Content Browser search-only.
+    Priority: CC5 (humanoid + installed) → NIM→Blender → Blender kits.
+    Meshy only when HEPHAESTUS_USE_MESHY=1 (optional paid path).
     """
     if not _CHARACTER_AUTHOR.search(message or ""):
         return None
@@ -697,34 +697,10 @@ def try_direct_cc5_author(
     provider = "blender_creature"
     fbx: Optional[str] = None
     export_meta: dict[str, Any] = {}
+    skeletal = True
 
-    # 1) Meshy generative when keyed
-    try:
-        from meshy_bridge import meshy_available, generate_and_download
-    except ImportError:
-        try:
-            from hephaestus_forge.meshy_bridge import meshy_available, generate_and_download  # type: ignore
-        except ImportError:
-            meshy_available = lambda: False  # type: ignore
-            generate_and_download = None  # type: ignore
-
-    if meshy_available() and generate_and_download:
-        prompt = (message or "").strip() or f"a stylized {kind}"
-        gen = generate_and_download(prompt, project_root=project_root, name=name)
-        export_meta["meshy"] = gen
-        if gen.get("success") and gen.get("output_path"):
-            path = Path(str(gen["output_path"]))
-            if path.suffix.lower() == ".fbx":
-                fbx = str(path)
-                provider = "meshy"
-            else:
-                # Convert GLB/OBJ → FBX via Blender creature fallback name
-                export_meta["meshy_note"] = "non-fbx download; falling back to Blender kit"
-        else:
-            export_meta["meshy_error"] = gen.get("error")
-
-    # 2) CC5 for humanoids when available
-    if fbx is None and kind == "humanoid":
+    # 1) CC5 for people when installed
+    if kind == "humanoid":
         try:
             from cc5_bridge import export_character_fbx, cc5_available
         except ImportError:
@@ -736,7 +712,50 @@ def try_direct_cc5_author(
                 fbx = str(export["output_path"])
                 provider = "cc5"
 
-    # 3) Blender authored creature kit (always-on studio path)
+    # 2) NIM → Blender complex mesh (free path with NVIDIA_API_KEY)
+    if fbx is None:
+        try:
+            from blender_nim_author import author_mesh_fbx, nim_available
+        except ImportError:
+            try:
+                from hephaestus_forge.blender_nim_author import author_mesh_fbx, nim_available  # type: ignore
+            except ImportError:
+                author_mesh_fbx = None  # type: ignore
+                nim_available = lambda: False  # type: ignore
+        if nim_available() and author_mesh_fbx:
+            prompt = (message or "").strip() or f"a stylized {kind}"
+            nim_out = author_mesh_fbx(prompt, name=name, project_root=project_root)
+            export_meta["nim_blender"] = {
+                k: nim_out.get(k)
+                for k in ("success", "error", "output_path", "provider", "gen", "stderr_tail")
+            }
+            if nim_out.get("success") and nim_out.get("output_path"):
+                fbx = str(nim_out["output_path"])
+                provider = "nim_blender"
+                # NIM meshes may be static or rigged — still try skeletal import
+                skeletal = kind in ("humanoid", "quadruped", "creature")
+
+    # 3) Optional Meshy (paid) — opt-in only
+    if fbx is None:
+        try:
+            from meshy_bridge import meshy_available, generate_and_download
+        except ImportError:
+            try:
+                from hephaestus_forge.meshy_bridge import meshy_available, generate_and_download  # type: ignore
+            except ImportError:
+                meshy_available = lambda: False  # type: ignore
+                generate_and_download = None  # type: ignore
+        if meshy_available() and generate_and_download:
+            prompt = (message or "").strip() or f"a stylized {kind}"
+            gen = generate_and_download(prompt, project_root=project_root, name=name)
+            export_meta["meshy"] = gen
+            if gen.get("success") and gen.get("output_path"):
+                path = Path(str(gen["output_path"]))
+                if path.suffix.lower() == ".fbx":
+                    fbx = str(path)
+                    provider = "meshy"
+
+    # 4) Blender creature kit fallback (always available if Blender is)
     if fbx is None:
         result = export_creature_fbx(kind=kind, name=name, project_root=project_root)
         export_meta["blender"] = result.to_dict() if hasattr(result, "to_dict") else result
@@ -750,14 +769,15 @@ def try_direct_cc5_author(
             )
         fbx = result.output_path
         provider = "blender_creature"
+        skeletal = True
 
     imported = dcc_import_to_pie(
         project_root=project_root,
         fbx=fbx,
         name=name,
         spawn=True,
-        import_as_skeletal=True,
-        force_skeletal_spawn=True,
+        import_as_skeletal=skeletal,
+        force_skeletal_spawn=skeletal,
     )
     if not imported.get("success"):
         return _chat_result(
@@ -802,6 +822,110 @@ def try_direct_cc5_author(
     )
 
 
+_PROP_AUTHOR = re.compile(
+    r"\b(?:make|create|build|author)\b.{0,40}\b(?:a|an)\s+"
+    r"(?!cube\b|sphere\b|cylinder\b|cone\b|plane\b|box\b)"
+    r"((?:[\w\-]+\s+){0,3}[\w\-]+?)"
+    r"(?=\s+and\b|\s+with\b|\s+in\b|\s+into\b|\s+for\b|[.,!?]|$)",
+    re.IGNORECASE,
+)
+
+
+def try_direct_nim_prop_author(
+    message: str,
+    *,
+    project_root: Optional[Path] = None,
+) -> Optional[dict[str, Any]]:
+    """NIM→Blender for props / complex meshes that are not primitives or creatures."""
+    if infer_dcc_shape(message):
+        return None
+    try:
+        from blender_bridge import infer_creature_kind
+    except ImportError:
+        from hephaestus_forge.blender_bridge import infer_creature_kind  # type: ignore
+    if infer_creature_kind(message):
+        return None
+    if not _PROP_AUTHOR.search(message or ""):
+        return None
+    if wants_dcc_export_only(message):
+        return None
+
+    try:
+        from blender_nim_author import author_mesh_fbx, nim_available
+    except ImportError:
+        from hephaestus_forge.blender_nim_author import author_mesh_fbx, nim_available  # type: ignore
+    try:
+        from dcc_import import dcc_import_to_pie
+    except ImportError:
+        from hephaestus_forge.dcc_import import dcc_import_to_pie  # type: ignore
+
+    if not nim_available():
+        return _chat_result(
+            False,
+            "nim_unavailable — set NVIDIA_API_KEY for Blender prop authoring "
+            "(or use make a cube / install CC5 for people).",
+            "prop",
+            planner="direct_nim_prop_author",
+        )
+
+    m = _PROP_AUTHOR.search(message or "")
+    noun = (m.group(1) if m else "prop").strip()
+    name = "Hephaestus_" + re.sub(r"[^\w\-]+", "_", noun)[:40]
+    out = author_mesh_fbx(message.strip(), name=name, project_root=project_root)
+    if not out.get("success"):
+        return _chat_result(
+            False,
+            out.get("error") or "NIM Blender authoring failed",
+            "prop",
+            planner="direct_nim_prop_author",
+            meta={"export": out},
+        )
+
+    imported = dcc_import_to_pie(
+        project_root=project_root,
+        fbx=out.get("output_path"),
+        name=name,
+        spawn=True,
+        import_as_skeletal=False,
+        force_skeletal_spawn=False,
+    )
+    if not imported.get("success"):
+        return _chat_result(
+            False,
+            imported.get("error") or "import failed",
+            "prop",
+            planner="direct_nim_prop_author",
+            meta={"export": out, "import": imported},
+        )
+
+    actor = _spawned_actor_path(imported)
+    frame_res = frame_actor(actor, create_shot=False) if actor else None
+    meta = {
+        "shape": "prop",
+        "kind": noun,
+        "provider": "nim_blender",
+        "asset_path": imported.get("asset_path"),
+        "actor_path": actor,
+        "fbx": out.get("output_path"),
+        "export": out,
+        "import": imported,
+        "frame": frame_res,
+    }
+    remember_dcc(project_root, meta)
+    reply = f"Authored {noun} via nim_blender, imported to {imported.get('asset_path')}, spawned in camera frustum"
+    if frame_res and frame_res.get("success"):
+        reply += f", framed {actor}"
+    reply += "."
+    return _chat_result(
+        True,
+        reply,
+        "prop",
+        planner="direct_nim_prop_author",
+        asset_path=str(imported.get("asset_path") or ""),
+        meta=meta,
+    )
+
+
 def try_direct_dcc_author(
     message: str,
     *,
@@ -821,6 +945,9 @@ def try_direct_dcc_author(
 
     shape = infer_dcc_shape(message)
     if not shape:
+        prop = try_direct_nim_prop_author(message, project_root=project_root)
+        if prop is not None:
+            return prop
         return try_direct_dcc_followup(message, project_root=project_root)
 
     export_only = wants_dcc_export_only(message)

@@ -44,7 +44,12 @@ def meshy_api_key(env: Optional[dict] = None) -> str:
 
 
 def meshy_available(env: Optional[dict] = None) -> bool:
-    return bool(meshy_api_key(env))
+    """Meshy is opt-in only — set HEPHAESTUS_USE_MESHY=1 plus MESHY_API_KEY."""
+    environ = env if env is not None else os.environ
+    flag = (environ.get("HEPHAESTUS_USE_MESHY") or "").strip().lower()
+    if flag not in ("1", "true", "yes", "on"):
+        return False
+    return bool(meshy_api_key(environ))
 
 
 def _request(
