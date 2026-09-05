@@ -34,6 +34,315 @@
 #include "Factories/FbxImportUI.h"
 #include "Factories/FbxFactory.h"
 #include "Factories/FbxSkeletalMeshImportData.h"
+#include "Factories/FbxTextureImportData.h"
+#include "Factories/MaterialInstanceConstantFactoryNew.h"
+#include "HAL/IConsoleManager.h"
+#include "HAL/FileManager.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "Engine/Texture2D.h"
+#include "Materials/MaterialInstanceConstant.h"
+#include "FileHelpers.h"
+
+namespace HephaestusFbxImport
+{
+	static bool IsImageExtension(const FString& Ext)
+	{
+		const FString Lower = Ext.ToLower();
+		return Lower == TEXT("jpg") || Lower == TEXT("jpeg") || Lower == TEXT("png")
+			|| Lower == TEXT("tga") || Lower == TEXT("bmp") || Lower == TEXT("exr");
+	}
+
+	/** Prefer Diffuse/Metallic .jpg over duplicate .png Normal sidecars when both exist. */
+	static void CollectFbmTextureFiles(const FString& FbmDir, TArray<FString>& OutFiles)
+	{
+		TArray<FString> Candidates;
+		IFileManager::Get().FindFiles(Candidates, *(FbmDir / TEXT("*.*")), true, false);
+		TSet<FString> BasesWithJpg;
+		for (const FString& Name : Candidates)
+		{
+			if (FPaths::GetExtension(Name).ToLower() == TEXT("jpg")
+				|| FPaths::GetExtension(Name).ToLower() == TEXT("jpeg"))
+			{
+				BasesWithJpg.Add(FPaths::GetBaseFilename(Name));
+			}
+		}
+		for (const FString& Name : Candidates)
+		{
+			if (!IsImageExtension(FPaths::GetExtension(Name)))
+			{
+				continue;
+			}
+			const FString Ext = FPaths::GetExtension(Name).ToLower();
+			const FString Base = FPaths::GetBaseFilename(Name);
+			if (Ext == TEXT("png") && BasesWithJpg.Contains(Base))
+			{
+				continue; // skip duplicate Normal.png when Normal.jpg exists
+			}
+			OutFiles.Add(FbmDir / Name);
+		}
+	}
+
+	static int32 ImportFbmTextures(const FString& FbxPath, const FString& DestinationPath)
+	{
+		const FString FbmDir = FPaths::Combine(
+			FPaths::GetPath(FbxPath),
+			FPaths::GetBaseFilename(FbxPath) + TEXT(".fbm"));
+		if (!FPaths::DirectoryExists(FbmDir))
+		{
+			return 0;
+		}
+
+		TArray<FString> Files;
+		CollectFbmTextureFiles(FbmDir, Files);
+		if (Files.Num() == 0)
+		{
+			return 0;
+		}
+
+		FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools");
+		TArray<UAssetImportTask*> Tasks;
+		for (const FString& File : Files)
+		{
+			UAssetImportTask* Task = NewObject<UAssetImportTask>();
+			Task->Filename = File;
+			Task->DestinationPath = DestinationPath;
+			Task->DestinationName = FPaths::GetBaseFilename(File);
+			Task->bAutomated = true;
+			Task->bSave = true;
+			Task->bReplaceExisting = true;
+			Task->bReplaceExistingSettings = true;
+			Tasks.Add(Task);
+		}
+		AssetToolsModule.Get().ImportAssetTasks(Tasks);
+
+		int32 Imported = 0;
+		for (UAssetImportTask* Task : Tasks)
+		{
+			Imported += Task ? Task->ImportedObjectPaths.Num() : 0;
+		}
+		UE_LOG(LogHephaestusBridge, Log,
+			TEXT("editor.import_fbx: imported %d texture(s) from %s"), Imported, *FbmDir);
+		return Imported;
+	}
+
+	static UTexture* LoadImportedTexture(const FString& DestinationPath, const FString& TextureName)
+	{
+		const FString ObjectPath = DestinationPath / TextureName + TEXT(".") + TextureName;
+		return LoadObject<UTexture>(nullptr, *ObjectPath, nullptr, LOAD_NoWarn | LOAD_Quiet);
+	}
+
+	static UMaterialInstanceConstant* CreateOrUpdateMic(
+		const FString& DestinationPath,
+		const FString& MicName,
+		UMaterialInterface* Parent,
+		UTexture* Diffuse,
+		UTexture* Normal,
+		UTexture* Opacity)
+	{
+		if (!Parent)
+		{
+			return nullptr;
+		}
+
+		const FString PackagePath = DestinationPath / MicName;
+		UMaterialInstanceConstant* MIC = LoadObject<UMaterialInstanceConstant>(
+			nullptr, *(PackagePath + TEXT(".") + MicName), nullptr, LOAD_NoWarn | LOAD_Quiet);
+
+		if (!MIC)
+		{
+			UMaterialInstanceConstantFactoryNew* Factory = NewObject<UMaterialInstanceConstantFactoryNew>();
+			Factory->InitialParent = Parent;
+			UPackage* Package = CreatePackage(*PackagePath);
+			MIC = Cast<UMaterialInstanceConstant>(Factory->FactoryCreateNew(
+				UMaterialInstanceConstant::StaticClass(),
+				Package,
+				*MicName,
+				RF_Public | RF_Standalone,
+				nullptr,
+				GWarn));
+			if (MIC)
+			{
+				FAssetRegistryModule::AssetCreated(MIC);
+			}
+		}
+		else
+		{
+			MIC->SetParentEditorOnly(Parent);
+		}
+
+		if (!MIC)
+		{
+			return nullptr;
+		}
+
+		if (Diffuse)
+		{
+			MIC->SetTextureParameterValueEditorOnly(FName(TEXT("DiffuseColorMap")), Diffuse);
+			MIC->SetScalarParameterValueEditorOnly(FName(TEXT("DiffuseColorMapWeight")), 1.0f);
+			MIC->SetVectorParameterValueEditorOnly(FName(TEXT("DiffuseColor")), FLinearColor::White);
+		}
+		if (Normal)
+		{
+			MIC->SetTextureParameterValueEditorOnly(FName(TEXT("NormalMap")), Normal);
+			MIC->SetScalarParameterValueEditorOnly(FName(TEXT("NormalMapWeight")), 1.0f);
+		}
+		if (Opacity)
+		{
+			MIC->SetTextureParameterValueEditorOnly(FName(TEXT("OpacityMap")), Opacity);
+			MIC->SetTextureParameterValueEditorOnly(FName(TEXT("OpacityMaskMap")), Opacity);
+			MIC->SetScalarParameterValueEditorOnly(FName(TEXT("OpacityMapWeight")), 1.0f);
+			MIC->SetScalarParameterValueEditorOnly(FName(TEXT("OpacityMaskMapWeight")), 1.0f);
+		}
+
+		MIC->PostEditChange();
+		MIC->MarkPackageDirty();
+		return MIC;
+	}
+
+	static UMaterialInterface* LoadPhongParent(bool bMasked)
+	{
+		const TCHAR* Candidates[] = {
+			bMasked
+				? TEXT("/InterchangeAssets/Materials/PhongSurfaceMaskMaterial.PhongSurfaceMaskMaterial")
+				: TEXT("/InterchangeAssets/Materials/FBXLegacyPhongSurfaceMaterial.FBXLegacyPhongSurfaceMaterial"),
+			bMasked
+				? TEXT("/Interchange/Materials/PhongSurfaceMaskMaterial.PhongSurfaceMaskMaterial")
+				: TEXT("/Interchange/Materials/FBXLegacyPhongSurfaceMaterial.FBXLegacyPhongSurfaceMaterial"),
+			bMasked
+				? TEXT("/InterchangeAssets/Materials/PhongSurfaceTranslucentMaterial.PhongSurfaceTranslucentMaterial")
+				: TEXT("/InterchangeAssets/Materials/PhongSurfaceMaterial.PhongSurfaceMaterial"),
+		};
+		for (const TCHAR* Path : Candidates)
+		{
+			if (UMaterialInterface* Mat = LoadObject<UMaterialInterface>(nullptr, Path, nullptr, LOAD_None, nullptr))
+			{
+				return Mat;
+			}
+		}
+
+		// Fallback: AssetRegistry lookup by short name.
+		const FName Wanted = bMasked
+			? FName(TEXT("PhongSurfaceMaskMaterial"))
+			: FName(TEXT("FBXLegacyPhongSurfaceMaterial"));
+		FAssetRegistryModule& AssetRegistryModule =
+			FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+		TArray<FAssetData> Assets;
+		AssetRegistryModule.Get().GetAssetsByClass(
+			UMaterialInterface::StaticClass()->GetClassPathName(), Assets, true);
+		for (const FAssetData& Asset : Assets)
+		{
+			if (Asset.AssetName == Wanted)
+			{
+				if (UMaterialInterface* Mat = Cast<UMaterialInterface>(Asset.GetAsset()))
+				{
+					return Mat;
+				}
+			}
+		}
+		return nullptr;
+	}
+
+	/**
+	 * CC5/Reallusion FBX often ships Diffuse maps only in the sibling .fbm folder and
+	 * does not link them as FBX material textures (normals may still be linked). Rebuild
+	 * slot materials as Phong MICs wired by naming convention.
+	 */
+	static int32 BindFbmTexturesToSkeletalMesh(USkeletalMesh* Mesh, const FString& DestinationPath)
+	{
+		if (!Mesh)
+		{
+			return 0;
+		}
+
+		UMaterialInterface* ParentOpaque = LoadPhongParent(false);
+		UMaterialInterface* ParentMasked = LoadPhongParent(true);
+		if (!ParentOpaque)
+		{
+			UE_LOG(LogHephaestusBridge, Warning,
+				TEXT("editor.import_fbx: Phong parent material missing — cannot bind CC5 textures"));
+			return 0;
+		}
+		UE_LOG(LogHephaestusBridge, Log,
+			TEXT("editor.import_fbx: Phong parent=%s masked=%s"),
+			*ParentOpaque->GetPathName(),
+			ParentMasked ? *ParentMasked->GetPathName() : TEXT("(none)"));
+
+		TArray<FSkeletalMaterial>& Materials = Mesh->GetMaterials();
+		int32 Bound = 0;
+		for (int32 Index = 0; Index < Materials.Num(); ++Index)
+		{
+			FString MatName;
+			if (Materials[Index].MaterialInterface)
+			{
+				MatName = Materials[Index].MaterialInterface->GetName();
+			}
+			if (MatName.IsEmpty() && !Materials[Index].MaterialSlotName.IsNone())
+			{
+				MatName = Materials[Index].MaterialSlotName.ToString();
+			}
+			if (MatName.IsEmpty())
+			{
+				continue;
+			}
+			// Strip accidental _MI suffix if re-binding.
+			if (MatName.EndsWith(TEXT("_MI")))
+			{
+				MatName.LeftChopInline(3);
+			}
+
+			UTexture* Diffuse = LoadImportedTexture(DestinationPath, MatName + TEXT("_Diffuse"));
+			UTexture* Normal = LoadImportedTexture(DestinationPath, MatName + TEXT("_Normal"));
+			UTexture* Opacity = LoadImportedTexture(DestinationPath, MatName + TEXT("_Opacity"));
+			if (!Diffuse && !Normal && !Opacity)
+			{
+				continue;
+			}
+
+			UMaterialInterface* Parent = (Opacity && ParentMasked) ? ParentMasked : ParentOpaque;
+			const FString MicName = MatName + TEXT("_MI");
+			UMaterialInstanceConstant* MIC = CreateOrUpdateMic(
+				DestinationPath, MicName, Parent, Diffuse, Normal, Opacity);
+			if (!MIC)
+			{
+				continue;
+			}
+
+			Materials[Index].MaterialInterface = MIC;
+			UE_LOG(LogHephaestusBridge, Log,
+				TEXT("editor.import_fbx: slot %d '%s' -> %s (diffuse=%s normal=%s opacity=%s)"),
+				Index, *MatName, *MIC->GetName(),
+				Diffuse ? *Diffuse->GetName() : TEXT("-"),
+				Normal ? *Normal->GetName() : TEXT("-"),
+				Opacity ? *Opacity->GetName() : TEXT("-"));
+			++Bound;
+		}
+
+		if (Bound > 0)
+		{
+			Mesh->Modify();
+			Mesh->SetMaterials(Materials);
+			Mesh->PostEditChange();
+			Mesh->MarkPackageDirty();
+
+			TArray<UPackage*> PackagesToSave;
+			PackagesToSave.Add(Mesh->GetOutermost());
+			for (const FSkeletalMaterial& Slot : Materials)
+			{
+				if (Slot.MaterialInterface)
+				{
+					PackagesToSave.AddUnique(Slot.MaterialInterface->GetOutermost());
+				}
+			}
+			UEditorLoadingAndSavingUtils::SavePackages(PackagesToSave, /*bOnlyDirty=*/true);
+
+			UE_LOG(LogHephaestusBridge, Log,
+				TEXT("editor.import_fbx: bound FBM textures on %d/%d material slot(s) for %s"),
+				Bound, Materials.Num(), *Mesh->GetName());
+		}
+		return Bound;
+	}
+} // namespace HephaestusFbxImport
+
 
 void UHephaestusEditorRemoteSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -250,6 +559,18 @@ bool UHephaestusEditorRemoteSubsystem::RequestImportFbx(
 	ImportTask->bReplaceExisting = true;
 	ImportTask->bReplaceExistingSettings = true;
 
+	// UE 5.5+ routes FBX through Interchange by default, which often imports the
+	// skeletal mesh without creating materials/textures from the sibling .fbm
+	// folder (CC5/Reallusion exports). Force the legacy FbxFactory path for
+	// Hephaestus imports so ImportUI material/texture flags are honored.
+	IConsoleVariable* InterchangeFbxCVar = IConsoleManager::Get().FindConsoleVariable(
+		TEXT("Interchange.FeatureFlags.Import.FBX"));
+	const int32 PreviousInterchangeFbx = InterchangeFbxCVar ? InterchangeFbxCVar->GetInt() : 1;
+	if (InterchangeFbxCVar)
+	{
+		InterchangeFbxCVar->Set(0, ECVF_SetByCode);
+	}
+
 	if (bImportAsSkeletal)
 	{
 		UFbxImportUI* ImportUI = NewObject<UFbxImportUI>();
@@ -258,10 +579,21 @@ bool UHephaestusEditorRemoteSubsystem::RequestImportFbx(
 		ImportUI->bImportAnimations = false;
 		ImportUI->bImportMaterials = true;
 		ImportUI->bImportTextures = true;
+		ImportUI->bAutomatedImportShouldDetectType = false;
 		ImportUI->MeshTypeToImport = FBXIT_SkeletalMesh;
-		ImportUI->SkeletalMeshImportData->bImportMorphTargets = true;
+		if (ImportUI->SkeletalMeshImportData)
+		{
+			ImportUI->SkeletalMeshImportData->bImportMorphTargets = true;
+		}
+		if (ImportUI->TextureImportData)
+		{
+			ImportUI->TextureImportData->MaterialSearchLocation = EMaterialSearchLocation::Local;
+			ImportUI->TextureImportData->bInvertNormalMaps = true;
+		}
+		UFbxFactory* FbxFactory = NewObject<UFbxFactory>();
+		FbxFactory->ImportUI = ImportUI;
 		ImportTask->Options = ImportUI;
-		ImportTask->Factory = NewObject<UFbxFactory>();
+		ImportTask->Factory = FbxFactory;
 	}
 
 	TArray<UAssetImportTask*> Tasks;
@@ -294,6 +626,11 @@ bool UHephaestusEditorRemoteSubsystem::RequestImportFbx(
 				OutAssetPaths.Add(Obj->GetPathName());
 			}
 		}
+	}
+
+	if (InterchangeFbxCVar)
+	{
+		InterchangeFbxCVar->Set(PreviousInterchangeFbx, ECVF_SetByCode);
 	}
 
 	if (Imported.Num() == 0)
@@ -363,6 +700,13 @@ bool UHephaestusEditorRemoteSubsystem::RequestImportFbx(
 	else
 	{
 		OutSkeletal = Cast<USkeletalMesh>(Chosen) != nullptr;
+	}
+
+	// CC5: import sibling .fbm textures and wire Phong MICs onto skeletal slots.
+	if (USkeletalMesh* SkelMesh = Cast<USkeletalMesh>(Chosen))
+	{
+		HephaestusFbxImport::ImportFbmTextures(FilePath, DestinationPath);
+		HephaestusFbxImport::BindFbmTexturesToSkeletalMesh(SkelMesh, DestinationPath);
 	}
 
 	OutAssetPath = Chosen->GetPathName();

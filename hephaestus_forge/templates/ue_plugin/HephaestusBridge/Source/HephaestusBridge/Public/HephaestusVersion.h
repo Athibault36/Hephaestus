@@ -2,4 +2,4 @@
 
 #pragma once
 
-#define HEPHAESTUS_BRIDGE_VERSION TEXT("1.0.5")
+#define HEPHAESTUS_BRIDGE_VERSION TEXT("1.0.7")
