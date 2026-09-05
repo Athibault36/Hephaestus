@@ -34,6 +34,80 @@ _EXPORT_ONLY = re.compile(
     r"\b(?:export|save)\b.{0,30}\b(?:fbx|blender)\b|\bblender\b.{0,30}\bexport\b",
     re.IGNORECASE,
 )
+_WANT_FRAME = re.compile(
+    r"\b(?:frame|framing|shot|cinematic|look\s*at|camera)\b",
+    re.IGNORECASE,
+)
+_WANT_SEQUENCE_SHOT = re.compile(
+    r"\b(?:create\s+(?:a\s+)?shot|level\s*sequence|sequencer)\b",
+    re.IGNORECASE,
+)
+
+
+def wants_frame_shot(message: str) -> bool:
+    """True when the user asked to frame/camera the result (also default for into-PIE)."""
+    return bool(_WANT_FRAME.search(message or ""))
+
+
+def _spawned_actor_path(import_result: dict[str, Any]) -> Optional[str]:
+    """Pull StaticMesh/Skeletal actor_path from dcc_import spawn_results."""
+    import json
+
+    for item in import_result.get("spawn_results") or []:
+        if not isinstance(item, dict) or not item.get("success"):
+            continue
+        paths = item.get("actor_paths") or []
+        for p in paths:
+            if p and "PointLight" not in str(p):
+                return str(p)
+        try:
+            inner = json.loads(item.get("result_json") or "{}")
+        except json.JSONDecodeError:
+            continue
+        ap = inner.get("actor_path")
+        if ap and "PointLight" not in str(ap):
+            return str(ap)
+    return None
+
+
+def frame_actor(
+    actor_path: str,
+    *,
+    remote_api: str = "http://127.0.0.1:8765",
+    create_shot: bool = False,
+    distance: float = 450.0,
+) -> dict[str, Any]:
+    """world.set_view look-at + optional sequence.create_shot."""
+    try:
+        from ue_agent_loop import RemoteUeClient
+    except ImportError:
+        from hephaestus_forge.ue_agent_loop import RemoteUeClient  # type: ignore
+
+    client = RemoteUeClient(remote_api, timeout=30.0)
+    view = client.command({
+        "command": "world.set_view",
+        "params": {
+            "mode": "free",
+            "look_at_actor": actor_path,
+            "distance": distance,
+            "yaw_offset": 35.0,
+            "height": 100.0,
+        },
+    })
+    out: dict[str, Any] = {"set_view": view, "actor_path": actor_path}
+    if create_shot and view.get("success"):
+        shot = client.command({
+            "command": "sequence.create_shot",
+            "params": {
+                "look_at_actor": actor_path,
+                "duration": 2.0,
+                "name": "HephaestusDccShot",
+            },
+        })
+        out["create_shot"] = shot
+    out["success"] = bool(view.get("success"))
+    out["error"] = "" if out["success"] else (view.get("error") or "set_view failed")
+    return out
 
 
 def infer_dcc_shape(message: str) -> Optional[str]:
@@ -80,9 +154,12 @@ def author_primitive_to_pie(
     project_root: Optional[Path],
     shape: str,
     name: Optional[str] = None,
+    frame: bool = True,
+    create_shot: bool = False,
+    remote_api: str = "http://127.0.0.1:8765",
 ) -> dict[str, Any]:
     """
-    DCC export → editor.import_fbx → PIE → spawn in frustum.
+    DCC export → editor.import_fbx → PIE → spawn in frustum → optional frame shot.
 
     Ensures DCC :8084 is up when possible.
     """
@@ -126,16 +203,54 @@ def author_primitive_to_pie(
         name=asset_name,
         spawn=True,
     )
+    if not imported.get("success"):
+        return {
+            "success": False,
+            "error": imported.get("error") or "",
+            "phase": "import",
+            "shape": shape,
+            "name": asset_name,
+            "fbx": fbx,
+            "asset_path": imported.get("asset_path"),
+            "export": export,
+            "import": imported,
+        }
+
+    actor_path = _spawned_actor_path(imported)
+    frame_result: Optional[dict[str, Any]] = None
+    if frame and actor_path:
+        frame_result = frame_actor(
+            actor_path,
+            remote_api=remote_api,
+            create_shot=create_shot,
+        )
+        if not frame_result.get("success"):
+            return {
+                "success": False,
+                "error": frame_result.get("error") or "framing failed",
+                "phase": "frame",
+                "shape": shape,
+                "name": asset_name,
+                "fbx": fbx,
+                "asset_path": imported.get("asset_path"),
+                "actor_path": actor_path,
+                "export": export,
+                "import": imported,
+                "frame": frame_result,
+            }
+
     return {
-        "success": bool(imported.get("success")),
-        "error": imported.get("error") or "",
-        "phase": "import" if not imported.get("success") else "done",
+        "success": True,
+        "error": "",
+        "phase": "done",
         "shape": shape,
         "name": asset_name,
         "fbx": fbx,
         "asset_path": imported.get("asset_path"),
+        "actor_path": actor_path,
         "export": export,
         "import": imported,
+        "frame": frame_result,
     }
 
 
@@ -191,14 +306,30 @@ def try_direct_dcc_author(
     if not wants_dcc_into_pie(message):
         return None
 
-    # Author + land in PIE (default for make-a-cube style goals)
-    result = author_primitive_to_pie(project_root=project_root, shape=shape)
+    # Author + land in PIE; frame by default (studio delivery). Explicit shot language
+    # also creates a short Level Sequence beat when the bridge supports it.
+    do_frame = True
+    do_shot = bool(_WANT_SEQUENCE_SHOT.search(message or "")) or (
+        wants_frame_shot(message) and "shot" in (message or "").lower()
+    )
+    result = author_primitive_to_pie(
+        project_root=project_root,
+        shape=shape,
+        frame=do_frame,
+        create_shot=do_shot,
+    )
     ok = bool(result.get("success"))
     if ok:
-        reply = (
-            f"Authored {shape} in Blender, imported to {result.get('asset_path')}, "
-            f"and spawned it in the camera view."
-        )
+        bits = [
+            f"Authored {shape} in Blender",
+            f"imported to {result.get('asset_path')}",
+            "spawned in camera frustum",
+        ]
+        if result.get("frame") and (result["frame"] or {}).get("success"):
+            bits.append(f"framed {result.get('actor_path')}")
+            if (result["frame"] or {}).get("create_shot"):
+                bits.append("created a shot")
+        reply = ", ".join(bits) + "."
     else:
         reply = (
             f"DCC authoring failed at {result.get('phase')}: "
