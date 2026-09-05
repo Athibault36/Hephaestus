@@ -4,20 +4,24 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from hephaestus_forge.dcc_server import route_command, health
-from hephaestus_forge.dcc_client import DccClient, dcc_online
-from hephaestus_forge.cc5_bridge import export_character_fbx, find_cc5
-from hephaestus_forge.dcc_import import resolve_fbx_path, editor_import_fbx
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from dcc_server import route_command, health  # noqa: E402
+from dcc_client import DccClient, dcc_online  # noqa: E402
+from cc5_bridge import export_character_fbx, find_cc5  # noqa: E402
+from dcc_import import resolve_fbx_path, editor_import_fbx  # noqa: E402
 
 
 def test_health_honest_blender_flag():
-    with patch("hephaestus_forge.dcc_server.find_blender", return_value=(None, None)):
-        with patch("hephaestus_forge.dcc_server._cc5_status", return_value={"available": False}):
+    with patch("dcc_server.find_blender", return_value=(None, None)):
+        with patch("dcc_server._cc5_status", return_value={"available": False}):
             h = health()
     assert h["ok"] is True
     assert h["ready"] is False
@@ -26,10 +30,10 @@ def test_health_honest_blender_flag():
 
 def test_health_ready_when_blender_found():
     with patch(
-        "hephaestus_forge.dcc_server.find_blender",
+        "dcc_server.find_blender",
         return_value=("C:/Blender/blender.exe", "4.2.0"),
     ):
-        with patch("hephaestus_forge.dcc_server._cc5_status", return_value={"available": False}):
+        with patch("dcc_server._cc5_status", return_value={"available": False}):
             h = health()
     assert h["ready"] is True
     assert h["blender"]["version"] == "4.2.0"
@@ -54,7 +58,7 @@ def test_route_blender_export_fbx(tmp_path: Path):
         "shape": "cube",
         "next_steps": ["stop PIE"],
     }
-    with patch("hephaestus_forge.dcc_server.export_primitive_fbx", return_value=fake):
+    with patch("dcc_server.export_primitive_fbx", return_value=fake):
         res = route_command(
             "blender.export_fbx",
             {"shape": "cube", "name": "cube", "project_root": str(tmp_path)},
@@ -100,15 +104,15 @@ def test_dcc_online_false_when_down(monkeypatch):
     def boom(*a, **k):
         raise OSError("connection refused")
 
-    monkeypatch.setattr("hephaestus_forge.dcc_client.DccClient.health", boom)
+    monkeypatch.setattr("dcc_client.DccClient.health", boom)
     ok, _, detail = dcc_online()
     assert ok is False
     assert "offline" in detail.lower() or "refused" in detail.lower() or "OSError" in detail
 
 
 def test_cc5_unavailable_clear_error(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr("hephaestus_forge.cc5_bridge.find_cc5", lambda env=None: None)
-    monkeypatch.setattr("hephaestus_forge.cc5_bridge.find_rlpython", lambda env=None: None)
+    monkeypatch.setattr("cc5_bridge.find_cc5", lambda env=None: None)
+    monkeypatch.setattr("cc5_bridge.find_rlpython", lambda env=None: None)
     res = export_character_fbx(character_name="Hero", project_root=tmp_path)
     assert res["success"] is False
     assert "cc5_unavailable" in (res.get("error") or "")
@@ -129,13 +133,13 @@ def test_resolve_fbx_path_latest(tmp_path: Path):
     assert path.name == "b.fbx"
 
 
-def test_editor_import_fbx_posts_editor_api(monkeypatch, tmp_path: Path):
+def test_editor_import_fbx_posts_editor_command(monkeypatch, tmp_path: Path):
     fbx = tmp_path / "mesh.fbx"
     fbx.write_bytes(b"fbx")
     captured = {}
 
     monkeypatch.setattr(
-        "hephaestus_forge.dcc_import.editor_online",
+        "dcc_import.editor_online",
         lambda: (True, {}, "ok"),
     )
 
@@ -145,8 +149,8 @@ def test_editor_import_fbx_posts_editor_api(monkeypatch, tmp_path: Path):
         captured["params"] = params
         return {"success": True, "result_json": '{"asset_path":"/Game/Hephaestus/DccImports/mesh"}'}
 
-    monkeypatch.setattr("hephaestus_forge.dcc_import._post_command", fake_post)
-    monkeypatch.setattr("hephaestus_forge.dcc_import.editor_api_base", lambda: "http://127.0.0.1:8766")
+    monkeypatch.setattr("dcc_import._post_command", fake_post)
+    monkeypatch.setattr("dcc_import.editor_api_base", lambda: "http://127.0.0.1:8766")
     res = editor_import_fbx(fbx)
     assert res["success"] is True
     assert captured["command"] == "editor.import_fbx"
@@ -166,7 +170,7 @@ def test_live_cc5_detect_only():
     reason="live Blender smoke is opt-in",
 )
 def test_live_blender_export_smoke(tmp_path: Path):
-    from hephaestus_forge.blender_bridge import export_primitive_fbx, find_blender
+    from blender_bridge import export_primitive_fbx, find_blender
 
     path, _ = find_blender()
     if not path:
