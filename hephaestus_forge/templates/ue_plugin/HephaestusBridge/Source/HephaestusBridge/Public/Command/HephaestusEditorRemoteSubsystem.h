@@ -53,7 +53,9 @@ private:
 	static bool RequestImportFbx(
 		const TSharedPtr<FJsonObject>& Params,
 		FString& OutAssetPath,
-		FString& OutError);
+		FString& OutError,
+		bool& OutSkeletal,
+		TArray<FString>& OutAssetPaths);
 
 	int32 ListenPort = 8766;
 	bool bIsListening = false;

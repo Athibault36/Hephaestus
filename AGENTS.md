@@ -59,7 +59,8 @@ Registered targets are stored in `%USERPROFILE%\.hephaestus\projects.json`.
 | Path | Role |
 |------|------|
 | `hephaestus_forge/dcc_server.py` | DCC control plane `:8084` (`blender.*` / `cc5.export`) |
-| `hephaestus_forge/agent_dcc.py` | Chat/autonomous: author → import → frame/spin; last-actor memory |
+| `hephaestus_forge/agent_dcc.py` | Chat/autonomous: author → import → frame/spin; last-actor memory; people/animals/creatures |
+| `hephaestus_forge/meshy_bridge.py` | Optional Meshy text-to-3D when `MESHY_API_KEY` is set |
 | `hephaestus_forge/dcc_client.py` | HTTP client + `forge dcc start` |
 | `hephaestus_forge/dcc_import.py` | Stop PIE → `editor.import_fbx` → Play → spawn |
 | `hephaestus_forge/cc5_bridge.py` | CC5/rlpython detect + character FBX export |

@@ -26,7 +26,11 @@ _DCC_AUTHOR = re.compile(
     re.IGNORECASE,
 )
 _CHARACTER_AUTHOR = re.compile(
-    r"\b(?:make|create|export|author)\b.{0,40}\b(?:character|avatar|cc5|humanoid)\b"
+    r"\b(?:make|create|export|author|build)\b.{0,60}\b(?:"
+    r"character|avatar|cc5|humanoid|person|people|human|"
+    r"dog|cat|wolf|fox|horse|animal|creature|monster|beast|dragon|alien|"
+    r"man|woman|npc"
+    r")\b"
     r"|\bcc5\b.{0,20}\bexport\b",
     re.IGNORECASE,
 )
@@ -666,68 +670,136 @@ def try_direct_cc5_author(
     *,
     project_root: Optional[Path] = None,
 ) -> Optional[dict[str, Any]]:
-    """Character Creator export → same import/spawn/frame path when CC5 is available."""
+    """
+    Author a person / animal / creature into PIE.
+
+    Priority: Meshy (if MESHY_API_KEY) → CC5 (humanoid + installed) → Blender creature kit.
+    Always creates an asset — never Content Browser search-only.
+    """
     if not _CHARACTER_AUTHOR.search(message or ""):
         return None
+
     try:
-        from cc5_bridge import export_character_fbx, cc5_available
+        from blender_bridge import infer_creature_kind, export_creature_fbx
     except ImportError:
-        from hephaestus_forge.cc5_bridge import export_character_fbx, cc5_available  # type: ignore
+        from hephaestus_forge.blender_bridge import infer_creature_kind, export_creature_fbx  # type: ignore
     try:
         from dcc_import import dcc_import_to_pie
     except ImportError:
         from hephaestus_forge.dcc_import import dcc_import_to_pie  # type: ignore
 
-    if not cc5_available():
-        return _chat_result(
-            False,
-            "cc5_unavailable - install Character Creator 5 / rlpython, or set RLPYTHON.",
-            "character",
-            planner="direct_cc5_author",
-        )
-
-    name = "Character"
+    kind = infer_creature_kind(message) or "creature"
+    name = f"Hephaestus_{kind}"
     m = re.search(r"\bnamed\s+(\w+)\b", message or "", re.I)
     if m:
         name = m.group(1)
-    export = export_character_fbx(character_name=name, project_root=project_root)
-    if not export.get("success"):
-        return _chat_result(
-            False,
-            export.get("error") or "cc5 export failed",
-            "character",
-            planner="direct_cc5_author",
-            meta={"export": export},
-        )
-    fbx = export.get("output_path")
-    imported = dcc_import_to_pie(project_root=project_root, fbx=fbx, name=name, spawn=True)
+
+    provider = "blender_creature"
+    fbx: Optional[str] = None
+    export_meta: dict[str, Any] = {}
+
+    # 1) Meshy generative when keyed
+    try:
+        from meshy_bridge import meshy_available, generate_and_download
+    except ImportError:
+        try:
+            from hephaestus_forge.meshy_bridge import meshy_available, generate_and_download  # type: ignore
+        except ImportError:
+            meshy_available = lambda: False  # type: ignore
+            generate_and_download = None  # type: ignore
+
+    if meshy_available() and generate_and_download:
+        prompt = (message or "").strip() or f"a stylized {kind}"
+        gen = generate_and_download(prompt, project_root=project_root, name=name)
+        export_meta["meshy"] = gen
+        if gen.get("success") and gen.get("output_path"):
+            path = Path(str(gen["output_path"]))
+            if path.suffix.lower() == ".fbx":
+                fbx = str(path)
+                provider = "meshy"
+            else:
+                # Convert GLB/OBJ → FBX via Blender creature fallback name
+                export_meta["meshy_note"] = "non-fbx download; falling back to Blender kit"
+        else:
+            export_meta["meshy_error"] = gen.get("error")
+
+    # 2) CC5 for humanoids when available
+    if fbx is None and kind == "humanoid":
+        try:
+            from cc5_bridge import export_character_fbx, cc5_available
+        except ImportError:
+            from hephaestus_forge.cc5_bridge import export_character_fbx, cc5_available  # type: ignore
+        if cc5_available():
+            export = export_character_fbx(character_name=name, project_root=project_root)
+            export_meta["cc5"] = export
+            if export.get("success") and export.get("output_path"):
+                fbx = str(export["output_path"])
+                provider = "cc5"
+
+    # 3) Blender authored creature kit (always-on studio path)
+    if fbx is None:
+        result = export_creature_fbx(kind=kind, name=name, project_root=project_root)
+        export_meta["blender"] = result.to_dict() if hasattr(result, "to_dict") else result
+        if not result.success:
+            return _chat_result(
+                False,
+                result.error or "creature authoring failed",
+                kind,
+                planner="direct_creature_author",
+                meta={"provider": provider, "export": export_meta},
+            )
+        fbx = result.output_path
+        provider = "blender_creature"
+
+    imported = dcc_import_to_pie(
+        project_root=project_root,
+        fbx=fbx,
+        name=name,
+        spawn=True,
+        import_as_skeletal=True,
+        force_skeletal_spawn=True,
+    )
     if not imported.get("success"):
         return _chat_result(
             False,
             imported.get("error") or "import failed",
-            "character",
-            planner="direct_cc5_author",
-            meta={"export": export, "import": imported},
+            kind,
+            planner="direct_creature_author",
+            meta={"provider": provider, "export": export_meta, "import": imported},
         )
+
     actor = _spawned_actor_path(imported)
     frame_res = None
     if actor:
         frame_res = frame_actor(actor, create_shot=False)
     meta = {
-        "shape": "character",
+        "shape": kind,
+        "kind": kind,
+        "provider": provider,
         "asset_path": imported.get("asset_path"),
         "actor_path": actor,
         "fbx": fbx,
-        "export": export,
+        "skeletal": imported.get("skeletal"),
+        "export": export_meta,
         "import": imported,
         "frame": frame_res,
     }
     remember_dcc(project_root, meta)
-    ok = True
-    reply = f"Exported CC5 character to {imported.get('asset_path')} and spawned in view."
+    reply = (
+        f"Authored {kind} via {provider}, imported to {imported.get('asset_path')}, "
+        f"spawned in camera frustum"
+    )
     if frame_res and frame_res.get("success"):
-        reply += f" Framed {actor}."
-    return _chat_result(ok, reply, "character", planner="direct_cc5_author", asset_path=str(imported.get("asset_path") or ""), meta=meta)
+        reply += f", framed {actor}"
+    reply += "."
+    return _chat_result(
+        True,
+        reply,
+        kind,
+        planner="direct_creature_author",
+        asset_path=str(imported.get("asset_path") or ""),
+        meta=meta,
+    )
 
 
 def try_direct_dcc_author(

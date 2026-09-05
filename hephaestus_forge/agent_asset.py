@@ -71,6 +71,7 @@ def spawn_asset_in_view(
     asset_path: str,
     *,
     with_light: bool = True,
+    force_skeletal: bool = False,
 ) -> list[dict[str, Any]]:
     """Direct spawn commands for a known /Game asset path (no LLM)."""
     asset_path = asset_path.strip()
@@ -106,7 +107,12 @@ def spawn_asset_in_view(
             },
         }))
 
-    skel = "SkeletalMesh" in asset_path or asset_path.endswith(".SkeletalMesh") or "/SK_" in asset_path
+    skel = (
+        force_skeletal
+        or "SkeletalMesh" in asset_path
+        or asset_path.endswith(".SkeletalMesh")
+        or "/SK_" in asset_path
+    )
     if skel:
         results.append(client.command({
             "command": "animation.spawn_skeletal_mesh",
@@ -119,6 +125,19 @@ def spawn_asset_in_view(
                 },
             },
         }))
+        # If skeletal spawn fails (asset imported as StaticMesh), fall back.
+        if results and not results[-1].get("success"):
+            results.append(client.command({
+                "command": "world.spawn_mesh",
+                "params": {
+                    "mesh_path": asset_path,
+                    "transform": {
+                        "location": loc,
+                        "rotation": {"pitch": 0.0, "yaw": 0.0, "roll": 0.0},
+                        "scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+                    },
+                },
+            }))
     else:
         results.append(client.command({
             "command": "world.spawn_mesh",

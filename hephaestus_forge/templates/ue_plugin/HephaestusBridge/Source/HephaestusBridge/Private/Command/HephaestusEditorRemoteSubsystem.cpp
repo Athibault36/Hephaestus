@@ -29,6 +29,10 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "UnrealEdGlobals.h"
+#include "Engine/SkeletalMesh.h"
+#include "Engine/StaticMesh.h"
+#include "Factories/FbxImportUI.h"
+#include "Factories/FbxSkeletalMeshImportData.h"
 
 void UHephaestusEditorRemoteSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -181,10 +185,14 @@ bool UHephaestusEditorRemoteSubsystem::RequestStop()
 bool UHephaestusEditorRemoteSubsystem::RequestImportFbx(
 	const TSharedPtr<FJsonObject>& Params,
 	FString& OutAssetPath,
-	FString& OutError)
+	FString& OutError,
+	bool& OutSkeletal,
+	TArray<FString>& OutAssetPaths)
 {
 	OutAssetPath.Reset();
 	OutError.Reset();
+	OutSkeletal = false;
+	OutAssetPaths.Reset();
 
 	if (IsPieActive())
 	{
@@ -194,6 +202,7 @@ bool UHephaestusEditorRemoteSubsystem::RequestImportFbx(
 
 	FString FilePath;
 	FString DestinationPath = TEXT("/Game/Hephaestus/DccImports");
+	bool bImportAsSkeletal = false;
 	if (Params.IsValid())
 	{
 		Params->TryGetStringField(TEXT("source_path"), FilePath);
@@ -205,6 +214,11 @@ bool UHephaestusEditorRemoteSubsystem::RequestImportFbx(
 		if (Params->TryGetStringField(TEXT("destination_path"), Dest) && !Dest.IsEmpty())
 		{
 			DestinationPath = Dest;
+		}
+		Params->TryGetBoolField(TEXT("import_as_skeletal"), bImportAsSkeletal);
+		if (!bImportAsSkeletal)
+		{
+			Params->TryGetBoolField(TEXT("skeletal"), bImportAsSkeletal);
 		}
 	}
 	if (FilePath.IsEmpty())
@@ -220,8 +234,6 @@ bool UHephaestusEditorRemoteSubsystem::RequestImportFbx(
 
 	FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools");
 
-	// Prefer ImportAssetTasks — ImportAssetsAutomated + Interchange WaitUntilDone
-	// asserts if invoked from nested TaskGraph (HTTP AsyncTask on game thread).
 	UAssetImportTask* ImportTask = NewObject<UAssetImportTask>();
 	ImportTask->Filename = FilePath;
 	ImportTask->DestinationPath = DestinationPath;
@@ -229,6 +241,21 @@ bool UHephaestusEditorRemoteSubsystem::RequestImportFbx(
 	ImportTask->bSave = true;
 	ImportTask->bReplaceExisting = true;
 	ImportTask->bReplaceExistingSettings = true;
+
+	if (bImportAsSkeletal)
+	{
+		UFbxImportUI* ImportUI = NewObject<UFbxImportUI>();
+		ImportUI->bImportAsSkeletal = true;
+		ImportUI->bImportMesh = true;
+		ImportUI->bImportAnimations = false;
+		ImportUI->bImportMaterials = true;
+		ImportUI->bImportTextures = true;
+		ImportUI->MeshTypeToImport = FBXIT_SkeletalMesh;
+		ImportUI->SkeletalMeshImportData->bImportMorphTargets = true;
+		ImportTask->Options = ImportUI;
+		ImportTask->FactoryName = TEXT("FbxFactory");
+	}
+
 	TArray<UAssetImportTask*> Tasks;
 	Tasks.Add(ImportTask);
 	AssetToolsModule.Get().ImportAssetTasks(Tasks);
@@ -239,6 +266,7 @@ bool UHephaestusEditorRemoteSubsystem::RequestImportFbx(
 		if (UObject* Obj = FSoftObjectPath(Path).TryLoad())
 		{
 			Imported.Add(Obj);
+			OutAssetPaths.Add(Obj->GetPathName());
 		}
 	}
 
@@ -251,6 +279,13 @@ bool UHephaestusEditorRemoteSubsystem::RequestImportFbx(
 		ImportData->bSkipReadOnly = true;
 		ImportData->GroupName = TEXT("HephaestusEditorImport");
 		Imported = AssetToolsModule.Get().ImportAssetsAutomated(ImportData);
+		for (UObject* Obj : Imported)
+		{
+			if (Obj)
+			{
+				OutAssetPaths.Add(Obj->GetPathName());
+			}
+		}
 	}
 
 	if (Imported.Num() == 0)
@@ -259,8 +294,26 @@ bool UHephaestusEditorRemoteSubsystem::RequestImportFbx(
 		return false;
 	}
 
-	OutAssetPath = Imported[0]->GetPathName();
-	UE_LOG(LogHephaestusBridge, Log, TEXT("editor.import_fbx: %s -> %s"), *FilePath, *OutAssetPath);
+	// Prefer SkeletalMesh when present (creature / character FBX).
+	UObject* Chosen = nullptr;
+	for (UObject* Obj : Imported)
+	{
+		if (Cast<USkeletalMesh>(Obj))
+		{
+			Chosen = Obj;
+			OutSkeletal = true;
+			break;
+		}
+	}
+	if (!Chosen)
+	{
+		Chosen = Imported[0];
+		OutSkeletal = Cast<USkeletalMesh>(Chosen) != nullptr;
+	}
+
+	OutAssetPath = Chosen->GetPathName();
+	UE_LOG(LogHephaestusBridge, Log, TEXT("editor.import_fbx: %s -> %s (skeletal=%s)"),
+		*FilePath, *OutAssetPath, OutSkeletal ? TEXT("true") : TEXT("false"));
 	return true;
 }
 
@@ -373,14 +426,31 @@ bool UHephaestusEditorRemoteSubsystem::HandleCommand(const FHttpServerRequest& R
 						FString ImportError;
 						FString ImportResultJson = TEXT("{}");
 						FString AssetPath;
-						bImportOk = WeakThis.IsValid() && RequestImportFbx(ParamsCopy, AssetPath, ImportError);
+						bool bSkeletal = false;
+						TArray<FString> AssetPaths;
+						bImportOk = WeakThis.IsValid()
+							&& RequestImportFbx(ParamsCopy, AssetPath, ImportError, bSkeletal, AssetPaths);
 						if (bImportOk)
 						{
 							FString Escaped = AssetPath;
 							Escaped.ReplaceInline(TEXT("\\"), TEXT("/"));
+							FString PathsJson = TEXT("[");
+							for (int32 i = 0; i < AssetPaths.Num(); ++i)
+							{
+								FString P = AssetPaths[i];
+								P.ReplaceInline(TEXT("\\"), TEXT("/"));
+								if (i > 0)
+								{
+									PathsJson += TEXT(",");
+								}
+								PathsJson += FString::Printf(TEXT("\"%s\""), *P);
+							}
+							PathsJson += TEXT("]");
 							ImportResultJson = FString::Printf(
-								TEXT("{\"action\":\"editor.import_fbx\",\"asset_path\":\"%s\",\"pie_active\":%s}"),
+								TEXT("{\"action\":\"editor.import_fbx\",\"asset_path\":\"%s\",\"skeletal\":%s,\"asset_paths\":%s,\"pie_active\":%s}"),
 								*Escaped,
+								bSkeletal ? TEXT("true") : TEXT("false"),
+								*PathsJson,
 								IsPieActive() ? TEXT("true") : TEXT("false"));
 						}
 
