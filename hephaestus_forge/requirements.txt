@@ -20,6 +20,10 @@ sentence-transformers>=3.0.0
 # Optional: Hephaestus Desktop native window
 # pywebview>=5.0
 
+# Windows dialog automation (forge dialog / Restore Packages dismiss)
+# Install on operator machines: pip install pywinauto
+# pywinauto>=0.6.8
+
 # Local .env loading (NVIDIA_API_KEY, HEPHAESTUS_PLANNER_VISION, …)
 python-dotenv>=1.0.0
 

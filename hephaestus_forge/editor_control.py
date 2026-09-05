@@ -104,12 +104,29 @@ def wait_for_editor(
     *,
     timeout_s: float = 180.0,
     poll_s: float = 2.0,
+    dismiss_dialogs: bool = True,
 ) -> tuple[bool, dict[str, Any], str]:
     """Poll editor :8766 until healthy (and identity matches when project_root given)."""
     deadline = time.time() + timeout_s
     last_detail = "waiting for editor API :8766"
     last_health: dict[str, Any] = {}
+    dismissed: list[dict[str, Any]] = []
     while time.time() < deadline:
+        if dismiss_dialogs and sys.platform == "win32":
+            try:
+                from dialog_control import auto_dismiss
+            except ImportError:
+                try:
+                    from hephaestus_forge.dialog_control import auto_dismiss  # type: ignore
+                except ImportError:
+                    auto_dismiss = None  # type: ignore
+            if auto_dismiss:
+                try:
+                    res = auto_dismiss(only_known=True)
+                    if res.get("handled_count"):
+                        dismissed.extend(res.get("handled") or [])
+                except Exception:
+                    pass
         ok, health, detail = editor_online(timeout=2.0)
         last_health = health
         if not ok:
@@ -122,8 +139,14 @@ def wait_for_editor(
                 last_detail = match_detail
                 time.sleep(poll_s)
                 continue
+            if dismissed:
+                match_detail = f"{match_detail}; dismissed {len(dismissed)} dialog(s)"
             return True, health, match_detail
+        if dismissed:
+            detail = f"{detail}; dismissed {len(dismissed)} dialog(s)"
         return True, health, detail
+    if dismissed:
+        last_detail = f"{last_detail}; dismissed {len(dismissed)} dialog(s) while waiting"
     return False, last_health, last_detail
 
 
