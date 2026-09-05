@@ -18,6 +18,11 @@ except ImportError:
     from hephaestus_forge.agent_asset import augment_goal_with_assets, spawn_asset_in_view  # type: ignore
 
 try:
+    from agent_dcc import try_direct_dcc_author
+except ImportError:
+    from hephaestus_forge.agent_dcc import try_direct_dcc_author  # type: ignore
+
+try:
     from goal_grader import GradeResult
 except ImportError:
     from hephaestus_forge.goal_grader import GradeResult  # type: ignore
@@ -106,14 +111,28 @@ def run_autonomous_goal(
     Run observe→act with NIM planner until grade passes or budget exhausted.
 
     When ``require_nim`` is True and no API key is configured, returns immediately
-    with ``llm_error`` (no heuristic fallback).
+    with ``llm_error`` (no heuristic fallback). Direct DCC authoring goals
+    (make a cube → PIE) bypass the NIM requirement.
     """
-    _ = project_root  # reserved for session persistence by callers
     raw_goal = (goal or "").strip()
     if mode == "cinematic":
         raw_goal = f"[cinematic mode] {raw_goal}"
     elif mode == "gameplay":
         raw_goal = f"[gameplay mode] {raw_goal}"
+
+    # Blender → import → spawn: deliver without NIM when the goal is a DCC primitive.
+    dcc = try_direct_dcc_author(raw_goal, project_root=project_root)
+    if dcc is not None:
+        return AutonomousReport(
+            ok=bool(dcc.get("ok")),
+            goal=raw_goal,
+            grade=dcc.get("grade") or {},
+            planner=str(dcc.get("planner") or "direct_dcc_author"),
+            llm_available=False,
+            llm_error="",
+            asset_matches=list(dcc.get("asset_matches") or []),
+            asset_meta=dict(dcc.get("asset_meta") or {}),
+        )
 
     client = RemoteUeClient(remote_api, timeout=60.0)
     try:

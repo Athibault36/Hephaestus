@@ -479,6 +479,13 @@
       "description": "Stop PIE → editor.import_fbx → Play → spawn in frustum"
     },
     {
+      "name": "agent.dcc_author",
+      "command": "agent",
+      "args": ["make a cube and put it in the scene"],
+      "timeout_seconds": 240,
+      "description": "Chat/autonomous: Blender primitive → dcc-import → frustum spawn (no NIM required)"
+    },
+    {
       "name": "forge.cc5",
       "command": "forge",
       "args": ["cc5", "export"],

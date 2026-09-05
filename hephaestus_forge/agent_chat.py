@@ -12,6 +12,11 @@ from agent_asset import search_project_assets, spawn_asset_in_view
 from agent_session import AgentSession, SessionStore
 from ue_agent_loop import RemoteUeClient
 
+try:
+    from agent_dcc import try_direct_dcc_author
+except ImportError:
+    from hephaestus_forge.agent_dcc import try_direct_dcc_author  # type: ignore
+
 AvatarFn = Callable[[str, Optional[int], Optional[str]], None]
 ThoughtFn = Callable[[str, str, dict[str, Any]], None]
 
@@ -249,6 +254,19 @@ def run_chat(
         session.last_grade = direct_search["grade"]
         store.save(session)
         return {**direct_search, "goal": goal, "session": session.to_dict()}
+
+    direct_dcc = try_direct_dcc_author(message, project_root=project_root)
+    if direct_dcc:
+        session.memory.append({
+            "kind": "dcc_author",
+            "shape": (direct_dcc.get("asset_meta") or {}).get("dcc_shape"),
+            "ok": direct_dcc["ok"],
+            "asset_path": (direct_dcc.get("asset_matches") or [None])[0],
+        })
+        session.add_assistant(direct_dcc["reply"])
+        session.last_grade = direct_dcc["grade"]
+        store.save(session)
+        return {**direct_dcc, "goal": goal, "session": session.to_dict()}
 
     if session.mode == "cinematic":
         goal = f"[cinematic mode] {goal}"
