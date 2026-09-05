@@ -38,8 +38,26 @@ def _post_command(base: str, command: str, params: Optional[dict[str, Any]] = No
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode("utf-8") or "{}")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8") or "{}")
+    except urllib.error.HTTPError as exc:
+        raw = ""
+        try:
+            raw = exc.read().decode("utf-8") or ""
+        except Exception:
+            raw = ""
+        try:
+            parsed = json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            parsed = {}
+        if isinstance(parsed, dict) and parsed:
+            # Preserve bridge error payload (e.g. unknown command on stale DLL).
+            parsed.setdefault("success", False)
+            if not parsed.get("error"):
+                parsed["error"] = raw or f"HTTP {exc.code}"
+            return parsed
+        return {"success": False, "error": raw or f"HTTP {exc.code}: {exc.reason}"}
 
 
 def fetch_editor_health(timeout: float = 2.0) -> dict[str, Any]:
@@ -84,11 +102,21 @@ def stop() -> dict[str, Any]:
     ok, _, _ = editor_online()
     if ok:
         return _post_command(editor_api_base(), "editor.stop")
-    pie_ok, _, _ = pie_online()
+    pie_ok, pie_health, _ = pie_online()
     if pie_ok:
-        return _post_command(pie_api_base(), "editor.stop")
+        result = _post_command(pie_api_base(), "editor.stop")
+        err = str(result.get("error") or "")
+        if not result.get("success") and "Unknown command" in err:
+            ver = pie_health.get("plugin_version") or "?"
+            result["error"] = (
+                f"{err} — live PIE plugin is {ver}; forge sync-plugin, rebuild "
+                f"HephaestusBridge 1.0.1+, full editor restart (or Stop Play manually). "
+                f"Editor API :8766 is also offline until that rebuild."
+            )
+        return result
     raise RuntimeError(
-        f"Neither editor API ({editor_api_base()}) nor PIE API ({pie_api_base()}) is reachable"
+        f"Neither editor API ({editor_api_base()}) nor PIE API ({pie_api_base()}) is reachable. "
+        f"Open the .uproject with HephaestusBridge ≥1.0.1 rebuilt, or Stop Play in the editor."
     )
 
 

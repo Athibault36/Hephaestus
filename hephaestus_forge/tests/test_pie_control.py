@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+import urllib.error
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -81,6 +82,37 @@ def test_stop_prefers_editor_then_pie():
                 out = pie_control.stop()
                 assert out["success"] is True
                 assert post.call_args[0][1] == "editor.stop"
+
+
+def test_stop_stale_plugin_hints_rebuild():
+    with patch("pie_control.editor_online", return_value=(False, {}, "off")):
+        with patch(
+            "pie_control.pie_online",
+            return_value=(True, {"plugin_version": "1.0.0"}, "pie"),
+        ):
+            with patch(
+                "pie_control._post_command",
+                return_value={"success": False, "error": "Unknown command category: editor.stop"},
+            ):
+                out = pie_control.stop()
+    assert out["success"] is False
+    assert "1.0.0" in out["error"]
+    assert "rebuild" in out["error"].lower()
+
+
+def test_post_command_parses_http_error_json():
+    err = urllib.error.HTTPError(
+        "http://127.0.0.1:8765/v1/command",
+        400,
+        "Bad Request",
+        hdrs=None,
+        fp=None,
+    )
+    err.read = lambda: b'{"success":false,"error":"Unknown command category: editor.stop"}'
+    with patch("pie_control.urllib.request.urlopen", side_effect=err):
+        out = pie_control._post_command("http://127.0.0.1:8765", "editor.stop")
+    assert out["success"] is False
+    assert "Unknown command" in out["error"]
 
 
 def test_wait_for_pie_matches_project():
