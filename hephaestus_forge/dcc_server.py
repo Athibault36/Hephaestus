@@ -20,6 +20,16 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 import uvicorn
 
+# Factory-root .env (MESHY_API_KEY, etc.) when DCC is started outside `forge`.
+try:
+    from dotenv import load_dotenv
+
+    _factory_env = Path(__file__).resolve().parent.parent / ".env"
+    if _factory_env.is_file():
+        load_dotenv(_factory_env, override=False)
+except ImportError:
+    pass
+
 try:
     from blender_bridge import (
         default_export_dir,

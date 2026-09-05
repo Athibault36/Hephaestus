@@ -23,6 +23,21 @@ except ImportError:
 DEFAULT_BASE = "https://api.meshy.ai"
 
 
+def _ensure_factory_dotenv() -> None:
+    """Load factory-root .env so MESHY_API_KEY works outside `forge` CLI."""
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    factory_root = Path(__file__).resolve().parent.parent
+    env_path = factory_root / ".env"
+    if env_path.is_file():
+        load_dotenv(env_path, override=False)
+
+
+_ensure_factory_dotenv()
+
+
 def meshy_api_key(env: Optional[dict] = None) -> str:
     environ = env if env is not None else os.environ
     return (environ.get("MESHY_API_KEY") or environ.get("HEPHAESTUS_MESHY_API_KEY") or "").strip()
