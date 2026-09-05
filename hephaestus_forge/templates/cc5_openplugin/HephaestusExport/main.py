@@ -258,6 +258,53 @@ def _load_outfit(avatar, appearance: dict) -> dict:
     return {"loaded": loaded, "errors": errors}
 
 
+def _load_content_assets(avatar, appearance: dict) -> dict:
+    """
+    Apply Free Resource packs (ccAvatarPreset / ccSlider / ccSkin) from the plan.
+
+    Paths come from hephaestus_forge.cc5_appearance.resolve_content_assets.
+    """
+    import RLPy
+
+    loaded: list[str] = []
+    errors: list[str] = []
+    paths = list((appearance or {}).get("content_assets") or [])
+    if not paths:
+        return {"loaded": [], "errors": [], "skipped": True}
+
+    for raw in paths:
+        path = Path(str(raw))
+        if not path.is_file():
+            errors.append(f"missing:{path.name}")
+            continue
+        try:
+            obj = RLPy.RFileIO.LoadObject(str(path))
+            if obj is None:
+                errors.append(f"null:{path.name}")
+                continue
+            loaded.append(path.name)
+            # Cloth-like assets may need conform; presets/skins usually apply in-place
+            try:
+                suf = path.suffix.lower()
+                if suf in (".cccloth", ".ccshoes", ".cchair") and hasattr(RLPy, "RCloth"):
+                    if hasattr(RLPy.RCloth, "Conform"):
+                        RLPy.RCloth.Conform(obj, avatar)
+            except Exception as exc:
+                errors.append(f"conform {path.name}:{exc}")
+        except Exception as exc:
+            errors.append(f"load {path.name}:{exc}")
+
+    try:
+        flags = RLPy.EObjectModifiedType_Attribute
+        if hasattr(RLPy, "EObjectModifiedType_Transform"):
+            flags = flags | RLPy.EObjectModifiedType_Transform
+        RLPy.RGlobal.ObjectModified(avatar, flags)
+    except Exception as exc:
+        errors.append(f"modified:{exc}")
+
+    return {"loaded": loaded, "errors": errors, "count": len(paths)}
+
+
 def _apply_morphs(avatar, appearance: dict) -> dict:
     """
     Alter shaping morphs from an appearance plan when morph packs are installed.
@@ -424,22 +471,26 @@ def _apply_morphs(avatar, appearance: dict) -> dict:
 
 
 def _apply_appearance(avatar, appearance: dict) -> dict:
-    """Create a distinct character: body-type base + scale + morphs + outfit."""
+    """Create a distinct character: content packs + scale + morphs + outfit."""
     if not appearance:
         return {"skipped": True}
+    # Free Resource presets/sliders/skins first (when installed), then fine morphs/scale
+    content = _load_content_assets(avatar, appearance)
     scale = _apply_scale_shape(avatar, appearance)
     morphs = _apply_morphs(avatar, appearance)
     outfit = _load_outfit(avatar, appearance)
     return {
         "traits": list(appearance.get("traits") or []),
         "gender": appearance.get("gender"),
+        "content": content,
         "scale": scale,
         "morphs": morphs,
         "outfit": outfit,
-        "applied": list(morphs.get("applied") or [])
+        "applied": [f"content:{n}" for n in (content.get("loaded") or [])]
+        + list(morphs.get("applied") or [])
         + ([f"scale={scale.get('scale')}"] if scale.get("scaled") else [])
         + [f"outfit:{n}" for n in (outfit.get("loaded") or [])],
-        "missed": list(morphs.get("missed") or []),
+        "missed": list(morphs.get("missed") or []) + list(content.get("errors") or []),
         "morph_count": morphs.get("morph_count") or 0,
     }
 
