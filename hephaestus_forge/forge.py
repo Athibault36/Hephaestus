@@ -1735,10 +1735,19 @@ def compile(
     
     ue_path = Path(config.system.ue_path) if config.system.ue_path else None
     if not ue_path or not ue_path.exists():
-        console.print("[red]✗ UE5.8 not found. Set UE_PATH in config.yaml[/red]")
+        try:
+            from editor_control import find_ue_root
+        except ImportError:
+            from hephaestus_forge.editor_control import find_ue_root  # type: ignore
+        ue_path = find_ue_root()
+    if not ue_path or not ue_path.exists():
+        console.print("[red]✗ UE5.8 not found. Set UE_PATH in config.yaml or the environment[/red]")
         raise typer.Exit(1)
     
-    plugin_dir = project_root / config.paths.ue_plugin_dir
+    # Prefer synced Plugins/HephaestusBridge; fall back to config path
+    plugin_dir = project_root / "Plugins" / "HephaestusBridge"
+    if not plugin_dir.exists():
+        plugin_dir = project_root / config.paths.ue_plugin_dir
     if not plugin_dir.exists():
         console.print(f"[red]✗ Plugin source not found: {plugin_dir}[/red]")
         raise typer.Exit(1)
@@ -1764,41 +1773,34 @@ def compile(
     if not uproject_files:
         console.print(f"[red]✗ No .uproject found in {project_root}[/red]")
         raise typer.Exit(1)
-    uproject = uproject_files[0]
+    uproject = uproject_files[0].resolve()
     project_name = uproject.stem
-    target = f"{project_name}Editor"
-    platform_arg = "Win64"
-    config_arg = "Development"
     
-    cmd = [
-        str(ubt_path),
-        target,
-        platform_arg,
-        config_arg,
-        f'-Project="{uproject}"',
-        "-NoEngineChanges",
-    ]
-    
-    if clean:
-        cmd.append("-Clean")
+    # Pass -Project= as one argv token WITHOUT nested quotes — subprocess list
+    # form already preserves spaces in the path (nested quotes break UBT on Windows).
+    try:
+        from ubt_compile import build_ubt_compile_argv
+    except ImportError:
+        from hephaestus_forge.ubt_compile import build_ubt_compile_argv  # type: ignore
+
+    cmd = build_ubt_compile_argv(
+        ubt_path,
+        project_name=project_name,
+        uproject=uproject,
+        clean=clean,
+    )
     
     console.print(f"[dim]Running: {' '.join(cmd)}[/dim]")
     
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        task = progress.add_task("Compiling with UnrealBuildTool...", total=None)
-        
-        start_time = time.time()
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            cwd=str(ue_path),
-        )
-        elapsed = time.time() - start_time
+    start_time = time.time()
+    console.print("[dim]Compiling with UnrealBuildTool...[/dim]")
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        cwd=str(ue_path),
+    )
+    elapsed = time.time() - start_time
     
     if result.returncode == 0:
         console.print(f"[green]✓ Compilation successful ({elapsed:.1f}s)[/green]")
