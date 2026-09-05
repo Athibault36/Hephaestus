@@ -63,6 +63,7 @@ public class HephaestusBridge : ModuleRules
 			PrivateDependencyModuleNames.AddRange(new string[]
 			{
 				"UnrealEd",
+				"EditorSubsystem",
 				"AssetTools",
 				"BlueprintGraph",
 				"PropertyEditor",
