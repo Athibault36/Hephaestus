@@ -325,7 +325,8 @@ def _apply_morphs(avatar, appearance: dict) -> dict:
     applied: list[str] = []
     missed: list[str] = []
     morphs = (appearance or {}).get("morphs") or {}
-    if not morphs:
+    traits = {str(t).lower() for t in ((appearance or {}).get("traits") or [])}
+    if not morphs and not traits:
         return {"applied": [], "missed": [], "morph_count": 0}
 
     try:
@@ -336,6 +337,7 @@ def _apply_morphs(avatar, appearance: dict) -> dict:
         return {"applied": [], "missed": list(morphs.keys()), "error": "no shaping component", "morph_count": 0}
 
     catalog: dict[str, object] = {}
+    cat_summary: dict[str, int] = {}
     try:
         categories = shaping.GetShapingMorphCatergoryNames()
     except Exception:
@@ -344,7 +346,6 @@ def _apply_morphs(avatar, appearance: dict) -> dict:
         except Exception as exc:
             return {"applied": [], "missed": list(morphs.keys()), "error": f"categories: {exc}", "morph_count": 0}
 
-    cat_summary: dict[str, int] = {}
     for cat in categories or []:
         try:
             ids = list(shaping.GetShapingMorphIDs(cat) or [])
@@ -379,6 +380,8 @@ def _apply_morphs(avatar, appearance: dict) -> dict:
                 for t in (
                     "height",
                     "muscle",
+                    "muscular",
+                    "skinny",
                     "body",
                     "thin",
                     "heavy",
@@ -394,15 +397,13 @@ def _apply_morphs(avatar, appearance: dict) -> dict:
                     "face",
                     "character",
                     "head",
-                    "neck",
-                    "shoulder",
-                    "chest",
-                    "waist",
-                    "hip",
-                    "arm",
-                    "leg",
+                    "ratio",
+                    "shape",
                 )
             )
+            and "actor parts" not in k
+            and "eyeball" not in k
+            and "teeth" not in k
         ][:200]
         (home / "cc5_morphs_sample.json").write_text(
             json.dumps(
@@ -420,31 +421,60 @@ def _apply_morphs(avatar, appearance: dict) -> dict:
     except Exception:
         useful = []
 
+    def _set(label: str, mid, weight: float) -> bool:
+        try:
+            shaping.SetShapingMorphWeight(mid, float(weight))
+            applied.append(f"{label}={float(weight):.2f}")
+            return True
+        except Exception as exc:
+            missed.append(f"{label}({exc})")
+            return False
+
+    def _find_exact(*names: str):
+        for n in names:
+            key = n.strip().lower()
+            if key in catalog:
+                return catalog[key], n
+        return None, None
+
     def _find_id(needle: str):
         n = needle.strip().lower()
         aliases = {
             "muscle": ("male muscular body", "muscular body", "male muscular", "muscular"),
-            "bodybuilder": ("male muscular body", "male muscular chest", "muscular"),
+            "bodybuilder": ("male muscular body", "male muscular chest a", "male muscular chest"),
             "athletic": ("male muscular body", "body shape", "athletic"),
-            "thin": ("male skinny body", "skinny body", "male skinny", "skinny"),
+            "thin": ("male skinny body", "skinny body", "male skinny"),
             "slender": ("male skinny body", "skinny"),
             "heavy": ("heavy", "overweight", "body shape"),
-            "height": ("character height", "height", "body ratio"),
-            "face width": ("face width", "head shape", "head width"),
+            "height": ("character height", "height"),
+            "face width": ("face width", "head shape"),
+            "slacker": ("slacker",),
         }
+        mid, _label = _find_exact(n, *aliases.get(n, ()))
+        if mid is not None:
+            return mid
         candidates = (n,) + tuple(aliases.get(n, ()))
         words = [w for w in re.split(r"[^a-z0-9]+", n) if len(w) > 2]
         best = None
         best_score = 0
         for k, v in catalog.items():
-            if any(x in k for x in ("eyeocclusion", "eo ", "/eo ", "tearline", "tl ", "eyeball", "teeth")):
+            if any(
+                x in k
+                for x in (
+                    "eyeocclusion",
+                    "eo ",
+                    "/eo ",
+                    "tearline",
+                    "tl ",
+                    "eyeball",
+                    "teeth",
+                    "actor parts",
+                )
+            ):
                 continue
             score = 0
             for cand in candidates:
-                if cand == k:
-                    return v
                 if cand and cand in k:
-                    # Prefer shorter/leaf keys and HD body muscular paths
                     score = max(score, 600 - min(len(k), 500))
             if score == 0 and words:
                 hits = sum(1 for w in words if w in k)
@@ -453,49 +483,74 @@ def _apply_morphs(avatar, appearance: dict) -> dict:
                 score = hits * 40
             if score == 0:
                 continue
-            if "male muscular" in k or "male skinny" in k:
-                score += 120
-            if any(t in k for t in ("full body", "character height", "hd body", "body shape", "body ratio", "head/", "face")):
+            if "male muscular" in k or "male skinny" in k or "character height" in k:
+                score += 150
+            if any(t in k for t in ("full body", "hd body", "body shape", "body ratio", "head shape")):
                 score += 80
-            # Penalize Actor Parts facial clutter
-            if "actor parts" in k or "parts/" in k:
-                score -= 200
             if score > best_score:
                 best_score = score
                 best = v
         return best if best_score >= 40 else None
 
-    # Trait-driven bulk apply when Free Resource embed morphs are present
-    traits = {str(t).lower() for t in ((appearance or {}).get("traits") or [])}
+    h = float(morphs.get("height") or 0.0)
+    if "tall" in traits and h >= -0.2:
+        h = -0.75
+    if "short" in traits and h <= 0.2:
+        h = 0.55
+    mid, label = _find_exact("Character Height", "character height", "Height")
+    if mid is not None and abs(h) > 0.05:
+        _set(label or "Character Height", mid, h)
+    elif abs(h) > 0.05:
+        mid = _find_id("height")
+        if mid is not None:
+            _set("height", mid, h)
+        else:
+            missed.append("height")
+
+    def _apply_category_substr(substr: str, weight: float, limit: int = 20) -> int:
+        n_set = 0
+        seen: set = set()
+        for cat, _count in cat_summary.items():
+            if substr not in str(cat).lower():
+                continue
+            try:
+                ids = list(shaping.GetShapingMorphIDs(cat) or [])
+                names = list(shaping.GetShapingMorphDisplayNames(cat) or [])
+            except Exception:
+                continue
+            for i, mid in enumerate(ids):
+                if n_set >= limit:
+                    break
+                key = (str(cat), i)
+                if key in seen:
+                    continue
+                seen.add(key)
+                lab = names[i] if i < len(names) else str(cat)
+                if _set(str(lab), mid, weight):
+                    n_set += 1
+        return n_set
+
     if "muscular" in traits:
-        mw = float(morphs.get("muscle") or 0.75)
-        for k, mid in catalog.items():
-            if "male muscular" in k and "actor parts" not in k:
-                try:
-                    shaping.SetShapingMorphWeight(mid, mw)
-                    applied.append(f"{k.split('/')[-1]}={mw:.2f}")
-                except Exception as exc:
-                    missed.append(f"{k}({exc})")
+        mw = float(morphs.get("muscle") or 0.85)
+        if _apply_category_substr("male muscular", mw) == 0:
+            for k, mid in list(catalog.items()):
+                if "male muscular" in k:
+                    _set(k.split("/")[-1], mid, mw)
     if "thin" in traits:
-        tw = float(morphs.get("thin") or 0.65)
-        for k, mid in catalog.items():
-            if "male skinny" in k and "actor parts" not in k:
-                try:
-                    shaping.SetShapingMorphWeight(mid, tw)
-                    applied.append(f"{k.split('/')[-1]}={tw:.2f}")
-                except Exception as exc:
-                    missed.append(f"{k}({exc})")
+        tw = float(morphs.get("thin") or 0.7)
+        if _apply_category_substr("male skinny", tw) == 0:
+            for k, mid in list(catalog.items()):
+                if "male skinny" in k:
+                    _set(k.split("/")[-1], mid, tw)
 
     for name, weight in morphs.items():
+        if str(name).lower() == "height":
+            continue
         mid = _find_id(str(name))
         if mid is None:
             missed.append(str(name))
             continue
-        try:
-            shaping.SetShapingMorphWeight(mid, float(weight))
-            applied.append(f"{name}={float(weight):.2f}")
-        except Exception as exc:
-            missed.append(f"{name}({exc})")
+        _set(str(name), mid, float(weight))
 
     try:
         flags = RLPy.EObjectModifiedType_Attribute
@@ -512,7 +567,7 @@ def _apply_morphs(avatar, appearance: dict) -> dict:
         "categories": cat_summary,
         "sample_useful": useful[:40],
         "body_morph_pack": any(
-            "body" in str(c).lower() or "character" in str(c).lower() or "actor/" in str(c).lower()
+            "body" in str(c).lower() or "character" in str(c).lower() or "muscular" in str(c).lower()
             for c in cat_summary
             if "parts" not in str(c).lower()
         ),
@@ -520,13 +575,12 @@ def _apply_morphs(avatar, appearance: dict) -> dict:
 
 
 def _apply_appearance(avatar, appearance: dict) -> dict:
-    """Create a distinct character: content packs + scale + morphs + outfit."""
+    """Create a distinct character: content packs + morphs + scale + outfit."""
     if not appearance:
         return {"skipped": True}
-    # Free Resource presets/sliders/skins first (when installed), then fine morphs/scale
     content = _load_content_assets(avatar, appearance)
-    scale = _apply_scale_shape(avatar, appearance)
     morphs = _apply_morphs(avatar, appearance)
+    scale = _apply_scale_shape(avatar, appearance)
     outfit = _load_outfit(avatar, appearance)
     return {
         "traits": list(appearance.get("traits") or []),
