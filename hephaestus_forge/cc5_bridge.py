@@ -7,10 +7,12 @@ Uses rlpython when available. Surfaces cc5_unavailable clearly when not installe
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
@@ -185,6 +187,168 @@ print("HEPHAESTUS_CC5_MORPHS={morph}")
 """
 
 
+def cc5_jobs_dir() -> Path:
+    home = Path(os.environ.get("HEPHAESTUS_HOME") or (Path.home() / ".hephaestus"))
+    d = home / "cc5_jobs"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def openplugin_template_dir() -> Path:
+    return Path(__file__).resolve().parent / "templates" / "cc5_openplugin" / "HephaestusExport"
+
+
+def install_cc5_openplugin(*, force: bool = False) -> dict:
+    """
+    Copy HephaestusExport OpenPlugin into CC5 Bin64/OpenPlugin.
+    May require admin if Program Files is locked.
+    Always stages a copy under ~/.hephaestus/cc5_openplugin_staging for manual install.
+    """
+    src = openplugin_template_dir()
+    if not (src / "main.py").is_file():
+        return {"ok": False, "error": f"Template missing: {src}"}
+
+    home = Path(os.environ.get("HEPHAESTUS_HOME") or (Path.home() / ".hephaestus"))
+    staging = home / "cc5_openplugin_staging" / "HephaestusExport"
+    try:
+        staging.mkdir(parents=True, exist_ok=True)
+        (staging / "main.py").write_text((src / "main.py").read_text(encoding="utf-8"), encoding="utf-8")
+    except OSError:
+        staging = src
+
+    cc5 = find_cc5()
+    if not cc5:
+        return {
+            "ok": False,
+            "error": "CC5 not found",
+            "staged_path": str(staging),
+            "next_steps": [
+                "Install Character Creator 5 or set CC5_EXECUTABLE",
+                f"Then copy {staging} → {{CC5}}/Bin64/OpenPlugin/HephaestusExport",
+            ],
+        }
+    dest = Path(cc5).parent / "OpenPlugin" / "HephaestusExport"
+    try:
+        dest.mkdir(parents=True, exist_ok=True)
+        target = dest / "main.py"
+        if target.is_file() and not force:
+            return {
+                "ok": True,
+                "path": str(dest),
+                "skipped": True,
+                "detail": "already installed",
+                "staged_path": str(staging),
+            }
+        target.write_text((src / "main.py").read_text(encoding="utf-8"), encoding="utf-8")
+        return {"ok": True, "path": str(dest), "skipped": False, "staged_path": str(staging)}
+    except PermissionError as exc:
+        return {
+            "ok": False,
+            "error": f"Permission denied writing {dest}: {exc}",
+            "staged_path": str(staging),
+            "next_steps": [
+                f"As Admin, copy {staging} → {dest}",
+                "Restart Character Creator after install",
+            ],
+        }
+    except OSError as exc:
+        return {"ok": False, "error": str(exc), "staged_path": str(staging)}
+
+
+def ensure_cc5_running(*, wait_s: float = 8.0) -> dict:
+    """Launch CharacterCreator.exe if no process is running (best-effort)."""
+    cc5 = find_cc5()
+    if not cc5:
+        return {"ok": False, "error": "CC5 not found", "launched": False}
+    try:
+        import psutil  # type: ignore
+
+        for proc in psutil.process_iter(["name"]):
+            name = (proc.info.get("name") or "").lower()
+            if "charactercreator" in name and "py" not in name:
+                return {"ok": True, "launched": False, "detail": "already running"}
+    except Exception:
+        # Fallback: tasklist
+        try:
+            out = subprocess.check_output(
+                ["tasklist", "/FI", "IMAGENAME eq CharacterCreator.exe"],
+                text=True,
+                timeout=10,
+            )
+            if "CharacterCreator.exe" in out:
+                return {"ok": True, "launched": False, "detail": "already running"}
+        except Exception:
+            pass
+
+    try:
+        subprocess.Popen(
+            [cc5],
+            cwd=str(Path(cc5).parent),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        time.sleep(max(2.0, wait_s))
+        return {"ok": True, "launched": True, "path": cc5}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "launched": False}
+
+
+def _export_via_job_queue(
+    *,
+    character_name: str,
+    fbx_path: Path,
+    timeout_seconds: float,
+) -> dict:
+    """Write a job for the CC5 OpenPlugin and poll for .result.json."""
+    jobs = cc5_jobs_dir()
+    job_id = f"export_{int(time.time() * 1000)}"
+    job_path = jobs / f"{job_id}.job.json"
+    result_path = jobs / f"{job_id}.result.json"
+    payload = {
+        "character_name": character_name,
+        "output_path": str(fbx_path.resolve()),
+        "created_at": time.time(),
+    }
+    job_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    ensure_cc5_running()
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        if result_path.is_file():
+            try:
+                result = json.loads(result_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                result = {"success": False, "error": "corrupt result json"}
+            try:
+                result_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            ok = bool(result.get("success")) and fbx_path.is_file()
+            return {
+                "success": ok,
+                "output_path": str(fbx_path) if ok else None,
+                "error": "" if ok else (result.get("error") or "CC5 job failed"),
+                "method": "openplugin_job",
+                "result": result,
+            }
+        time.sleep(1.0)
+    # cleanup stale job
+    try:
+        job_path.unlink(missing_ok=True)
+    except OSError:
+        pass
+    return {
+        "success": False,
+        "output_path": None,
+        "error": (
+            "cc5_job_timeout — Open Character Creator with a character loaded, "
+            "ensure HephaestusExport OpenPlugin is installed (forge cc5 install-plugin), "
+            "then retry"
+        ),
+        "method": "openplugin_job",
+        "job_path": str(job_path),
+    }
+
+
 def export_character_fbx(
     *,
     character_name: str = "Character",
@@ -199,7 +363,7 @@ def export_character_fbx(
         return {
             "success": False,
             "error": (
-                "cc5_unavailable - install Character Creator 5 / rlpython, "
+                "cc5_unavailable - install Character Creator 5 / CharacterCreatorpy, "
                 "or set CC5_EXECUTABLE / RLPYTHON"
             ),
             "cc5_path": None,
@@ -209,7 +373,7 @@ def export_character_fbx(
             "next_steps": [
                 "Install Character Creator 5 from Reallusion",
                 "Open a character in CC5",
-                "Set RLPYTHON to rlpython.exe if not on PATH",
+                "forge cc5 install-plugin",
                 "Re-run: forge cc5 export",
             ],
         }
@@ -223,76 +387,79 @@ def export_character_fbx(
         safe = re.sub(r"[^\w\-]+", "_", character_name) or "Character"
         fbx_path = out_dir / f"{safe}.fbx"
 
-    if not rlpy:
+    # Preferred: GUI OpenPlugin job queue (CharacterCreatorpy cannot host RLPy headless)
+    install_cc5_openplugin(force=False)
+    job = _export_via_job_queue(
+        character_name=character_name,
+        fbx_path=fbx_path,
+        timeout_seconds=float(timeout_seconds),
+    )
+    if job.get("success"):
+        next_steps = ue_import_next_steps(fbx_path)
         return {
-            "success": False,
-            "error": (
-                "cc5_unavailable - Character Creator found but Python host missing "
-                "(CharacterCreatorpy.exe / rlpython); cannot automate export"
-            ),
-            "cc5_path": cc5,
-            "rlpython_path": None,
-            "result_json": "{}",
-            "asset_paths": [],
-            "next_steps": [
-                f"CC5 at {cc5}",
-                "Set RLPYTHON to CharacterCreatorpy.exe beside CharacterCreator.exe",
-                "Or export FBX manually to .hephaestus_forge/dcc_exports then forge dcc-import",
-            ],
-        }
-
-    script = _rlpy_export_script(character_name, str(fbx_path), include_morphs)
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as fh:
-        fh.write(script)
-        script_path = fh.name
-
-    try:
-        proc = subprocess.run(
-            [rlpy, script_path],
-            capture_output=True,
-            text=True,
-            timeout=timeout_seconds,
-        )
-        ok = proc.returncode == 0 and fbx_path.is_file()
-        err = ""
-        for line in (proc.stdout or "").splitlines():
-            if line.startswith("HEPHAESTUS_CC5_ERROR="):
-                err = line.split("=", 1)[1]
-        if not ok and not err:
-            err = (proc.stderr or proc.stdout or f"rlpython exit {proc.returncode}")[:2000]
-        next_steps = ue_import_next_steps(fbx_path) if ok else []
-        return {
-            "success": ok,
-            "output_path": str(fbx_path) if ok else None,
+            "success": True,
+            "output_path": str(fbx_path),
             "cc5_path": cc5,
             "rlpython_path": rlpy,
-            "error": err if not ok else "",
-            "result_json": f'{{"output_path":"{str(fbx_path).replace(chr(92), "/")}"}}' if ok else "{}",
-            "asset_paths": [str(fbx_path)] if ok else [],
+            "error": "",
+            "result_json": f'{{"output_path":"{str(fbx_path).replace(chr(92), "/")}"}}',
+            "asset_paths": [str(fbx_path)],
             "next_steps": next_steps,
-            "stdout_tail": (proc.stdout or "")[-1500:],
-            "stderr_tail": (proc.stderr or "")[-1500:],
+            "method": "openplugin_job",
         }
-    except subprocess.TimeoutExpired:
-        return {
-            "success": False,
-            "error": f"rlpython timed out after {timeout_seconds}s",
-            "cc5_path": cc5,
-            "rlpython_path": rlpy,
-            "result_json": "{}",
-            "asset_paths": [],
-        }
-    except Exception as exc:
-        return {
-            "success": False,
-            "error": str(exc),
-            "cc5_path": cc5,
-            "rlpython_path": rlpy,
-            "result_json": "{}",
-            "asset_paths": [],
-        }
-    finally:
+
+    # CharacterCreatorpy crashes headless (access violation). Opt-in only for diagnostics.
+    if rlpy and (os.environ.get("HEPHAESTUS_CC5_HEADLESS") or "").strip() in ("1", "true", "yes"):
+        script = _rlpy_export_script(character_name, str(fbx_path), include_morphs)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as fh:
+            fh.write(script)
+            script_path = fh.name
         try:
-            Path(script_path).unlink(missing_ok=True)
-        except OSError:
+            proc = subprocess.run(
+                [rlpy, script_path],
+                capture_output=True,
+                text=True,
+                timeout=min(30, timeout_seconds),
+                cwd=str(Path(rlpy).parent),
+            )
+            ok = proc.returncode == 0 and fbx_path.is_file()
+            if ok:
+                return {
+                    "success": True,
+                    "output_path": str(fbx_path),
+                    "cc5_path": cc5,
+                    "rlpython_path": rlpy,
+                    "error": "",
+                    "result_json": f'{{"output_path":"{str(fbx_path).replace(chr(92), "/")}"}}',
+                    "asset_paths": [str(fbx_path)],
+                    "next_steps": ue_import_next_steps(fbx_path),
+                    "method": "charactercreatorpy",
+                }
+        except Exception:
             pass
+        finally:
+            try:
+                Path(script_path).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    return {
+        "success": False,
+        "output_path": None,
+        "cc5_path": cc5,
+        "rlpython_path": rlpy,
+        "error": job.get("error")
+        or (
+            "cc5_gui_required — CharacterCreatorpy cannot export headless. "
+            "Install OpenPlugin (forge cc5 install-plugin), open a character in CC5, retry."
+        ),
+        "result_json": "{}",
+        "asset_paths": [],
+        "next_steps": [
+            "forge cc5 install-plugin  (may need Admin once)",
+            "Open Character Creator with a character in the scene",
+            "Retry make a person / forge cc5 export",
+            "Or fall through to NIM→Blender humanoid automatically",
+        ],
+        "method": job.get("method") or "failed",
+    }

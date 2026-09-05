@@ -118,6 +118,68 @@ def test_cc5_unavailable_clear_error(monkeypatch, tmp_path: Path):
     assert "cc5_unavailable" in (res.get("error") or "")
 
 
+def test_install_cc5_openplugin_copies_template(tmp_path: Path, monkeypatch):
+    from cc5_bridge import install_cc5_openplugin, openplugin_template_dir
+
+    bin64 = tmp_path / "Bin64"
+    bin64.mkdir()
+    exe = bin64 / "CharacterCreator.exe"
+    exe.write_bytes(b"x")
+    template = openplugin_template_dir()
+    assert (template / "main.py").is_file()
+
+    monkeypatch.setattr("cc5_bridge.find_cc5", lambda env=None: str(exe))
+    res = install_cc5_openplugin(force=True)
+    assert res["ok"] is True
+    dest = bin64 / "OpenPlugin" / "HephaestusExport" / "main.py"
+    assert dest.is_file()
+    assert "cc5_jobs" in dest.read_text(encoding="utf-8")
+
+    skip = install_cc5_openplugin(force=False)
+    assert skip["ok"] and skip.get("skipped")
+
+
+def test_cc5_job_queue_timeout(monkeypatch, tmp_path: Path):
+    from cc5_bridge import _export_via_job_queue
+
+    monkeypatch.setattr("cc5_bridge.cc5_jobs_dir", lambda: tmp_path)
+    monkeypatch.setattr("cc5_bridge.ensure_cc5_running", lambda **k: {"ok": True, "launched": False})
+    fbx = tmp_path / "Hero.fbx"
+    res = _export_via_job_queue(character_name="Hero", fbx_path=fbx, timeout_seconds=0.2)
+    assert res["success"] is False
+    assert "cc5_job_timeout" in (res.get("error") or "")
+
+
+def test_cc5_job_queue_success(monkeypatch, tmp_path: Path):
+    from cc5_bridge import _export_via_job_queue
+
+    monkeypatch.setattr("cc5_bridge.cc5_jobs_dir", lambda: tmp_path)
+    monkeypatch.setattr("cc5_bridge.ensure_cc5_running", lambda **k: {"ok": True})
+
+    fbx = tmp_path / "Hero.fbx"
+
+    def write_result_soon(*a, **k):
+        # Simulate OpenPlugin: after job file appears, write result + fbx
+        import time as _t
+
+        for _ in range(20):
+            jobs = list(tmp_path.glob("*.job.json"))
+            if jobs:
+                job = jobs[0]
+                fbx.write_bytes(b"fbx")
+                result = job.with_name(job.name.replace(".job.json", ".result.json"))
+                result.write_text('{"success": true}', encoding="utf-8")
+                job.unlink(missing_ok=True)
+                return
+            _t.sleep(0.05)
+
+    import threading
+
+    threading.Thread(target=write_result_soon, daemon=True).start()
+    res = _export_via_job_queue(character_name="Hero", fbx_path=fbx, timeout_seconds=3.0)
+    assert res["success"] is True
+    assert res["output_path"] == str(fbx)
+
 def test_resolve_fbx_path_latest(tmp_path: Path):
     export = tmp_path / ".hephaestus_forge" / "dcc_exports"
     export.mkdir(parents=True)

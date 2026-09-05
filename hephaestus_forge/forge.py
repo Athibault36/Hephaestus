@@ -1203,7 +1203,7 @@ app.add_typer(blender_app, name="blender")
 
 cc5_app = typer.Typer(
     name="cc5",
-    help="Character Creator 5 export via DCC / rlpython.",
+    help="Character Creator 5: OpenPlugin install + FBX export (GUI job queue).",
     no_args_is_help=True,
 )
 app.add_typer(cc5_app, name="cc5")
@@ -1453,6 +1453,34 @@ def blender_exec_cmd(
     raise typer.Exit(1)
 
 
+@cc5_app.command("install-plugin")
+def cc5_install_plugin_cmd(
+    force: Annotated[bool, typer.Option("--force", help="Overwrite existing OpenPlugin")] = False,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+):
+    """Install HephaestusExport OpenPlugin into CC5 Bin64/OpenPlugin (may need Admin)."""
+    try:
+        from cc5_bridge import install_cc5_openplugin
+    except ImportError:
+        from hephaestus_forge.cc5_bridge import install_cc5_openplugin  # type: ignore
+
+    res = install_cc5_openplugin(force=force)
+    if as_json:
+        import json as _json
+
+        typer.echo(_json.dumps(res, indent=2, ensure_ascii=True))
+        raise typer.Exit(0 if res.get("ok") else 1)
+    if res.get("ok"):
+        detail = "already present" if res.get("skipped") else "installed"
+        console.print(f"[green]✓ CC5 OpenPlugin {detail}[/green] → {res.get('path')}")
+        console.print("[dim]Restart Character Creator, open a character, then forge cc5 export[/dim]")
+        raise typer.Exit(0)
+    console.print(f"[red]✗ CC5 OpenPlugin install[/red]: {res.get('error')}")
+    for step in res.get("next_steps") or []:
+        console.print(f"  • {step}")
+    raise typer.Exit(1)
+
+
 @cc5_app.command("export")
 def cc5_export_cmd(
     project_path: Annotated[
@@ -1461,9 +1489,10 @@ def cc5_export_cmd(
     ] = None,
     name: Annotated[str, typer.Option("--name", "-n", help="Character / output name")] = "Character",
     output: Annotated[Optional[Path], typer.Option("--output", "-o")] = None,
+    timeout: Annotated[float, typer.Option("--timeout", help="Seconds to wait for OpenPlugin job")] = 180.0,
     as_json: Annotated[bool, typer.Option("--json")] = False,
 ):
-    """Export character FBX via CC5/rlpython into .hephaestus_forge/dcc_exports."""
+    """Export character FBX via CC5 OpenPlugin job queue into .hephaestus_forge/dcc_exports."""
     project_root = _resolve_active_project(project_path)
     try:
         from cc5_bridge import export_character_fbx
@@ -1474,6 +1503,7 @@ def cc5_export_cmd(
         character_name=name,
         project_root=project_root,
         output_path=output,
+        timeout_seconds=int(timeout),
     )
     if as_json:
         import json as _json

@@ -219,20 +219,45 @@ def test_creature_author_uses_blender_kit(tmp_path: Path):
     }
     with patch("agent_dcc.meshy_available", create=True, return_value=False):
         with patch("meshy_bridge.meshy_available", return_value=False):
-            with patch("blender_bridge.export_creature_fbx", return_value=FakeExport()):
-                with patch("agent_dcc.dcc_import_to_pie", create=True):
-                    with patch("dcc_import.dcc_import_to_pie", return_value=imported):
-                        with patch("agent_dcc.frame_actor", return_value={"success": True}):
-                            out = try_direct_dcc_author(
-                                "make a dog and put it in the scene",
-                                project_root=tmp_path,
-                            )
+            with patch("blender_nim_author.nim_available", return_value=False):
+                with patch("blender_bridge.export_creature_fbx", return_value=FakeExport()):
+                    with patch("agent_dcc.dcc_import_to_pie", create=True):
+                        with patch("dcc_import.dcc_import_to_pie", return_value=imported):
+                            with patch("agent_dcc.frame_actor", return_value={"success": True}):
+                                with patch(
+                                    "agent_dcc.animate_authored_actor",
+                                    return_value={
+                                        "success": True,
+                                        "method": "play_locomotion",
+                                        "mode": "idle",
+                                    },
+                                ):
+                                    out = try_direct_dcc_author(
+                                        "make a dog and put it in the scene",
+                                        project_root=tmp_path,
+                                    )
     assert out and out["ok"]
     assert out["planner"] == "direct_creature_author"
     assert "Authored quadruped" in out["reply"] or "quadruped" in out["reply"].lower()
+    assert "animated" in out["reply"].lower()
 
 
-def test_meshy_opt_in_only(monkeypatch):
+def test_animate_authored_actor_locomotion(monkeypatch):
+    from agent_dcc import animate_authored_actor
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        def command(self, body):
+            if body.get("command") == "animation.play_locomotion":
+                return {"success": True, "result_json": "{}"}
+            return {"success": False, "error": "unexpected"}
+
+    monkeypatch.setattr("ue_agent_loop.RemoteUeClient", FakeClient)
+    out = animate_authored_actor("/Temp/Actor_0", mode="idle")
+    assert out["success"] is True
+    assert out["method"] == "play_locomotion"
     from meshy_bridge import meshy_available
 
     monkeypatch.setenv("MESHY_API_KEY", "msy_test")
