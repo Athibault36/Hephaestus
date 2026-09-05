@@ -61,9 +61,10 @@ _FOLLOWUP_ONLY = re.compile(
     r"spin(?:\s+it)?(?:\s+slowly)?|"
     r"orbit(?:\s+it)?|"
     r"frame(?:\s+it)?(?:\s+a\s+shot)?|"
-    r"make\s+it\s+(\w+)|"
+    r"make\s+it\s+(\w+)(?:\s+and\s+spin(?:\s+it)?(?:\s+slowly)?)?|"
     r"tint(?:\s+it)?(?:\s+(\w+))?|"
-    r"look\s+at\s+it"
+    r"look\s+at\s+it|"
+    r"make\s+it\s+(\w+)\s+and\s+(?:spin|orbit|frame)(?:\s+it)?"
     r")\s*[.!?]?\s*$",
     re.IGNORECASE,
 )
@@ -605,32 +606,59 @@ def try_direct_dcc_followup(
         return None
 
     color = infer_mesh_color(message)
-    # "make it blue" → color only
+    bits: list[str] = []
+    meta: dict[str, Any] = {"actor_path": actor}
+    ok = True
+
+    # Tint when asked (make it blue / tint red) — may combine with spin/orbit/frame
     if color and re.search(r"\bmake\s+it\b|\btint\b", message or "", re.I):
         tint = tint_actor(actor, color, remote_api=remote_api)
-        ok = bool(tint.get("success"))
-        reply = f"Tinted {actor}." if ok else f"Tint failed: {tint.get('error')}"
-        return _chat_result(ok, reply, str((remembered or {}).get("shape") or ""), planner="direct_dcc_followup", asset_path=str((remembered or {}).get("asset_path") or ""), meta={"tint": tint, "actor_path": actor})
+        meta["tint"] = tint
+        if tint.get("success"):
+            bits.append(f"Tinted {actor}")
+        else:
+            ok = False
+            bits.append(f"Tint failed: {tint.get('error')}")
 
     if wants_orbit(message):
         orb = orbit_camera(actor, remote_api=remote_api, duration=infer_spin_duration(message))
-        ok = bool(orb.get("success"))
-        reply = f"Orbited camera around {actor}." if ok else f"Orbit failed: {orb.get('error')}"
-        return _chat_result(ok, reply, str((remembered or {}).get("shape") or ""), planner="direct_dcc_followup", asset_path=str((remembered or {}).get("asset_path") or ""), meta={"orbit": orb, "actor_path": actor})
-
-    if wants_spin(message):
+        meta["orbit"] = orb
+        if orb.get("success"):
+            bits.append(f"Orbited camera around {actor}")
+        else:
+            ok = False
+            bits.append(f"Orbit failed: {orb.get('error')}")
+    elif wants_spin(message):
         sp = spin_actor(actor, remote_api=remote_api, duration=infer_spin_duration(message))
-        ok = bool(sp.get("success"))
-        reply = f"Spun {actor}." if ok else f"Spin failed: {sp.get('error')}"
-        return _chat_result(ok, reply, str((remembered or {}).get("shape") or ""), planner="direct_dcc_followup", asset_path=str((remembered or {}).get("asset_path") or ""), meta={"spin": sp, "actor_path": actor})
+        meta["spin"] = sp
+        if sp.get("success"):
+            bits.append(f"Spun {actor}")
+        else:
+            ok = False
+            bits.append(f"Spin failed: {sp.get('error')}")
 
-    if wants_frame_shot(message) or re.search(r"\bframe\b", message or "", re.I):
+    if wants_frame_shot(message) or re.search(r"\bframe(?:\s+it)?\b", message or "", re.I):
+        # Skip if the only match was "frame" inside a longer author phrase that we shouldn't hit here
         fr = frame_actor(actor, remote_api=remote_api, create_shot="shot" in (message or "").lower())
-        ok = bool(fr.get("success"))
-        reply = f"Framed {actor}." if ok else f"Frame failed: {fr.get('error')}"
-        return _chat_result(ok, reply, str((remembered or {}).get("shape") or ""), planner="direct_dcc_followup", asset_path=str((remembered or {}).get("asset_path") or ""), meta={"frame": fr, "actor_path": actor})
+        meta["frame"] = fr
+        if fr.get("success"):
+            bits.append(f"Framed {actor}")
+        else:
+            ok = False
+            bits.append(f"Frame failed: {fr.get('error')}")
 
-    return None
+    if not bits:
+        return None
+
+    reply = ". ".join(bits) + "."
+    return _chat_result(
+        ok,
+        reply,
+        str((remembered or {}).get("shape") or ""),
+        planner="direct_dcc_followup",
+        asset_path=str((remembered or {}).get("asset_path") or ""),
+        meta=meta,
+    )
 
 
 def try_direct_cc5_author(

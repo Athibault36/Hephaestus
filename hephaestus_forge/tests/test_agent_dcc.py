@@ -173,6 +173,19 @@ def test_last_dcc_persists_to_disk(tmp_path: Path):
     assert mem["shape"] == "cone"
 
 
+def test_followup_tint_and_spin(tmp_path: Path):
+    remember_dcc(
+        tmp_path,
+        {"actor_path": "/Temp/Combo.StaticMeshActor_0", "asset_path": "/Game/Z", "shape": "cube"},
+    )
+    with patch("agent_dcc.tint_actor", return_value={"success": True}) as tint:
+        with patch("agent_dcc.spin_actor", return_value={"success": True}) as sp:
+            out = try_direct_dcc_author("make it blue and spin it", project_root=tmp_path)
+    assert out and out["ok"]
+    assert tint.called and sp.called
+    assert "Tinted" in out["reply"] and "Spun" in out["reply"]
+
+
 def test_cc5_unavailable(tmp_path: Path):
     with patch("cc5_bridge.cc5_available", return_value=False):
         out = try_direct_dcc_author(
