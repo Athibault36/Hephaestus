@@ -19,8 +19,9 @@
 Editor must have HephaestusBridge rebuilt. Preferred hands-off flow:
 
 ```powershell
-# One shot: launch editor (if needed) → wait :8766 → start PIE
+# One shot: launch editor (if needed) → wait :8766 → start PIE → start DCC :8084
 forge up <PATH-TO-UE-PROJECT>
+forge up <PATH-TO-UE-PROJECT> --no-dcc   # skip Blender/CC5 plane
 
 forge autonomous-suite <PATH-TO-UE-PROJECT> --json
 
@@ -50,13 +51,37 @@ forge pie stop
 |------|----------|------|
 | **8766** | Editor open (`-HephaestusEditorPort=` override) | `editor.play` / `editor.stop` / `editor.import_fbx` |
 | **8765** | Only while PIE (`-HephaestusRemotePort=`) | World / animation / vision commands |
-| **8084** | `forge dcc start` | `blender.export_fbx` / `blender.exec` / `cc5.export` |
+| **8084** | `forge dcc start` or `forge up` | `blender.export_fbx` / `blender.exec` / `cc5.export` |
 
 ```powershell
 forge dcc start
 forge blender export <PATH-TO-UE-PROJECT> --shape cube
 forge dcc-import <PATH-TO-UE-PROJECT> --name HephaestusPrimitive
 forge cc5 export <PATH-TO-UE-PROJECT> --name Character
+```
+
+### Studio utterances (chat / Mission Control / `forge run`)
+
+These go through the agent DCC path (no NIM required for primitives):
+
+| Utterance | Result |
+|-----------|--------|
+| `make a cube` | Blender export → import → spawn in frustum → frame |
+| `make a red cube, frame it, and spin it slowly` | tint + frame + in-place spin |
+| `make a blue sphere` | colored UV sphere in PIE |
+| `spin it` / `make it blue` | follow-up on last DCC actor (session memory) |
+| `orbit it` | camera orbit around last DCC actor |
+| `make a character` | CC5 export when available; else `cc5_unavailable` |
+| `export a cube fbx with blender` | export only (no import) |
+
+Mission Control: **Author into PIE** builds the same style of goal from shape/color/spin controls.
+
+Dual-target smoke (any two adopted UE 5.8 projects with PIE live):
+
+```powershell
+forge health <PATH-A>
+forge run <PATH-A> "make a red cube, frame it, and spin it slowly"
+forge run <PATH-B> "make a cube"
 ```
 
 `editor.stop` / `pie.stop` also work on `:8765` while PIE is live.

@@ -248,11 +248,31 @@ def bring_up(
     pie_timeout_s: float = 60.0,
     editor_timeout_s: float = 180.0,
     open_if_needed: bool = True,
+    start_dcc: bool = True,
 ) -> dict[str, Any]:
-    """Open editor if needed, wait :8766, then forge pie start equivalent."""
+    """Open editor if needed, wait :8766, start PIE, optionally start DCC :8084."""
     root = Path(project_root).expanduser().resolve()
     uproject = resolve_uproject(root)
     project_dir = uproject.parent
+
+    dcc_info: dict[str, Any] = {"ok": False, "skipped": not start_dcc}
+    if start_dcc:
+        try:
+            from dcc_client import start_dcc_server, dcc_online
+        except ImportError:
+            try:
+                from hephaestus_forge.dcc_client import start_dcc_server, dcc_online  # type: ignore
+            except ImportError:
+                start_dcc_server = None  # type: ignore
+                dcc_online = None  # type: ignore
+        if start_dcc_server:
+            try:
+                dcc_info = start_dcc_server()
+            except Exception as exc:
+                dcc_info = {"ok": False, "error": str(exc), "detail": "DCC start failed (non-blocking)"}
+        elif dcc_online:
+            ok, _, detail = dcc_online()
+            dcc_info = {"ok": ok, "detail": detail}
 
     launch: dict[str, Any] = {"ok": True, "launched": False, "detail": "editor already ready"}
     ed_ok, ed_health, ed_detail = editor_online()
@@ -266,21 +286,23 @@ def bring_up(
                     f"forge down --quit-editor then forge up again."
                 ),
                 "editor": ed_health,
+                "dcc": dcc_info,
             }
     elif open_if_needed:
         launch = open_editor(project_dir, wait_timeout_s=editor_timeout_s)
         if not launch.get("ok"):
-            return {"ok": False, "phase": "editor_open", **launch}
+            return {"ok": False, "phase": "editor_open", "dcc": dcc_info, **launch}
     else:
         return {
             "ok": False,
             "error": f"Editor offline ({ed_detail}). Pass open_if_needed or run forge editor open.",
+            "dcc": dcc_info,
         }
 
     # Ensure editor still matches after launch wait
     ed_ok, ed_health, ed_detail = editor_online()
     if not ed_ok:
-        return {"ok": False, "phase": "editor_wait", "error": ed_detail, "launch": launch}
+        return {"ok": False, "phase": "editor_wait", "error": ed_detail, "launch": launch, "dcc": dcc_info}
 
     pie_ok, _, _ = pie_online()
     if pie_ok:
@@ -292,6 +314,7 @@ def bring_up(
                 "detail": snap.get("pie_detail") or snap.get("identity") or "PIE already online",
                 "launch": launch,
                 "status": snap,
+                "dcc": dcc_info,
             }
 
     play_result = play()
@@ -302,6 +325,7 @@ def bring_up(
             "error": play_result.get("error") or "editor.play failed",
             "play": play_result,
             "launch": launch,
+            "dcc": dcc_info,
         }
 
     ok, health, detail = wait_for_pie(project_dir, timeout_s=pie_timeout_s)
@@ -312,6 +336,7 @@ def bring_up(
         "play": play_result,
         "health": health,
         "launch": launch,
+        "dcc": dcc_info,
         "error": None if ok else detail,
     }
 

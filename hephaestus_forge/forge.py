@@ -1246,9 +1246,10 @@ def forge_up(
     editor_timeout: Annotated[float, typer.Option("--editor-timeout", help="Wait for :8766")] = 180.0,
     pie_timeout: Annotated[float, typer.Option("--pie-timeout", help="Wait for :8765 after play")] = 60.0,
     no_open: Annotated[bool, typer.Option("--no-open", help="Do not launch editor; require :8766 already up")] = False,
+    no_dcc: Annotated[bool, typer.Option("--no-dcc", help="Do not start DCC :8084")] = False,
     as_json: Annotated[bool, typer.Option("--json", help="Print JSON")] = False,
 ):
-    """Hands-off: open editor if needed, wait :8766, then start PIE (:8765)."""
+    """Hands-off: open editor if needed, wait :8766, start PIE (:8765), optionally DCC :8084."""
     try:
         from editor_control import bring_up
     except ImportError:
@@ -1259,11 +1260,15 @@ def forge_up(
         pie_timeout_s=pie_timeout,
         editor_timeout_s=editor_timeout,
         open_if_needed=not no_open,
+        start_dcc=not no_dcc,
     )
     if as_json:
         console.print_json(data=result)
     elif result.get("ok"):
         console.print(f"[green]Ready[/green]: {result.get('detail')}")
+        dcc = result.get("dcc") or {}
+        if dcc:
+            console.print(f"[dim]DCC: {dcc.get('detail') or dcc}[/dim]")
     else:
         console.print(f"[red]up failed[/red]: {result.get('error') or result}")
     raise typer.Exit(0 if result.get("ok") else 2)
@@ -2411,6 +2416,26 @@ _MISSION_CONTROL_HTML = r"""<!DOCTYPE html>
       <button id="btnSpawnCube">Spawn Cube</button>
       <button id="btnList">List actors</button>
     </div>
+    <h2 style="margin-top:1rem">DCC author</h2>
+    <div class="row" style="flex-wrap:wrap;align-items:center">
+      <select id="dccShape">
+        <option value="cube">cube</option>
+        <option value="uv_sphere">sphere</option>
+        <option value="cylinder">cylinder</option>
+        <option value="cone">cone</option>
+        <option value="plane">plane</option>
+      </select>
+      <select id="dccColor">
+        <option value="">default</option>
+        <option value="red">red</option>
+        <option value="blue">blue</option>
+        <option value="green">green</option>
+        <option value="gold">gold</option>
+      </select>
+      <label class="hint"><input type="checkbox" id="dccSpin"/> spin</label>
+      <button class="primary" id="btnDccAuthor">Author into PIE</button>
+    </div>
+    <p class="hint" id="dccAuthorHint">Blender → import → spawn → frame (same path as chat; no NIM).</p>
     <div class="row">
       <input id="actorPath" placeholder="selected actor path" style="flex:1;min-width:180px"/>
       <button id="btnDestroy">Destroy</button>
@@ -3264,6 +3289,22 @@ async function sendChat(reset) {
 
 document.getElementById("btnChatSend").onclick = () => sendChat(false);
 document.getElementById("btnChatReset").onclick = () => sendChat(true);
+
+const btnDccAuthor = document.getElementById("btnDccAuthor");
+if (btnDccAuthor) {
+  btnDccAuthor.onclick = async () => {
+    const shape = (document.getElementById("dccShape") || {}).value || "cube";
+    const color = (document.getElementById("dccColor") || {}).value || "";
+    const spin = !!(document.getElementById("dccSpin") || {}).checked;
+    let msg = "make a " + (color ? color + " " : "") + shape + " and put it in the scene and frame it";
+    if (spin) msg += " and spin it slowly";
+    const input = document.getElementById("chatInput");
+    if (input) input.value = msg;
+    const hint = document.getElementById("dccAuthorHint");
+    if (hint) hint.textContent = "Running: " + msg;
+    await sendChat(false);
+  };
+}
 document.getElementById("btnExportSession").onclick = async () => {
   try {
     const res = await fetch("/agent/export");
