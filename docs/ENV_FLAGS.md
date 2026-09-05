@@ -46,7 +46,8 @@ forge pie stop
 | `HEPHAESTUS_DCC_API` | `http://127.0.0.1:8084` | DCC Blender/CC5 plane |
 | `BLENDER_EXECUTABLE` | auto-detect | Override Blender path |
 | `CC5_EXECUTABLE` / `RLPYTHON` | auto-detect | Character Creator / rlpython |
-| `MESHY_API_KEY` | — | Generative people/creatures via Meshy (preferred when set) |
+| `MESHY_API_KEY` | — | Only used when `HEPHAESTUS_USE_MESHY=1` (optional paid path) |
+| `HEPHAESTUS_USE_MESHY` | off | Set `1` to enable Meshy; default is NIM→Blender + CC5 |
 
 | Port | Lifetime | Role |
 |------|----------|------|
@@ -72,7 +73,8 @@ These go through the agent DCC path (no NIM required for primitives):
 | `make a blue sphere` | colored UV sphere in PIE |
 | `spin it` / `make it blue` / `make it blue and spin it` | follow-up on last DCC actor (session + `.hephaestus_forge/last_dcc.json`) |
 | `orbit it` | camera orbit around last DCC actor |
-| `make a dog` / `make a person` / `make a creature` | Author mesh+armature (Meshy if keyed → CC5 humanoid → Blender kit) → import → spawn → frame |
+| `make a dog` / `make a person` / `make a creature` | CC5 (people) → NIM→Blender → Blender kits; Meshy only if `HEPHAESTUS_USE_MESHY=1` |
+| `make a wooden chair` / other props | NIM→Blender bpy → import → spawn → frame |
 | `export a cube fbx with blender` | export only (no import) |
 
 Mission Control: **Author into PIE** builds the same style of goal from shape/color/spin controls.

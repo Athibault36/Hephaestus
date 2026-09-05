@@ -4,9 +4,10 @@
 
 ## Providers (priority)
 
-1. **Meshy** (when `MESHY_API_KEY`) — text → textured mesh → FBX/GLB in `dcc_exports`
-2. **CC5** (when installed) — character export (existing)
-3. **Blender creature kits** (always if Blender present) — authored mesh + armature FBX (stylized stand-in until gen/CC5)
+1. **CC5** (people / humanoids when installed)
+2. **NIM → Blender bpy** (complex meshes / animals / props — uses `NVIDIA_API_KEY`)
+3. **Blender creature kits** (offline stylized fallback)
+4. **Meshy** — opt-in only (`HEPHAESTUS_USE_MESHY=1` + `MESHY_API_KEY`)
 
 ## First vertical (this build)
 
