@@ -15,15 +15,32 @@
 
 ## PIE engage / disengage (bridge ≥ 1.0.1)
 
-Editor must be open with HephaestusBridge rebuilt. Then:
+Editor must have HephaestusBridge rebuilt. Preferred hands-off flow:
 
 ```powershell
-forge sync-plugin <PATH-TO-UE-PROJECT>
-# Rebuild HephaestusBridge in UE (Live Coding off) → full editor restart
+# One shot: launch editor (if needed) → wait :8766 → start PIE
+forge up <PATH-TO-UE-PROJECT>
+
+forge autonomous-suite <PATH-TO-UE-PROJECT> --json
+
+forge down                 # stop PIE, keep editor
+forge down --quit-editor   # stop PIE and quit UnrealEditor
+```
+
+Lower-level commands:
+
+```powershell
+forge editor open <PATH-TO-UE-PROJECT>
 forge pie status
 forge pie start <PATH-TO-UE-PROJECT>
 forge pie stop
 ```
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `UE_PATH` | auto-detect | Engine root for `forge editor open` / `forge up` |
+| `HEPHAESTUS_EDITOR_API` | `http://127.0.0.1:8766` | Editor control plane |
+| `HEPHAESTUS_UE_API` | `http://127.0.0.1:8765` | PIE world API |
 
 | Port | Lifetime | Role |
 |------|----------|------|

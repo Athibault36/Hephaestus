@@ -1191,6 +1191,100 @@ pie_app = typer.Typer(
 )
 app.add_typer(pie_app, name="pie")
 
+editor_app = typer.Typer(
+    name="editor",
+    help="Launch / quit Unreal Editor for an adopted target.",
+    no_args_is_help=True,
+)
+app.add_typer(editor_app, name="editor")
+
+
+@editor_app.command("open")
+def editor_open_cmd(
+    project_path: Annotated[Path, typer.Argument(help="UE project root or .uproject")],
+    timeout: Annotated[float, typer.Option("--timeout", help="Seconds to wait for editor :8766")] = 180.0,
+    as_json: Annotated[bool, typer.Option("--json", help="Print JSON")] = False,
+):
+    """Launch UnrealEditor on the project and wait for Hephaestus editor API (:8766)."""
+    try:
+        from editor_control import open_editor
+    except ImportError:
+        from hephaestus_forge.editor_control import open_editor  # type: ignore
+
+    try:
+        result = open_editor(project_path, wait_timeout_s=timeout)
+    except Exception as exc:
+        if as_json:
+            console.print_json(data={"ok": False, "error": str(exc)})
+        else:
+            console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+    if as_json:
+        console.print_json(data=result)
+    elif result.get("ok"):
+        action = "already open" if not result.get("launched") else "launched"
+        console.print(f"[green]Editor {action}[/green]: {result.get('detail')}")
+    else:
+        console.print(f"[red]{result.get('error') or result.get('detail')}[/red]")
+    raise typer.Exit(0 if result.get("ok") else 2)
+
+
+@app.command("up")
+def forge_up(
+    project_path: Annotated[Path, typer.Argument(help="UE project root or .uproject")],
+    editor_timeout: Annotated[float, typer.Option("--editor-timeout", help="Wait for :8766")] = 180.0,
+    pie_timeout: Annotated[float, typer.Option("--pie-timeout", help="Wait for :8765 after play")] = 60.0,
+    no_open: Annotated[bool, typer.Option("--no-open", help="Do not launch editor; require :8766 already up")] = False,
+    as_json: Annotated[bool, typer.Option("--json", help="Print JSON")] = False,
+):
+    """Hands-off: open editor if needed, wait :8766, then start PIE (:8765)."""
+    try:
+        from editor_control import bring_up
+    except ImportError:
+        from hephaestus_forge.editor_control import bring_up  # type: ignore
+
+    result = bring_up(
+        project_path,
+        pie_timeout_s=pie_timeout,
+        editor_timeout_s=editor_timeout,
+        open_if_needed=not no_open,
+    )
+    if as_json:
+        console.print_json(data=result)
+    elif result.get("ok"):
+        console.print(f"[green]Ready[/green]: {result.get('detail')}")
+    else:
+        console.print(f"[red]up failed[/red]: {result.get('error') or result}")
+    raise typer.Exit(0 if result.get("ok") else 2)
+
+
+@app.command("down")
+def forge_down(
+    quit_editor: Annotated[
+        bool,
+        typer.Option("--quit-editor/--keep-editor", help="Also quit UnrealEditor after stopping PIE"),
+    ] = False,
+    as_json: Annotated[bool, typer.Option("--json", help="Print JSON")] = False,
+):
+    """Stop PIE; optionally quit the Unreal Editor."""
+    try:
+        from editor_control import bring_down
+    except ImportError:
+        from hephaestus_forge.editor_control import bring_down  # type: ignore
+
+    result = bring_down(quit_editor_flag=quit_editor)
+    if as_json:
+        console.print_json(data=result)
+    elif result.get("ok"):
+        msg = "PIE stopped"
+        if quit_editor:
+            msg += " + editor quit" if (result.get("quit_editor") or {}).get("ok") else " (editor quit attempted)"
+        console.print(f"[green]{msg}[/green]")
+    else:
+        console.print(f"[red]down failed[/red]: {result}")
+    raise typer.Exit(0 if result.get("ok") else 2)
+
 
 @pie_app.command("status")
 def pie_status(
@@ -1235,8 +1329,8 @@ def pie_start(
     ed_ok, _, ed_detail = editor_online()
     if not ed_ok:
         msg = (
-            f"{ed_detail}. Open the .uproject in UE 5.8 with HephaestusBridge "
-            f"rebuilt (v1.0.1+), then retry."
+            f"{ed_detail}. Run `forge up <project>` (launches editor + PIE) "
+            f"or open the .uproject with HephaestusBridge ≥1.0.1 rebuilt."
         )
         if as_json:
             console.print_json(data={"ok": False, "error": msg})

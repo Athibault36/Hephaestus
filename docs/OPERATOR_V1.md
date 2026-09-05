@@ -8,8 +8,9 @@ NIM-required autonomous operator. Builds on [OPERATOR_V0_9.md](OPERATOR_V0_9.md)
 pip install -e .
 export NVIDIA_API_KEY=nvapi-...
 
-# Engage PIE without clicking Play (requires bridge ≥ 1.0.1 + editor open)
-forge pie start <PATH-TO-UE-PROJECT>
+# Engage PIE without clicking Play (requires bridge ≥ 1.0.1)
+forge up <PATH-TO-UE-PROJECT>          # opens editor if needed, then PIE
+# or: forge pie start <PATH-TO-UE-PROJECT>  # when editor already open
 
 forge run <PATH-TO-UE-PROJECT> "spawn a dog and make it walk"
 forge run <PATH-TO-UE-PROJECT> "frame the shot" --json
@@ -18,7 +19,8 @@ forge autonomous-suite <PATH-TO-UE-PROJECT>
 forge autonomous-suite <PATH-TO-UE-PROJECT> --scenario A --scenario B --json
 forge autonomous-suite <PATH-TO-UE-PROJECT> --offline   # infra C/D only
 
-forge pie stop
+forge down                             # stop PIE
+forge down --quit-editor               # stop PIE + quit Unreal
 ```
 
 Mission Control chat uses the same autonomous runner (repair on by default).
@@ -27,8 +29,10 @@ Mission Control chat uses the same autonomous runner (repair on by default).
 
 | Port | When | Commands |
 |------|------|----------|
-| `:8766` | Editor open | `forge pie start` / `stop` / `status` |
+| `:8766` | Editor open | `forge up` / `forge pie start` / `stop` / `status` |
 | `:8765` | PIE running | world / animation / suite |
+
+Hands-off: `forge up <project>` launches the editor (via `UE_PATH`) if needed, then starts PIE. `forge down [--quit-editor]` tears down.
 
 See [ENV_FLAGS.md](ENV_FLAGS.md).
 
