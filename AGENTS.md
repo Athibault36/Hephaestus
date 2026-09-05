@@ -73,3 +73,24 @@ Registered targets are stored in `%USERPROFILE%\.hephaestus\projects.json`.
 - Do **not** hardcode paths to a single UE project in docs or scripts.
 - After C++ bridge changes: sync template → target, rebuild plugin, restart PIE, restart `forge observe` / desktop.
 - Keep clients sending `params` (not only `args`).
+
+## Learned User Preferences
+
+- Prefer long autonomous coding runs: minimize check-ins and clarifying questions; execute an approved plan end-to-end until finished or truly blocked.
+- Product framing: plain-language AI animation studio that delivers inside UE PIE (spawn, animate, frame shots)—not sketches, plans, or handoffs.
+- Never treat Hephaestus as tied to one UE game; keep the factory reusable across any UE 5.8 target.
+- Prefer Nemotron 3 Ultra for coding this repo (Cursor/NIM), with Lightning in parallel when dual-model; DeepSeek is optional/fallback, not the default coding brain.
+- Desktop app (`forge desktop`) is desired, including a polymorphic avatar that can change at the agent’s discretion.
+- Persist NIM/API keys locally (factory `.env` or Windows user env) so they are not re-entered each session.
+- When UE plugin rebuilds hit Visual Studio/.NET automation errors, bypass unnecessary .NET tooling and rebuild the C++ HephaestusBridge only.
+
+## Learned Workspace Facts
+
+- Factory repo path is `C:\dev\Hephaestus` (kept off OneDrive).
+- UE 5.8 engine is commonly installed at `C:\Program Files\Epic Games\UE_5.8`.
+- A frequent local validation target is `C:\Unreal Projects\MacroVerse` (example only—not canonical).
+- After bridge C++ changes: `forge sync-plugin` → disable Live Coding → rebuild HephaestusBridge → full editor restart → PIE → restart `forge observe` / desktop.
+- UE 5.8 may open .NET 10 automation projects; if VS reports NETSDK1209, build the C++ plugin only instead of the full automation solution.
+- Factory `.env` (gitignored) supplies `NVIDIA_API_KEY` / `HEPHAESTUS_LLM_API_KEY` for forge health, observe, and autonomous suites.
+- Cinematic camera control goes through bridge `world.get_view` / `world.set_view` (including free/look-at modes), not pawn-at-origin assumptions.
+- Operator validation entrypoints include `forge health`, `forge gate`, and `forge autonomous-suite` against an adopted target with PIE live.
