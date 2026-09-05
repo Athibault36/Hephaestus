@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT))
 
 from dcc_server import route_command, health  # noqa: E402
 from dcc_client import DccClient, dcc_online  # noqa: E402
-from cc5_bridge import export_character_fbx, find_cc5  # noqa: E402
+from cc5_bridge import export_character_fbx, find_cc5, find_rlpython  # noqa: E402
 from dcc_import import resolve_fbx_path, editor_import_fbx  # noqa: E402
 
 
@@ -157,12 +157,32 @@ def test_editor_import_fbx_posts_editor_command(monkeypatch, tmp_path: Path):
     assert "mesh.fbx" in captured["params"]["source_path"]
 
 
+def test_find_cc5_nested_layout(tmp_path: Path, monkeypatch):
+    bin64 = tmp_path / "Character Creator 5" / "Character Creator 5" / "Bin64"
+    bin64.mkdir(parents=True)
+    exe = bin64 / "CharacterCreator.exe"
+    py = bin64 / "CharacterCreatorpy.exe"
+    exe.write_bytes(b"x")
+    py.write_bytes(b"x")
+    monkeypatch.setattr(
+        "cc5_bridge._CC5_CANDIDATES",
+        (exe,),
+    )
+    monkeypatch.setattr("cc5_bridge._RLPYTHON_CANDIDATES", ())
+    monkeypatch.delenv("CC5_EXECUTABLE", raising=False)
+    monkeypatch.delenv("RLPYTHON", raising=False)
+    monkeypatch.delenv("CC5_RLPYTHON", raising=False)
+    assert find_cc5() == str(exe)
+    assert find_rlpython() == str(py)
+
+
 @pytest.mark.skipif(
     find_cc5() is None,
     reason="CC5 not installed — live skip",
 )
 def test_live_cc5_detect_only():
     assert find_cc5() is not None
+    assert find_rlpython() is not None
 
 
 @pytest.mark.skipif(
