@@ -84,24 +84,30 @@ def test_spawned_actor_skips_light():
     assert path and "StaticMeshActor" in path
 
 
-def test_frame_actor_posts_set_view(monkeypatch):
-    from agent_dcc import frame_actor
+def test_infer_mesh_color_red():
+    from agent_dcc import infer_mesh_color
 
-    calls = []
+    c = infer_mesh_color("make a red cube and frame it")
+    assert c is not None
+    assert c["r"] > c["g"] and c["r"] > c["b"]
 
-    class FakeClient:
-        def __init__(self, *a, **k):
-            pass
 
-        def command(self, body):
-            calls.append(body)
-            return {"success": True, "result_json": "{}"}
-
-    monkeypatch.setattr("ue_agent_loop.RemoteUeClient", FakeClient)
-    out = frame_actor("/Temp/A.StaticMeshActor_0", create_shot=False)
-    assert out["success"] is True
-    assert calls[0]["command"] == "world.set_view"
-    assert calls[0]["params"]["look_at_actor"].endswith("StaticMeshActor_0")
+def test_try_direct_passes_color(monkeypatch, tmp_path: Path):
+    fake = {
+        "success": True,
+        "asset_path": "/Game/X",
+        "actor_path": "/Temp/A",
+        "phase": "done",
+        "tint": {"success": True},
+        "frame": {"success": True},
+    }
+    with patch("agent_dcc.author_primitive_to_pie", return_value=fake) as auth:
+        out = try_direct_dcc_author("make a blue sphere", project_root=tmp_path)
+    assert out and out["ok"]
+    color = auth.call_args.kwargs.get("color")
+    assert color is not None
+    assert color["b"] > color["r"]
+    assert "tinted" in out["reply"]
 
 
 def test_try_direct_skips_unrelated():
