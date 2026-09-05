@@ -11,6 +11,7 @@
 #include "AssetToolsModule.h"
 #include "AssetImportTask.h"
 #include "AutomatedAssetImportData.h"
+#include "Containers/Ticker.h"
 #include "Editor.h"
 #include "Editor/UnrealEdEngine.h"
 #include "HttpPath.h"
@@ -217,35 +218,39 @@ bool UHephaestusEditorRemoteSubsystem::RequestImportFbx(
 		return false;
 	}
 
-	UAutomatedAssetImportData* ImportData = NewObject<UAutomatedAssetImportData>();
-	ImportData->Filenames.Add(FilePath);
-	ImportData->DestinationPath = DestinationPath;
-	ImportData->bReplaceExisting = true;
-	ImportData->bSkipReadOnly = true;
-	ImportData->GroupName = TEXT("HephaestusEditorImport");
-
 	FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools");
-	TArray<UObject*> Imported = AssetToolsModule.Get().ImportAssetsAutomated(ImportData);
+
+	// Prefer ImportAssetTasks — ImportAssetsAutomated + Interchange WaitUntilDone
+	// asserts if invoked from nested TaskGraph (HTTP AsyncTask on game thread).
+	UAssetImportTask* ImportTask = NewObject<UAssetImportTask>();
+	ImportTask->Filename = FilePath;
+	ImportTask->DestinationPath = DestinationPath;
+	ImportTask->bAutomated = true;
+	ImportTask->bSave = true;
+	ImportTask->bReplaceExisting = true;
+	ImportTask->bReplaceExistingSettings = true;
+	TArray<UAssetImportTask*> Tasks;
+	Tasks.Add(ImportTask);
+	AssetToolsModule.Get().ImportAssetTasks(Tasks);
+
+	TArray<UObject*> Imported;
+	for (const FString& Path : ImportTask->ImportedObjectPaths)
+	{
+		if (UObject* Obj = FSoftObjectPath(Path).TryLoad())
+		{
+			Imported.Add(Obj);
+		}
+	}
 
 	if (Imported.Num() == 0)
 	{
-		UAssetImportTask* ImportTask = NewObject<UAssetImportTask>();
-		ImportTask->Filename = FilePath;
-		ImportTask->DestinationPath = DestinationPath;
-		ImportTask->bAutomated = true;
-		ImportTask->bSave = true;
-		ImportTask->bReplaceExisting = true;
-		ImportTask->bReplaceExistingSettings = true;
-		TArray<UAssetImportTask*> Tasks;
-		Tasks.Add(ImportTask);
-		AssetToolsModule.Get().ImportAssetTasks(Tasks);
-		for (const FString& Path : ImportTask->ImportedObjectPaths)
-		{
-			if (UObject* Obj = FSoftObjectPath(Path).TryLoad())
-			{
-				Imported.Add(Obj);
-			}
-		}
+		UAutomatedAssetImportData* ImportData = NewObject<UAutomatedAssetImportData>();
+		ImportData->Filenames.Add(FilePath);
+		ImportData->DestinationPath = DestinationPath;
+		ImportData->bReplaceExisting = true;
+		ImportData->bSkipReadOnly = true;
+		ImportData->GroupName = TEXT("HephaestusEditorImport");
+		Imported = AssetToolsModule.Get().ImportAssetsAutomated(ImportData);
 	}
 
 	if (Imported.Num() == 0)
@@ -357,17 +362,49 @@ bool UHephaestusEditorRemoteSubsystem::HandleCommand(const FHttpServerRequest& R
 				|| Action.Equals(TEXT("editor.import"), ESearchCase::IgnoreCase)
 				|| Action.Equals(TEXT("asset.import_fbx"), ESearchCase::IgnoreCase))
 			{
-				FString AssetPath;
-				bSuccess = WeakThis.IsValid() && RequestImportFbx(Params, AssetPath, Error);
-				if (bSuccess)
-				{
-					FString Escaped = AssetPath;
-					Escaped.ReplaceInline(TEXT("\\"), TEXT("/"));
-					ResultJson = FString::Printf(
-						TEXT("{\"action\":\"editor.import_fbx\",\"asset_path\":\"%s\",\"pie_active\":%s}"),
-						*Escaped,
-						IsPieActive() ? TEXT("true") : TEXT("false"));
-				}
+				// Defer AssetTools off this TaskGraph task — Interchange WaitUntilDone nested
+				// inside AsyncTask(GameThread) trips RecursionGuard and crashes the editor.
+				TSharedPtr<FJsonObject> ParamsCopy = Params;
+				const FString ActionCopy = Action;
+				FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
+					[WeakThis, ParamsCopy, ActionCopy, OnComplete](float)
+					{
+						bool bImportOk = false;
+						FString ImportError;
+						FString ImportResultJson = TEXT("{}");
+						FString AssetPath;
+						bImportOk = WeakThis.IsValid() && RequestImportFbx(ParamsCopy, AssetPath, ImportError);
+						if (bImportOk)
+						{
+							FString Escaped = AssetPath;
+							Escaped.ReplaceInline(TEXT("\\"), TEXT("/"));
+							ImportResultJson = FString::Printf(
+								TEXT("{\"action\":\"editor.import_fbx\",\"asset_path\":\"%s\",\"pie_active\":%s}"),
+								*Escaped,
+								IsPieActive() ? TEXT("true") : TEXT("false"));
+						}
+
+						TSharedRef<FJsonObject> ImportOut = MakeShared<FJsonObject>();
+						ImportOut->SetBoolField(TEXT("success"), bImportOk);
+						ImportOut->SetStringField(TEXT("error"), ImportError);
+						ImportOut->SetStringField(TEXT("command"), ActionCopy);
+						ImportOut->SetBoolField(TEXT("pie_active"), IsPieActive());
+						ImportOut->SetStringField(TEXT("result_json"), bImportOk ? ImportResultJson : TEXT("{}"));
+
+						FString ImportBody;
+						TSharedRef<TJsonWriter<>> ImportWriter = TJsonWriterFactory<>::Create(&ImportBody);
+						FJsonSerializer::Serialize(ImportOut, ImportWriter);
+
+						TUniquePtr<FHttpServerResponse> ImportResponse =
+							FHttpServerResponse::Create(ImportBody, TEXT("application/json"));
+						ImportResponse->Code = bImportOk
+							? EHttpServerResponseCodes::Ok
+							: EHttpServerResponseCodes::BadRequest;
+						ApplyCors(ImportResponse);
+						OnComplete(MoveTemp(ImportResponse));
+						return false;
+					}));
+				return;
 			}
 			else
 			{

@@ -118,7 +118,7 @@ def dcc_import_to_pie(
 
     steps.append({"step": "resolve_fbx", "ok": True, "path": str(fbx_path)})
 
-    # Stop PIE if up
+    # Stop PIE if up — wait until both :8765 is down and editor reports pie_active=false
     pie_up, _, _ = pie_online(timeout=1.0)
     if pie_up:
         try:
@@ -126,12 +126,15 @@ def dcc_import_to_pie(
         except RuntimeError as exc:
             stop_res = {"success": False, "error": str(exc)}
         steps.append({"step": "editor.stop", "ok": bool(stop_res.get("success")), "result": stop_res})
-        deadline = time.time() + 20.0
+        deadline = time.time() + 30.0
         while time.time() < deadline:
             up, _, _ = pie_online(timeout=0.8)
-            if not up:
+            ed_ok, ed_health, _ = editor_online(timeout=0.8)
+            pie_flag = bool((ed_health or {}).get("pie_active")) if ed_ok else False
+            if not up and not pie_flag:
                 break
-            time.sleep(0.4)
+            time.sleep(0.5)
+        time.sleep(0.75)  # settle after End Play teardown
     else:
         steps.append({"step": "editor.stop", "ok": True, "skipped": True})
 
