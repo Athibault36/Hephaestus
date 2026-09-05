@@ -40,11 +40,13 @@ def rebuild_checklist(project_root: Optional[Path] = None) -> list[str]:
     return [
         f"git pull && forge sync-plugin {target}",
         "UE 5.8: enable HephaestusBridge + MetaSound plugins, rebuild Development Editor, disable Live Coding",
-        "Play (PIE) in the target project",
+        "Open the target .uproject (editor API listens on :8766 after rebuild)",
+        f"forge pie start {target}   # or press Play (PIE) manually",
         f"forge health {target}  # expect plugin_version {BRIDGE_VERSION}",
         f"forge e2e {target}  # live probes (assets, audio, sequencer) when PIE is up",
         f"forge observe {target}  # Mission Control on :3000",
         f"forge build-mc {target}  # optional React UI (Node.js)",
+        "forge pie stop  # disengage PIE when done",
         "Optional CI: GitHub Actions → Live E2E (self-hosted) with PIE on runner — docs/LIVE_E2E.md",
     ]
 

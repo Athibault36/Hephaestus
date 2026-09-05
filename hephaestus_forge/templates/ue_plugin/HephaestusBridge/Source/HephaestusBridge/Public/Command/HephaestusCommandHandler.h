@@ -127,6 +127,7 @@ protected:
 
 	FHephaestusCommandResult HandleWorldCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params);
 	FHephaestusCommandResult HandleAssetCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params);
+	FHephaestusCommandResult HandleEditorCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params);
 	FHephaestusCommandResult HandleBlueprintCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params);
 	FHephaestusCommandResult HandleRenderingCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params);
 	FHephaestusCommandResult HandlePCGCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params);

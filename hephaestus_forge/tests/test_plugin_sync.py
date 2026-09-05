@@ -24,7 +24,7 @@ def test_sync_plugin_copies_template(tmp_path):
     assert (dest / "HEPHAESTUS_BRIDGE_VERSION").is_file()
     version_h = dest / "Source" / "HephaestusBridge" / "Public" / "HephaestusVersion.h"
     assert version_h.is_file()
-    assert 'TEXT("1.0.0")' in version_h.read_text(encoding="utf-8")
+    assert 'TEXT("1.0.1")' in version_h.read_text(encoding="utf-8")
 
 
 def test_plugin_template_has_sequence_verbs():

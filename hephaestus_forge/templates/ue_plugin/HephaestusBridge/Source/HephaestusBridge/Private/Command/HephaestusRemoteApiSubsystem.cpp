@@ -299,6 +299,7 @@ bool UHephaestusRemoteApiSubsystem::HandleHealth(const FHttpServerRequest& Reque
 	Root->SetStringField(TEXT("service"), TEXT("hephaestus-remote"));
 	Root->SetNumberField(TEXT("port"), ListenPort);
 	Root->SetStringField(TEXT("plugin_version"), HEPHAESTUS_BRIDGE_VERSION);
+	Root->SetNumberField(TEXT("editor_port"), 8766);
 	Root->SetStringField(TEXT("project_name"), FApp::GetProjectName());
 	Root->SetStringField(TEXT("project_dir"), FPaths::ConvertRelativePathToFull(FPaths::ProjectDir()));
 
