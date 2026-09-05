@@ -91,3 +91,35 @@ def test_skip_no_character_is_ok():
     assert report.passed_ids == ["H1"]
     assert report.to_dict()["skipped"] == ["E2"]
     assert report.to_dict()["passed"] == ["H1"]
+
+
+def test_direct_locomotion_uses_transform_when_no_anim():
+    from autonomous_suite import _direct_locomotion_suite
+
+    client = MagicMock()
+    client.command.side_effect = [
+        {"success": True, "actor_paths": ["/Game/World/SK_Actor"], "error": ""},
+        {"success": True, "error": "", "result_json": "{}"},
+    ]
+
+    with patch(
+        "autonomous_suite.resolve_suite_character_assets",
+        return_value=("/Engine/EditorMeshes/SkeletalMesh/DefaultSkeletalMesh.DefaultSkeletalMesh", ""),
+    ):
+        with patch("autonomous_suite._client", return_value=(client, lambda e: False)):
+            result = _direct_locomotion_suite("http://127.0.0.1:8765", scenario_id="E2")
+
+    assert result.ok is True
+    assert result.report.get("mode") == "transform"
+    assert "Transform walk" in result.detail
+    cmds = [c.args[0]["command"] for c in client.command.call_args_list]
+    assert cmds[0] == "animation.spawn_skeletal_mesh"
+    assert cmds[1] == "animation.play_transform_sequence"
+
+
+def test_scenario_a_is_direct_locomotion():
+    from autonomous_suite import SUITE_SCENARIOS
+
+    a = next(s for s in SUITE_SCENARIOS if s.id == "A")
+    assert a.kind == "direct"
+    assert a.goal == "__suite_locomotion__"

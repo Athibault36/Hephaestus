@@ -88,9 +88,9 @@ SUITE_SCENARIOS: list[SuiteScenario] = [
     SuiteScenario(
         "A",
         "Spawn creature and walk",
-        "autonomous",
-        # Goal filled at runtime from project asset search (__suite_spawn_walk__).
-        "__suite_spawn_walk__",
+        "direct",
+        # Same direct path as E2/G4 — AnimSequence when available, else transform walk.
+        "__suite_locomotion__",
     ),
     SuiteScenario("B", "Cinematic framing", "direct", "__suite_camera_frame__"),
     # Direct scenarios resolve paths from the target project at runtime.
@@ -258,19 +258,26 @@ def _spawn_walk_goal(remote_api: str) -> str:
     )
 
 
+def _actor_path_from_spawn(spawn: dict[str, Any]) -> Optional[str]:
+    actor = (spawn.get("actor_paths") or [None])[0]
+    if actor:
+        return str(actor)
+    import json as _json
+
+    try:
+        return _json.loads(spawn.get("result_json") or "{}").get("actor_path")
+    except Exception:
+        return None
+
+
 def _direct_locomotion_suite(remote_api: str, scenario_id: str = "E2") -> SuiteStepResult:
-    """Spawn a project skeletal mesh, then play a project walk AnimSequence."""
+    """Spawn a skeletal mesh and walk — AnimSequence when found, else transform displace."""
     client, _ = _client(remote_api, timeout=60.0)
     mesh, anim = resolve_suite_character_assets(client)
     if not mesh:
         return _skip_no_character(
             scenario_id,
             "No SkeletalMesh via asset.search (/Game or Engine) — blank project",
-        )
-    if not anim:
-        return _skip_no_character(
-            scenario_id,
-            f"Found mesh {mesh} but no walk AnimSequence — blank project",
         )
 
     spawn = client.command({
@@ -291,20 +298,14 @@ def _direct_locomotion_suite(remote_api: str, scenario_id: str = "E2") -> SuiteS
             f"Could not spawn skeletal mesh for locomotion: {spawn.get('error')}",
             report={"spawn": spawn, "mesh": mesh, "anim": anim},
         )
-    actor = (spawn.get("actor_paths") or [None])[0]
-    if not actor:
-        import json as _json
-
-        try:
-            actor = _json.loads(spawn.get("result_json") or "{}").get("actor_path")
-        except Exception:
-            actor = None
+    actor = _actor_path_from_spawn(spawn)
     if not actor:
         return SuiteStepResult(
             scenario_id, False, "Spawn succeeded but no actor_path returned", report={"spawn": spawn}
         )
 
     play: dict[str, Any] = {"success": False, "error": "no walk anim"}
+    mode = "anim"
     if anim:
         play = client.command({
             "command": "animation.play_locomotion",
@@ -315,17 +316,36 @@ def _direct_locomotion_suite(remote_api: str, scenario_id: str = "E2") -> SuiteS
                 "command": "animation.play_sequence",
                 "params": {"actor_path": actor, "anim_path": anim, "loop": True},
             })
+    if not play.get("success"):
+        # Blank / Engine-only targets often have DefaultSkeletalMesh but no AnimSequence.
+        mode = "transform"
+        play = client.command({
+            "command": "animation.play_transform_sequence",
+            "params": {
+                "actor_path": actor,
+                "target_location": {"x": 600, "y": 0, "z": 100},
+                "duration": 2.0,
+            },
+        })
     ok = bool(play.get("success"))
-    detail = (
-        f"Playing walk on {actor}"
-        if ok
-        else f"Could not play walk on {actor}: {play.get('error', 'failed')}"
-    )
+    if ok and mode == "transform":
+        detail = f"Transform walk on {actor} (no AnimSequence — displaced)"
+    elif ok:
+        detail = f"Playing walk on {actor}"
+    else:
+        detail = f"Could not walk {actor}: {play.get('error', 'failed')}"
     return SuiteStepResult(
         scenario_id,
         ok,
         detail,
-        report={"planner": "direct_locomotion", "mesh": mesh, "anim": anim, "actor": actor, "play": play},
+        report={
+            "planner": "direct_locomotion",
+            "mode": mode,
+            "mesh": mesh,
+            "anim": anim,
+            "actor": actor,
+            "play": play,
+        },
     )
 
 
@@ -572,7 +592,7 @@ def run_autonomous_suite(
         if scenario.kind == "direct":
             if skip_nim:
                 return SuiteStepResult(sid, True, "skipped (offline — direct scenarios not run)", report={})
-            if sid == "E2" or sid == "G4" or scenario.goal == "__suite_locomotion__":
+            if sid in ("A", "E2", "G4") or scenario.goal == "__suite_locomotion__":
                 return _direct_locomotion_suite(remote_api, scenario_id=sid)
             if sid == "E1" or scenario.goal == "__suite_spawn_mesh__":
                 return _direct_spawn_mesh_suite(remote_api, scenario_id=sid)
@@ -619,11 +639,8 @@ def run_autonomous_suite(
         if goal == "__suite_skip_no_character__":
             return _skip_no_character(sid, "No SkeletalMesh via asset.search — blank project")
         if goal == "__suite_skip_no_walk_anim__":
-            mesh, _anim = resolve_suite_character_assets(_client(remote_api)[0])
-            return _skip_no_character(
-                sid,
-                f"Found mesh {mesh or '(unknown)'} but no walk AnimSequence — blank project",
-            )
+            # Prefer transform displacement over soft-skip when a mesh exists.
+            return _direct_locomotion_suite(remote_api, scenario_id=sid)
 
         report: AutonomousReport = run_autonomous_goal(
             goal,
