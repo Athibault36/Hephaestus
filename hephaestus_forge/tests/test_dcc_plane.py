@@ -232,6 +232,41 @@ def test_editor_import_fbx_posts_editor_command(monkeypatch, tmp_path: Path):
     assert "mesh.fbx" in captured["params"]["source_path"]
 
 
+def test_pick_imported_asset_prefers_hero_over_materials():
+    from dcc_import import pick_imported_asset_path
+
+    paths = [
+        "/Game/Hephaestus/DccImports/Std_Tongue_Pbr_Opacity.Std_Tongue_Pbr_Opacity",
+        "/Game/Hephaestus/DccImports/Std_Skin_Head.Std_Skin_Head",
+        "/Game/Hephaestus/DccImports/Hero.Hero",
+        "/Game/Hephaestus/DccImports/Hero_Skeleton.Hero_Skeleton",
+    ]
+    chosen, skeletal = pick_imported_asset_path(
+        paths,
+        preferred_name="Hero",
+        fallback=paths[0],
+        import_as_skeletal=True,
+    )
+    assert chosen.endswith("Hero.Hero")
+    assert skeletal is True
+
+
+def test_pick_imported_asset_synthesizes_when_only_materials():
+    from dcc_import import pick_imported_asset_path
+
+    paths = [
+        "/Game/Hephaestus/DccImports/Std_Tongue_Pbr_Opacity.Std_Tongue_Pbr_Opacity",
+    ]
+    chosen, skeletal = pick_imported_asset_path(
+        paths,
+        preferred_name="Hero",
+        fallback=paths[0],
+        import_as_skeletal=True,
+    )
+    assert chosen == "/Game/Hephaestus/DccImports/Hero.Hero"
+    assert skeletal is True
+
+
 def test_find_cc5_nested_layout(tmp_path: Path, monkeypatch):
     bin64 = tmp_path / "Character Creator 5" / "Character Creator 5" / "Bin64"
     bin64.mkdir(parents=True)
