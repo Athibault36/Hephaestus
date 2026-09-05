@@ -150,6 +150,7 @@ def test_infer_appearance_tall_muscular_male():
     assert plan["morphs"]["height"] < 0
     assert plan["morphs"]["muscle"] > 0.5
     assert plan["force_new"] is True
+    assert isinstance(plan.get("content_assets"), list)
 
 
 def test_infer_appearance_unique_by_name():
@@ -158,6 +159,43 @@ def test_infer_appearance_unique_by_name():
     a = infer_appearance("make a person", character_name="Alex")
     b = infer_appearance("make a person", character_name="Blake")
     assert a["morphs"] != b["morphs"]
+
+
+def test_resolve_content_assets_muscular_when_pack_present(tmp_path: Path, monkeypatch):
+    from cc5_appearance import resolve_content_assets
+
+    base = (
+        tmp_path
+        / "Documents"
+        / "Reallusion"
+        / "Reallusion Templates"
+        / "Reallusion 3D"
+        / "CC5 Characters"
+    )
+    muscle = base / "Actor" / "Avatar Control" / "CC Embed Morphs" / "Male Muscular"
+    muscle.mkdir(parents=True)
+    body = muscle / "Male Muscular Body.ccSlider"
+    body.write_bytes(b"x")
+    preset = base / "Avatar Preset" / "Full Body Morph"
+    preset.mkdir(parents=True)
+    (preset / "HD Aaron.ccAvatarPreset").write_bytes(b"p")
+    skin = base / "Skin" / "Overall" / "CC5 Human 2K"
+    skin.mkdir(parents=True)
+    (skin / "HD Aaron_2K.ccSkin").write_bytes(b"s")
+
+    monkeypatch.setenv("PUBLIC", str(tmp_path))
+    # Force roots to only our fake Public tree
+    monkeypatch.setattr(
+        "cc5_appearance.content_library_roots",
+        lambda: [tmp_path / "Documents" / "Reallusion"],
+    )
+    paths = resolve_content_assets(
+        {"gender": "male", "traits": ["muscular", "tall"], "seed": "Rex|tall"}
+    )
+    names = [Path(p).name for p in paths]
+    assert "HD Aaron.ccAvatarPreset" in names
+    assert "Male Muscular Body.ccSlider" in names
+    assert "HD Aaron_2K.ccSkin" in names
 
 
 def test_find_default_cc5_template(tmp_path: Path, monkeypatch):
@@ -245,6 +283,7 @@ def test_editor_import_fbx_posts_editor_command(monkeypatch, tmp_path: Path):
         captured["base"] = base
         captured["command"] = command
         captured["params"] = params
+        captured["timeout"] = timeout
         return {"success": True, "result_json": '{"asset_path":"/Game/Hephaestus/DccImports/mesh"}'}
 
     monkeypatch.setattr("dcc_import._post_command", fake_post)
@@ -253,6 +292,29 @@ def test_editor_import_fbx_posts_editor_command(monkeypatch, tmp_path: Path):
     assert res["success"] is True
     assert captured["command"] == "editor.import_fbx"
     assert "mesh.fbx" in captured["params"]["source_path"]
+    assert captured["timeout"] >= 120.0
+
+
+def test_import_fbx_timeout_scales_with_size(tmp_path: Path, monkeypatch):
+    from dcc_import import import_fbx_timeout_seconds
+
+    small = tmp_path / "small.fbx"
+    small.write_bytes(b"x" * 1024)
+    assert import_fbx_timeout_seconds(small) == 120.0
+
+    large = tmp_path / "large.fbx"
+    large.write_bytes(b"x")
+    real_stat = Path.stat
+
+    def patched_stat(self, *args, **kwargs):
+        if self.name == "large.fbx":
+            return type("S", (), {"st_size": 185 * 1024 * 1024})()
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", patched_stat)
+    t = import_fbx_timeout_seconds(large)
+    assert t >= 400.0
+    assert t <= 900.0
 
 
 def test_pick_imported_asset_prefers_hero_over_materials():

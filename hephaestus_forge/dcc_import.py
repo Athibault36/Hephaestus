@@ -162,23 +162,40 @@ def resolve_fbx_path(
     return fbxs[0].resolve()
 
 
+def import_fbx_timeout_seconds(source_path: Path | str, *, minimum: float = 120.0) -> float:
+    """
+    Scale import HTTP timeout for large character FBX (CC5 exports often 50–200MB).
+
+    Rule of thumb: ~90s base + ~45s per 25MB, capped so huge files still finish.
+    """
+    path = Path(source_path)
+    try:
+        size_mb = max(0.0, path.stat().st_size / (1024 * 1024))
+    except OSError:
+        size_mb = 0.0
+    scaled = 90.0 + (size_mb / 25.0) * 45.0
+    return float(min(900.0, max(minimum, scaled)))
+
+
 def editor_import_fbx(
     source_path: Path | str,
     *,
     destination_path: str = "/Game/Hephaestus/DccImports",
     destination_name: Optional[str] = None,
     import_as_skeletal: bool = False,
-    timeout: float = 120.0,
+    timeout: Optional[float] = None,
 ) -> dict[str, Any]:
     """Call editor.import_fbx on :8766 (WITH_EDITOR AssetTools; refuses if PIE active)."""
-    src = str(Path(source_path).resolve())
-    name = destination_name or Path(src).stem
+    src_path = Path(source_path).resolve()
+    src = str(src_path)
+    name = destination_name or src_path.stem
     ok, _, detail = editor_online()
     if not ok:
         return {
             "success": False,
             "error": f"Editor API offline ({detail}). Open project / forge up first.",
         }
+    wait = float(timeout) if timeout is not None else import_fbx_timeout_seconds(src_path)
     return _post_command(
         editor_api_base(),
         "editor.import_fbx",
@@ -190,7 +207,7 @@ def editor_import_fbx(
             "import_as_skeletal": bool(import_as_skeletal),
             "skeletal": bool(import_as_skeletal),
         },
-        timeout=timeout,
+        timeout=wait,
     )
 
 
@@ -205,6 +222,7 @@ def dcc_import_to_pie(
     wait_pie_s: float = 45.0,
     import_as_skeletal: bool = False,
     force_skeletal_spawn: bool = False,
+    import_timeout: Optional[float] = None,
 ) -> dict[str, Any]:
     """
     Full loop: resolve FBX → stop PIE → editor.import_fbx → play → spawn in view.
@@ -242,6 +260,7 @@ def dcc_import_to_pie(
         destination_path=destination_path,
         destination_name=fbx_path.stem,
         import_as_skeletal=import_as_skeletal,
+        timeout=import_timeout,
     )
     steps.append({"step": "editor.import_fbx", "ok": bool(import_res.get("success")), "result": import_res})
     if not import_res.get("success"):

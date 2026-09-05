@@ -258,6 +258,63 @@ def _load_outfit(avatar, appearance: dict) -> dict:
     return {"loaded": loaded, "errors": errors}
 
 
+def _load_content_assets(avatar, appearance: dict) -> dict:
+    """
+    Apply Free Resource packs (ccAvatarPreset / ccSlider / ccSkin) from the plan.
+
+    Paths come from hephaestus_forge.cc5_appearance.resolve_content_assets.
+    """
+    import RLPy
+
+    loaded: list[str] = []
+    errors: list[str] = []
+    paths = list((appearance or {}).get("content_assets") or [])
+    if not paths:
+        return {"loaded": [], "errors": [], "skipped": True}
+
+    for raw in paths:
+        path = Path(str(raw))
+        if not path.is_file():
+            errors.append(f"missing:{path.name}")
+            continue
+        try:
+            obj = None
+            # Prefer LoadObject; some content types need LoadFile
+            try:
+                obj = RLPy.RFileIO.LoadObject(str(path))
+            except Exception:
+                obj = None
+            if obj is None and hasattr(RLPy.RFileIO, "LoadFile"):
+                try:
+                    obj = RLPy.RFileIO.LoadFile(str(path))
+                except Exception:
+                    obj = None
+            if obj is None:
+                errors.append(f"null:{path.name}")
+                continue
+            loaded.append(path.name)
+            # Cloth-like assets may need conform; presets/skins usually apply in-place
+            try:
+                suf = path.suffix.lower()
+                if suf in (".cccloth", ".ccshoes", ".cchair") and hasattr(RLPy, "RCloth"):
+                    if hasattr(RLPy.RCloth, "Conform"):
+                        RLPy.RCloth.Conform(obj, avatar)
+            except Exception as exc:
+                errors.append(f"conform {path.name}:{exc}")
+        except Exception as exc:
+            errors.append(f"load {path.name}:{exc}")
+
+    try:
+        flags = RLPy.EObjectModifiedType_Attribute
+        if hasattr(RLPy, "EObjectModifiedType_Transform"):
+            flags = flags | RLPy.EObjectModifiedType_Transform
+        RLPy.RGlobal.ObjectModified(avatar, flags)
+    except Exception as exc:
+        errors.append(f"modified:{exc}")
+
+    return {"loaded": loaded, "errors": errors, "count": len(paths)}
+
+
 def _apply_morphs(avatar, appearance: dict) -> dict:
     """
     Alter shaping morphs from an appearance plan when morph packs are installed.
@@ -365,30 +422,69 @@ def _apply_morphs(avatar, appearance: dict) -> dict:
 
     def _find_id(needle: str):
         n = needle.strip().lower()
+        aliases = {
+            "muscle": ("male muscular body", "muscular body", "male muscular", "muscular"),
+            "bodybuilder": ("male muscular body", "male muscular chest", "muscular"),
+            "athletic": ("male muscular body", "body shape", "athletic"),
+            "thin": ("male skinny body", "skinny body", "male skinny", "skinny"),
+            "slender": ("male skinny body", "skinny"),
+            "heavy": ("heavy", "overweight", "body shape"),
+            "height": ("character height", "height", "body ratio"),
+            "face width": ("face width", "head shape", "head width"),
+        }
+        candidates = (n,) + tuple(aliases.get(n, ()))
         words = [w for w in re.split(r"[^a-z0-9]+", n) if len(w) > 2]
         best = None
         best_score = 0
         for k, v in catalog.items():
-            if any(x in k for x in ("eyeocclusion", "eo ", "/eo ", "tearline", "tl ")):
+            if any(x in k for x in ("eyeocclusion", "eo ", "/eo ", "tearline", "tl ", "eyeball", "teeth")):
                 continue
             score = 0
-            if n == k:
-                return v
-            if n in k:
-                score = 500 - min(len(k), 400)
-            elif words:
+            for cand in candidates:
+                if cand == k:
+                    return v
+                if cand and cand in k:
+                    # Prefer shorter/leaf keys and HD body muscular paths
+                    score = max(score, 600 - min(len(k), 500))
+            if score == 0 and words:
                 hits = sum(1 for w in words if w in k)
                 if not hits:
                     continue
                 score = hits * 40
-            else:
+            if score == 0:
                 continue
-            if any(t in k for t in ("full body", "character", "actor/body", "body/", "head/", "face")):
+            if "male muscular" in k or "male skinny" in k:
+                score += 120
+            if any(t in k for t in ("full body", "character height", "hd body", "body shape", "body ratio", "head/", "face")):
                 score += 80
+            # Penalize Actor Parts facial clutter
+            if "actor parts" in k or "parts/" in k:
+                score -= 200
             if score > best_score:
                 best_score = score
                 best = v
         return best if best_score >= 40 else None
+
+    # Trait-driven bulk apply when Free Resource embed morphs are present
+    traits = {str(t).lower() for t in ((appearance or {}).get("traits") or [])}
+    if "muscular" in traits:
+        mw = float(morphs.get("muscle") or 0.75)
+        for k, mid in catalog.items():
+            if "male muscular" in k and "actor parts" not in k:
+                try:
+                    shaping.SetShapingMorphWeight(mid, mw)
+                    applied.append(f"{k.split('/')[-1]}={mw:.2f}")
+                except Exception as exc:
+                    missed.append(f"{k}({exc})")
+    if "thin" in traits:
+        tw = float(morphs.get("thin") or 0.65)
+        for k, mid in catalog.items():
+            if "male skinny" in k and "actor parts" not in k:
+                try:
+                    shaping.SetShapingMorphWeight(mid, tw)
+                    applied.append(f"{k.split('/')[-1]}={tw:.2f}")
+                except Exception as exc:
+                    missed.append(f"{k}({exc})")
 
     for name, weight in morphs.items():
         mid = _find_id(str(name))
@@ -424,22 +520,26 @@ def _apply_morphs(avatar, appearance: dict) -> dict:
 
 
 def _apply_appearance(avatar, appearance: dict) -> dict:
-    """Create a distinct character: body-type base + scale + morphs + outfit."""
+    """Create a distinct character: content packs + scale + morphs + outfit."""
     if not appearance:
         return {"skipped": True}
+    # Free Resource presets/sliders/skins first (when installed), then fine morphs/scale
+    content = _load_content_assets(avatar, appearance)
     scale = _apply_scale_shape(avatar, appearance)
     morphs = _apply_morphs(avatar, appearance)
     outfit = _load_outfit(avatar, appearance)
     return {
         "traits": list(appearance.get("traits") or []),
         "gender": appearance.get("gender"),
+        "content": content,
         "scale": scale,
         "morphs": morphs,
         "outfit": outfit,
-        "applied": list(morphs.get("applied") or [])
+        "applied": [f"content:{n}" for n in (content.get("loaded") or [])]
+        + list(morphs.get("applied") or [])
         + ([f"scale={scale.get('scale')}"] if scale.get("scaled") else [])
         + [f"outfit:{n}" for n in (outfit.get("loaded") or [])],
-        "missed": list(morphs.get("missed") or []),
+        "missed": list(morphs.get("missed") or []) + list(content.get("errors") or []),
         "morph_count": morphs.get("morph_count") or 0,
     }
 

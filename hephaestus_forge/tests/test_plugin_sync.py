@@ -27,6 +27,8 @@ def test_sync_plugin_copies_template(tmp_path):
     assert version_h.is_file()
     assert f'TEXT("{BRIDGE_VERSION}")' in version_h.read_text(encoding="utf-8")
     assert (dest / "HEPHAESTUS_BRIDGE_VERSION").read_text(encoding="utf-8").strip() == BRIDGE_VERSION
+    uplugin = (dest / "HephaestusBridge.uplugin").read_text(encoding="utf-8")
+    assert f'"VersionName": "{BRIDGE_VERSION}"' in uplugin
 
 
 def test_plugin_template_has_sequence_verbs():

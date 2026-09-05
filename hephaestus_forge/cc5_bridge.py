@@ -427,7 +427,7 @@ def export_character_fbx(
     project_root: Optional[Path] = None,
     output_path: Optional[Path] = None,
     include_morphs: bool = True,
-    timeout_seconds: int = 180,
+    timeout_seconds: int = 300,
     prompt: str = "",
     appearance: Optional[dict] = None,
 ) -> dict:

@@ -768,8 +768,8 @@ def try_direct_cc5_author(
             export = export_character_fbx(
                 character_name=name,
                 project_root=project_root,
-                # Create mannequin + morph + FBX can take a minute on cold CC5
-                timeout_seconds=90,
+                # Create avatar + Free Resource morphs + Unreal FBX can take several minutes
+                timeout_seconds=300,
                 prompt=message or "",
                 appearance=plan,
             )

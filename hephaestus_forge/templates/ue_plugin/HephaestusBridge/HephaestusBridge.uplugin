@@ -1,7 +1,7 @@
 {
 	"FileVersion": 3,
 	"Version": 2,
-	"VersionName": "1.0.1",
+	"VersionName": "1.0.5",
 	"FriendlyName": "Hephaestus Bridge",
 	"Description": "HEPHAESTUS Agent Bridge - Total Engine Authority for UE5.8 Autonomous Agent",
 	"Category": "Hephaestus",
