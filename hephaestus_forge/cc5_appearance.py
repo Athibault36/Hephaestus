@@ -90,30 +90,16 @@ def resolve_content_assets(plan: dict[str, Any]) -> list[str]:
         out.append(body_preset)
 
     embed = base / "Actor" / "Avatar Control" / "CC Embed Morphs"
+    # One full-body muscular/skinny slider only. Loading every regional slider
+    # plus morph-category weights stacks deformations into spaghetti skins.
     if "muscular" in traits and gender != "female":
-        muscle_dir = embed / "Male Muscular"
-        for name in (
-            "Male Muscular Body.ccSlider",
-            "Male Muscular Chest A.ccSlider",
-            "Male Muscular Arm.ccSlider",
-            "Male Muscular Shoulder.ccSlider",
-            "Male Muscular Abs.ccSlider",
-            "Male Muscular Thigh.ccSlider",
-        ):
-            p = muscle_dir / name
-            if p.is_file():
-                out.append(p)
+        p = embed / "Male Muscular" / "Male Muscular Body.ccSlider"
+        if p.is_file():
+            out.append(p)
     elif "thin" in traits and gender != "female":
-        skinny_dir = embed / "Male Skinny"
-        for name in (
-            "Male Skinny Body.ccSlider",
-            "Male Skinny Chest.ccSlider",
-            "Male Skinny Arm.ccSlider",
-            "Male Skinny Thigh.ccSlider",
-        ):
-            p = skinny_dir / name
-            if p.is_file():
-                out.append(p)
+        p = embed / "Male Skinny" / "Male Skinny Body.ccSlider"
+        if p.is_file():
+            out.append(p)
 
     char_dir = embed / "CC5 Characters"
     if char_dir.is_dir():
@@ -124,7 +110,13 @@ def resolve_content_assets(plan: dict[str, Any]) -> list[str]:
         elif abs(hash(seed)) % 3 == 1 and gender != "female":
             if (char_dir / "HD Gibro_Body Shape.ccSlider").is_file():
                 prefix = "HD Gibro"
-        for suffix in ("_Body Shape.ccSlider", "_Body Ratio.ccSlider", "_Head Shape.ccSlider"):
+        # Never load *_Body Ratio.ccSlider here — stacking Ratio content with
+        # height morphs collapses the mesh. Height uses one Ratio morph in OpenPlugin.
+        # Skip Body Shape when tall/short so Ratio morph is the sole body-proportion driver.
+        suffixes = ("_Head Shape.ccSlider",)
+        if "tall" not in traits and "short" not in traits:
+            suffixes = ("_Body Shape.ccSlider",) + suffixes
+        for suffix in suffixes:
             p = char_dir / f"{prefix}{suffix}"
             if p.is_file():
                 out.append(p)

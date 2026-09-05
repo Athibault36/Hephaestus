@@ -134,7 +134,8 @@ def _clear_avatars() -> int:
 def _apply_scale_shape(avatar, appearance: dict) -> dict:
     """
     Visibly alter the character when body morph packs aren't installed:
-    non-uniform scale from traits (tall/short/muscular/thin/heavy).
+    uniform XYZ scale from traits (tall/short/muscular/thin/heavy).
+    Non-uniform scale collapses skinned meshes in UE.
     """
     import RLPy
 
@@ -142,37 +143,37 @@ def _apply_scale_shape(avatar, appearance: dict) -> dict:
     morphs = (appearance or {}).get("morphs") or {}
     sx = sy = sz = 1.0
 
-    # Height from trait or morph needle
+    # Height from trait or morph needle — uniform scale (non-uniform Y wrecks skinning)
     h = float(morphs.get("height") or 0.0)
     if "tall" in traits or h < -0.2:
-        sy *= 1.08 + min(0.12, abs(h) * 0.1)
+        grow = 1.10 + min(0.10, abs(h) * 0.08)
+        sx *= grow
+        sy *= grow
+        sz *= grow
     elif "short" in traits or h > 0.2:
-        sy *= 0.92 - min(0.08, abs(h) * 0.08)
+        shrink = 0.90 - min(0.06, abs(h) * 0.05)
+        sx *= shrink
+        sy *= shrink
+        sz *= shrink
 
+    # Build width only via morphs (Male Muscular etc.). Uniform XYZ only —
+    # any non-uniform scale collapses skinned FBX into spaghetti in UE.
     if "muscular" in traits:
-        sx *= 1.08
-        sz *= 1.08
-        sy *= 1.02
+        sx = sy = sz = sx * 1.04
     elif "thin" in traits:
-        sx *= 0.92
-        sz *= 0.92
+        sx = sy = sz = sx * 0.96
     elif "heavy" in traits:
-        sx *= 1.12
-        sz *= 1.12
-        sy *= 0.98
+        sx = sy = sz = sx * 1.05
     else:
-        # Seeded mild variation from unused morph weights
         m = float(morphs.get("muscle") or 0.0)
         t = float(morphs.get("thin") or 0.0)
         hv = float(morphs.get("heavy") or 0.0)
-        sx *= 1.0 + m * 0.06 - t * 0.05 + hv * 0.07
-        sz *= 1.0 + m * 0.06 - t * 0.05 + hv * 0.07
+        sx = sy = sz = sx * (1.0 + m * 0.04 - t * 0.04 + hv * 0.05)
 
-    # Clamp
-    sx = max(0.82, min(1.25, sx))
-    sy = max(0.82, min(1.25, sy))
-    sz = max(0.82, min(1.25, sz))
-    if abs(sx - 1.0) < 0.01 and abs(sy - 1.0) < 0.01 and abs(sz - 1.0) < 0.01:
+    # Clamp + force identical XYZ
+    u = max(0.82, min(1.28, (sx + sy + sz) / 3.0))
+    sx = sy = sz = u
+    if abs(u - 1.0) < 0.01:
         return {"scaled": False, "scale": [1.0, 1.0, 1.0]}
 
     errors: list[str] = []
@@ -492,21 +493,6 @@ def _apply_morphs(avatar, appearance: dict) -> dict:
                 best = v
         return best if best_score >= 40 else None
 
-    h = float(morphs.get("height") or 0.0)
-    if "tall" in traits and h >= -0.2:
-        h = -0.75
-    if "short" in traits and h <= 0.2:
-        h = 0.55
-    mid, label = _find_exact("Character Height", "character height", "Height")
-    if mid is not None and abs(h) > 0.05:
-        _set(label or "Character Height", mid, h)
-    elif abs(h) > 0.05:
-        mid = _find_id("height")
-        if mid is not None:
-            _set("height", mid, h)
-        else:
-            missed.append("height")
-
     def _apply_category_substr(substr: str, weight: float, limit: int = 20) -> int:
         n_set = 0
         seen: set = set()
@@ -530,18 +516,40 @@ def _apply_morphs(avatar, appearance: dict) -> dict:
                     n_set += 1
         return n_set
 
-    if "muscular" in traits:
+    h = float(morphs.get("height") or 0.0)
+    if "tall" in traits and h >= -0.2:
+        h = -0.75
+    if "short" in traits and h <= 0.2:
+        h = 0.55
+    mid, label = _find_exact("Character Height", "character height", "Height", "Essential Body Morphs/Character Height")
+    if mid is not None and abs(h) > 0.05:
+        _set(label or "Character Height", mid, h)
+    elif abs(h) > 0.05:
+        # Free Resource packs lack Essential Character Height. Do NOT use Body Ratio
+        # morphs as a height proxy — they change limb proportions and collapse the
+        # skinned mesh into spaghetti after FBX export. Height comes from uniform
+        # scale in _apply_scale_shape + PIE actor scale instead.
+        missed.append("height(no Essential Character Height; using uniform scale)")
+        applied.append("height_via_uniform_scale=1")
+    content_names = " ".join(
+        str(p).lower() for p in ((appearance or {}).get("content_assets") or [])
+    )
+    # Skip morph-category muscle/skinny when a matching content slider already loaded.
+    if "muscular" in traits and "male muscular" not in content_names:
         mw = float(morphs.get("muscle") or 0.85)
-        if _apply_category_substr("male muscular", mw) == 0:
+        # One slider max — regional muscular morphs stack into broken bind poses.
+        if _apply_category_substr("male muscular", mw, limit=1) == 0:
             for k, mid in list(catalog.items()):
-                if "male muscular" in k:
-                    _set(k.split("/")[-1], mid, mw)
-    if "thin" in traits:
+                if "male muscular body" in k or k.endswith("male muscular"):
+                    if _set(k.split("/")[-1], mid, mw):
+                        break
+    if "thin" in traits and "male skinny" not in content_names:
         tw = float(morphs.get("thin") or 0.7)
-        if _apply_category_substr("male skinny", tw) == 0:
+        if _apply_category_substr("male skinny", tw, limit=1) == 0:
             for k, mid in list(catalog.items()):
-                if "male skinny" in k:
-                    _set(k.split("/")[-1], mid, tw)
+                if "male skinny body" in k:
+                    if _set(k.split("/")[-1], mid, tw):
+                        break
 
     for name, weight in morphs.items():
         if str(name).lower() == "height":

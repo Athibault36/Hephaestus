@@ -196,6 +196,41 @@ def test_resolve_content_assets_muscular_when_pack_present(tmp_path: Path, monke
     assert "HD Aaron.ccAvatarPreset" in names
     assert "Male Muscular Body.ccSlider" in names
     assert "HD Aaron_2K.ccSkin" in names
+    assert not any("Body Ratio" in n for n in names)
+    assert sum(1 for n in names if "Muscular" in n) == 1
+    assert not any("Body Shape" in n for n in names)  # tall skips Body Shape
+
+
+def test_resolve_content_assets_non_tall_may_include_body_shape(tmp_path: Path, monkeypatch):
+    from cc5_appearance import resolve_content_assets
+
+    base = (
+        tmp_path
+        / "Documents"
+        / "Reallusion"
+        / "Reallusion Templates"
+        / "Reallusion 3D"
+        / "CC5 Characters"
+    )
+    char = base / "Actor" / "Avatar Control" / "CC Embed Morphs" / "CC5 Characters"
+    char.mkdir(parents=True)
+    (char / "HD Aaron_Body Shape.ccSlider").write_bytes(b"b")
+    (char / "HD Aaron_Body Ratio.ccSlider").write_bytes(b"r")
+    (char / "HD Aaron_Head Shape.ccSlider").write_bytes(b"h")
+    preset = base / "Avatar Preset" / "Full Body Morph"
+    preset.mkdir(parents=True)
+    (preset / "HD Aaron.ccAvatarPreset").write_bytes(b"p")
+
+    monkeypatch.setenv("PUBLIC", str(tmp_path))
+    monkeypatch.setattr(
+        "cc5_appearance.content_library_roots",
+        lambda: [tmp_path / "Documents" / "Reallusion"],
+    )
+    paths = resolve_content_assets({"gender": "male", "traits": ["muscular"], "seed": "plain"})
+    names = [Path(p).name for p in paths]
+    assert "HD Aaron_Body Shape.ccSlider" in names
+    assert "HD Aaron_Head Shape.ccSlider" in names
+    assert "HD Aaron_Body Ratio.ccSlider" not in names
 
 
 def test_find_default_cc5_template(tmp_path: Path, monkeypatch):
