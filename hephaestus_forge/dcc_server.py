@@ -23,6 +23,7 @@ import uvicorn
 try:
     from blender_bridge import (
         default_export_dir,
+        export_creature_fbx,
         export_primitive_fbx,
         find_blender,
         ue_import_next_steps,
@@ -30,6 +31,7 @@ try:
 except ImportError:
     from hephaestus_forge.blender_bridge import (  # type: ignore
         default_export_dir,
+        export_creature_fbx,
         export_primitive_fbx,
         find_blender,
         ue_import_next_steps,
@@ -86,6 +88,39 @@ def health() -> dict[str, Any]:
         # Honest: available only when Blender is actually found
         "ready": bool(blender.get("available")),
     }
+
+
+def _handle_blender_export_creature(params: dict[str, Any]) -> dict[str, Any]:
+    project_root = params.get("project_root") or params.get("project")
+    root = Path(project_root).resolve() if project_root else None
+    kind = str(params.get("kind") or params.get("creature") or params.get("shape") or "humanoid")
+    name = str(params.get("name") or f"Hephaestus_{kind}")
+    output_path = params.get("output_path") or params.get("output")
+    result = export_creature_fbx(
+        kind=kind,
+        name=name,
+        project_root=root,
+        output_path=Path(output_path) if output_path else None,
+        blender_executable=params.get("blender_executable"),
+        timeout_seconds=int(params.get("timeout") or 180),
+    )
+    out = result.to_dict()
+    out["success"] = result.success
+    out["kind"] = result.shape
+    if result.success and result.output_path:
+        out["result_json"] = json.dumps(
+            {
+                "output_path": result.output_path,
+                "kind": result.shape,
+                "skeletal": True,
+                "next_steps": result.next_steps,
+            }
+        )
+        out["asset_paths"] = [result.output_path]
+    else:
+        out["error"] = result.error or "creature export failed"
+        out["result_json"] = "{}"
+    return out
 
 
 def _handle_blender_export_fbx(params: dict[str, Any]) -> dict[str, Any]:
@@ -212,6 +247,31 @@ def _handle_blender_scene_info(params: dict[str, Any]) -> dict[str, Any]:
             pass
 
 
+def _handle_meshy_generate(params: dict[str, Any]) -> dict[str, Any]:
+    try:
+        from meshy_bridge import generate_and_download, meshy_available
+    except ImportError:
+        from hephaestus_forge.meshy_bridge import generate_and_download, meshy_available  # type: ignore
+    if not meshy_available():
+        return {
+            "success": False,
+            "error": "meshy_unavailable — set MESHY_API_KEY",
+            "result_json": "{}",
+        }
+    project_root = params.get("project_root") or params.get("project")
+    root = Path(project_root).resolve() if project_root else None
+    prompt = str(params.get("prompt") or params.get("text") or "").strip()
+    if not prompt:
+        return {"success": False, "error": "params.prompt required", "result_json": "{}"}
+    return generate_and_download(
+        prompt,
+        project_root=root,
+        name=str(params.get("name") or "HephaestusMeshy"),
+        art_style=str(params.get("art_style") or "realistic"),
+        timeout_s=float(params.get("timeout") or 600),
+    )
+
+
 def _handle_cc5_export(params: dict[str, Any]) -> dict[str, Any]:
     try:
         from cc5_bridge import export_character_fbx
@@ -234,17 +294,27 @@ def route_command(command: str, params: Optional[dict[str, Any]] = None) -> dict
     cmd = (command or "").strip()
     if cmd in ("blender.export_fbx", "blender.export", "blender-export"):
         return _handle_blender_export_fbx(params)
+    if cmd in (
+        "blender.export_creature",
+        "blender.creature",
+        "blender.export_character",
+        "creature.export",
+    ):
+        return _handle_blender_export_creature(params)
     if cmd in ("blender.exec", "blender.execute", "blender.run"):
         return _handle_blender_exec(params)
     if cmd in ("blender.scene_info", "blender.scene"):
         return _handle_blender_scene_info(params)
     if cmd in ("cc5.export", "cc5.export_character", "cc5-export"):
         return _handle_cc5_export(params)
+    if cmd in ("meshy.generate", "meshy.text_to_3d", "meshy-generate"):
+        return _handle_meshy_generate(params)
     return {
         "success": False,
         "error": (
             f"Unknown DCC command '{cmd}' "
-            "(use blender.export_fbx, blender.exec, blender.scene_info, cc5.export)"
+            "(use blender.export_fbx, blender.export_creature, blender.exec, "
+            "blender.scene_info, cc5.export, meshy.generate)"
         ),
         "result_json": "{}",
     }

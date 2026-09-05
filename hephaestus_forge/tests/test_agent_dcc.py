@@ -186,16 +186,50 @@ def test_followup_tint_and_spin(tmp_path: Path):
     assert "Tinted" in out["reply"] and "Spun" in out["reply"]
 
 
-def test_cc5_unavailable(tmp_path: Path):
-    with patch("cc5_bridge.cc5_available", return_value=False):
-        out = try_direct_dcc_author(
-            "make a character and put it in the scene",
-            project_root=tmp_path,
-        )
-    assert out is not None
-    assert out["ok"] is False
-    assert "cc5_unavailable" in out["reply"]
-    assert out["planner"] == "direct_cc5_author"
+def test_infer_creature_kind():
+    from blender_bridge import infer_creature_kind
+
+    assert infer_creature_kind("make a dog") == "quadruped"
+    assert infer_creature_kind("create a person") == "humanoid"
+    assert infer_creature_kind("make a creature") == "creature"
+    assert infer_creature_kind("make a cube") is None
+
+
+def test_creature_author_uses_blender_kit(tmp_path: Path):
+    class FakeExport:
+        success = True
+        output_path = str(tmp_path / "dog.fbx")
+        error = None
+
+        def to_dict(self):
+            return {"success": True, "output_path": self.output_path}
+
+    (tmp_path / "dog.fbx").write_bytes(b"fbx")
+    imported = {
+        "success": True,
+        "asset_path": "/Game/Hephaestus/DccImports/dog",
+        "actor_path": "/Temp/Dog.SkeletalMeshActor_0",
+        "skeletal": True,
+        "spawn_results": [
+            {
+                "success": True,
+                "actor_paths": ["/Temp/Dog.SkeletalMeshActor_0"],
+            }
+        ],
+    }
+    with patch("agent_dcc.meshy_available", create=True, return_value=False):
+        with patch("meshy_bridge.meshy_available", return_value=False):
+            with patch("blender_bridge.export_creature_fbx", return_value=FakeExport()):
+                with patch("agent_dcc.dcc_import_to_pie", create=True):
+                    with patch("dcc_import.dcc_import_to_pie", return_value=imported):
+                        with patch("agent_dcc.frame_actor", return_value={"success": True}):
+                            out = try_direct_dcc_author(
+                                "make a dog and put it in the scene",
+                                project_root=tmp_path,
+                            )
+    assert out and out["ok"]
+    assert out["planner"] == "direct_creature_author"
+    assert "Authored quadruped" in out["reply"] or "quadruped" in out["reply"].lower()
 
 
 def test_autonomous_runner_uses_dcc(monkeypatch, tmp_path: Path):
