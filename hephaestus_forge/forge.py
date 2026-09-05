@@ -1184,6 +1184,122 @@ scanner = SystemScanner(console)
 scaffold = ProjectScaffold(console)
 downloader = ModelDownloader(console)
 
+pie_app = typer.Typer(
+    name="pie",
+    help="Engage / disengage Unreal Play-In-Editor via editor API (:8766).",
+    no_args_is_help=True,
+)
+app.add_typer(pie_app, name="pie")
+
+
+@pie_app.command("status")
+def pie_status(
+    project_path: Annotated[Optional[Path], typer.Argument(help="UE project root (optional identity check)")] = None,
+    as_json: Annotated[bool, typer.Option("--json", help="Print JSON")] = False,
+):
+    """Report editor (:8766) vs PIE (:8765) online state."""
+    try:
+        from pie_control import status_snapshot
+    except ImportError:
+        from hephaestus_forge.pie_control import status_snapshot  # type: ignore
+
+    root = project_path.expanduser().resolve() if project_path else None
+    snap = status_snapshot(root)
+    if as_json:
+        console.print_json(data=snap)
+        raise typer.Exit(0 if snap.get("editor_online") or snap.get("pie_online") else 1)
+
+    ed = "OK" if snap["editor_online"] else "OFF"
+    pie = "OK" if snap["pie_online"] else "OFF"
+    console.print(f"[{'green' if snap['editor_online'] else 'yellow'}]editor {ed}[/{'green' if snap['editor_online'] else 'yellow'}]: {snap['editor_detail']}")
+    console.print(f"[{'green' if snap['pie_online'] else 'yellow'}]pie {pie}[/{'green' if snap['pie_online'] else 'yellow'}]: {snap['pie_detail']}")
+    if snap.get("identity"):
+        console.print(f"[dim]identity: {snap['identity']}[/dim]")
+    if not snap["editor_online"] and not snap["pie_online"]:
+        raise typer.Exit(1)
+
+
+@pie_app.command("start")
+def pie_start(
+    project_path: Annotated[Optional[Path], typer.Argument(help="UE project root for identity match")] = None,
+    timeout: Annotated[float, typer.Option("--timeout", help="Seconds to wait for PIE :8765")] = 45.0,
+    as_json: Annotated[bool, typer.Option("--json", help="Print JSON")] = False,
+):
+    """Request Play (PIE) via editor :8766, then wait until :8765 is healthy."""
+    try:
+        from pie_control import editor_online, play, wait_for_pie
+    except ImportError:
+        from hephaestus_forge.pie_control import editor_online, play, wait_for_pie  # type: ignore
+
+    root = project_path.expanduser().resolve() if project_path else None
+    ed_ok, _, ed_detail = editor_online()
+    if not ed_ok:
+        msg = (
+            f"{ed_detail}. Open the .uproject in UE 5.8 with HephaestusBridge "
+            f"rebuilt (v1.0.1+), then retry."
+        )
+        if as_json:
+            console.print_json(data={"ok": False, "error": msg})
+        else:
+            console.print(f"[red]{msg}[/red]")
+        raise typer.Exit(1)
+
+    try:
+        result = play()
+    except Exception as exc:
+        if as_json:
+            console.print_json(data={"ok": False, "error": str(exc)})
+        else:
+            console.print(f"[red]editor.play failed: {exc}[/red]")
+        raise typer.Exit(1)
+
+    if not result.get("success"):
+        err = result.get("error") or "editor.play failed"
+        if as_json:
+            console.print_json(data={"ok": False, "error": err, "result": result})
+        else:
+            console.print(f"[red]{err}[/red]")
+        raise typer.Exit(1)
+
+    ok, health, detail = wait_for_pie(root, timeout_s=timeout)
+    out = {"ok": ok, "detail": detail, "play": result, "health": health}
+    if as_json:
+        console.print_json(data=out)
+    elif ok:
+        console.print(f"[green]PIE started[/green]: {detail}")
+    else:
+        console.print(f"[red]PIE did not come online in {timeout}s[/red]: {detail}")
+    raise typer.Exit(0 if ok else 2)
+
+
+@pie_app.command("stop")
+def pie_stop(
+    as_json: Annotated[bool, typer.Option("--json", help="Print JSON")] = False,
+):
+    """Stop PIE via editor :8766 (fallback: PIE :8765 editor.stop)."""
+    try:
+        from pie_control import stop
+    except ImportError:
+        from hephaestus_forge.pie_control import stop  # type: ignore
+
+    try:
+        result = stop()
+    except Exception as exc:
+        if as_json:
+            console.print_json(data={"ok": False, "error": str(exc)})
+        else:
+            console.print(f"[red]pie stop failed: {exc}[/red]")
+        raise typer.Exit(1)
+
+    ok = bool(result.get("success"))
+    if as_json:
+        console.print_json(data={"ok": ok, "result": result})
+    elif ok:
+        console.print("[green]PIE stop requested[/green]")
+    else:
+        console.print(f"[red]stop failed: {result.get('error') or result}[/red]")
+    raise typer.Exit(0 if ok else 2)
+
 
 @app.command()
 def init(

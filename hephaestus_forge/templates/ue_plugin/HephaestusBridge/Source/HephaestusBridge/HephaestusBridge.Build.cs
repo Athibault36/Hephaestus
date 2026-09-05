@@ -70,7 +70,9 @@ public class HephaestusBridge : ModuleRules
 				"ToolMenus",
 				"EditorStyle",
 				"DeveloperSettings",
+				"LevelEditor",
 			});
+			PublicDefinitions.Add("WITH_HEPHAESTUS_EDITOR_REMOTE=1");
 		}
 
 		PublicDefinitions.AddRange(new string[]

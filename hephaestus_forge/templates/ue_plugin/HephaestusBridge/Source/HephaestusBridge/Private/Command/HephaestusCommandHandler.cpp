@@ -13,6 +13,12 @@
 #include "Sequence/HephaestusSequenceSubsystem.h"
 #include "Vision/HephaestusVisionSubsystem.h"
 
+#if WITH_EDITOR
+#include "Editor.h"
+#include "Editor/UnrealEdEngine.h"
+#include "UnrealEdGlobals.h"
+#endif
+
 #include "Async/Async.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
@@ -260,6 +266,8 @@ TArray<FString> UHephaestusCommandHandler::GetAvailableCommands() const
         TEXT("vision.start_stream"),
         TEXT("vision.stop_stream"),
         TEXT("vision.inject_overlay"),
+        TEXT("editor.stop"),
+        TEXT("pie.stop"),
     };
 
     // Add custom commands
@@ -405,6 +413,13 @@ FHephaestusCommandResult UHephaestusCommandHandler::RouteCommand(const TSharedPt
     else if (Command.StartsWith(TEXT("vision.")))
     {
         return HandleVisionCommand(Command, Params);
+    }
+    else if (Command.Equals(TEXT("editor.stop"), ESearchCase::IgnoreCase)
+        || Command.Equals(TEXT("pie.stop"), ESearchCase::IgnoreCase)
+        || Command.StartsWith(TEXT("editor."))
+        || Command.StartsWith(TEXT("pie.")))
+    {
+        return HandleEditorCommand(Command, Params);
     }
 
     return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Unknown command category: %s"), *Command));
@@ -2463,6 +2478,37 @@ FHephaestusCommandResult UHephaestusCommandHandler::MakeSuccessResult(const FStr
     Result.ExecutionTimeMs = TimeMs;
     Result.CommandID = CommandID;
     return Result;
+}
+
+FHephaestusCommandResult UHephaestusCommandHandler::HandleEditorCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params)
+{
+#if WITH_EDITOR
+	if (Command.Equals(TEXT("editor.stop"), ESearchCase::IgnoreCase)
+		|| Command.Equals(TEXT("pie.stop"), ESearchCase::IgnoreCase))
+	{
+		if (!GUnrealEd)
+		{
+			return MakeErrorResult(TEXT(""), TEXT("UnrealEd not available — cannot stop PIE"));
+		}
+		if (GEditor && GEditor->PlayWorld == nullptr)
+		{
+			return MakeSuccessResult(TEXT(""), TEXT("{\"stopped\":false,\"reason\":\"pie_not_active\"}"));
+		}
+		GUnrealEd->RequestEndPlayMap();
+		return MakeSuccessResult(TEXT(""), TEXT("{\"stopped\":true}"));
+	}
+	if (Command.Equals(TEXT("editor.play"), ESearchCase::IgnoreCase)
+		|| Command.Equals(TEXT("pie.start"), ESearchCase::IgnoreCase)
+		|| Command.Equals(TEXT("pie.play"), ESearchCase::IgnoreCase))
+	{
+		return MakeErrorResult(
+			TEXT(""),
+			TEXT("editor.play is only available on the editor control API (port 8766), not during PIE"));
+	}
+	return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Unknown editor command: %s"), *Command));
+#else
+	return MakeErrorResult(TEXT(""), TEXT("Editor PIE control requires an editor build of HephaestusBridge"));
+#endif
 }
 
 FHephaestusCommandResult UHephaestusCommandHandler::MakeErrorResult(const FString& CommandID, const FString& ErrorMessage, float TimeMs)

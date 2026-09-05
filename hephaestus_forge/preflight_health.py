@@ -302,6 +302,36 @@ def _probe_bridge_capabilities(remote_api: str) -> HealthCheck:
         )
 
 
+def _probe_ue_editor(timeout: float = 1.5) -> HealthCheck:
+    """Non-blocking: editor control API (:8766) for forge pie start/stop."""
+    try:
+        try:
+            from pie_control import editor_online
+        except ImportError:
+            from hephaestus_forge.pie_control import editor_online  # type: ignore
+        ok, health, detail = editor_online(timeout=timeout)
+        if ok:
+            pie_active = bool(health.get("pie_active"))
+            hint = "PIE active" if pie_active else "PIE inactive — run forge pie start"
+            return HealthCheck(
+                "ue_editor",
+                True,
+                f"{detail}; {hint}",
+                blocker=False,
+            )
+        return HealthCheck(
+            "ue_editor",
+            False,
+            (
+                f"{detail} — open the .uproject with HephaestusBridge rebuilt "
+                f"(editor listens on :8766 for play/stop)"
+            ),
+            blocker=False,
+        )
+    except Exception as exc:
+        return HealthCheck("ue_editor", False, str(exc), blocker=False)
+
+
 def run_preflight(
     remote_api: str = "http://127.0.0.1:8765",
     project_root: Optional[Path] = None,
@@ -311,6 +341,7 @@ def run_preflight(
         HealthCheck("forge", True, f"HephaestusForge {FORGE_VERSION} (bridge template {BRIDGE_VERSION})", blocker=False),
         _probe_project(project_root),
         _probe_bridge_template(project_root),
+        _probe_ue_editor(),
         _probe_ue(remote_api, project_root=project_root),
         _probe_bridge_capabilities(remote_api),
         _probe_nim_key(),

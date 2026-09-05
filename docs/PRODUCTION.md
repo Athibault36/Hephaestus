@@ -29,13 +29,22 @@ In UE 5.8:
 
 1. Enable **HephaestusBridge** + **MetaSound**
 2. Rebuild **Development Editor** (disable Live Coding for C++ changes)
-3. **Play (PIE)** — bridge listens on `http://127.0.0.1:8765`
+3. Engage PIE — either press **Play**, or from forge (bridge ≥ 1.0.1):
+
+```powershell
+forge pie start "C:\path\to\YourGame"
+```
+
+Editor control listens on `http://127.0.0.1:8766`; PIE world API on `http://127.0.0.1:8765`.
 
 Verify:
 
 ```powershell
+curl http://127.0.0.1:8766/v1/health
+# expect "service":"hephaestus-editor"
 curl http://127.0.0.1:8765/v1/health
-# expect "plugin_version":"1.0.0"
+# expect "plugin_version":"1.0.1"
+forge pie stop
 ```
 
 ## Production gate (required)

@@ -10,6 +10,27 @@
 | `HEPHAESTUS_NIM_REPAIR` | off | `1` to run a short repair loop when grading fails |
 | `HEPHAESTUS_NIM_PARALLEL_REPAIR` | off | `1` to fetch a NIM parallel hint before repair loop |
 | `HEPHAESTUS_HEURISTIC_REPAIR` | off | `1` to run repair loop without requiring NIM (heuristic follow-up) |
+| `HEPHAESTUS_EDITOR_API` | `http://127.0.0.1:8766` | Editor control plane for `forge pie start` / `stop` |
+| `HEPHAESTUS_UE_API` | `http://127.0.0.1:8765` | PIE world API (commands / frame) |
+
+## PIE engage / disengage (bridge ≥ 1.0.1)
+
+Editor must be open with HephaestusBridge rebuilt. Then:
+
+```powershell
+forge sync-plugin <PATH-TO-UE-PROJECT>
+# Rebuild HephaestusBridge in UE (Live Coding off) → full editor restart
+forge pie status
+forge pie start <PATH-TO-UE-PROJECT>
+forge pie stop
+```
+
+| Port | Lifetime | Role |
+|------|----------|------|
+| **8766** | Editor open (`-HephaestusEditorPort=` override) | `editor.play` / `editor.stop` |
+| **8765** | Only while PIE (`-HephaestusRemotePort=`) | World / animation / vision commands |
+
+`editor.stop` / `pie.stop` also work on `:8765` while PIE is live.
 
 ## Operator gate (v0.9)
 

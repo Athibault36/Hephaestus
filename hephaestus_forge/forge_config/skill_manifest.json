@@ -457,6 +457,13 @@
   ],
   "external_tools": [
     {
+      "name": "forge.pie",
+      "command": "forge",
+      "args": ["pie", "start|stop|status"],
+      "timeout_seconds": 60,
+      "description": "Engage/disengage UE PIE via editor API :8766"
+    },
+    {
       "name": "blender",
       "command": "blender",
       "args": ["--background", "--python-expr"],

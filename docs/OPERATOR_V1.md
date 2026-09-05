@@ -8,15 +8,29 @@ NIM-required autonomous operator. Builds on [OPERATOR_V0_9.md](OPERATOR_V0_9.md)
 pip install -e .
 export NVIDIA_API_KEY=nvapi-...
 
+# Engage PIE without clicking Play (requires bridge ≥ 1.0.1 + editor open)
+forge pie start <PATH-TO-UE-PROJECT>
+
 forge run <PATH-TO-UE-PROJECT> "spawn a dog and make it walk"
 forge run <PATH-TO-UE-PROJECT> "frame the shot" --json
 
 forge autonomous-suite <PATH-TO-UE-PROJECT>
 forge autonomous-suite <PATH-TO-UE-PROJECT> --scenario A --scenario B --json
 forge autonomous-suite <PATH-TO-UE-PROJECT> --offline   # infra C/D only
+
+forge pie stop
 ```
 
 Mission Control chat uses the same autonomous runner (repair on by default).
+
+## PIE ports
+
+| Port | When | Commands |
+|------|------|----------|
+| `:8766` | Editor open | `forge pie start` / `stop` / `status` |
+| `:8765` | PIE running | world / animation / suite |
+
+See [ENV_FLAGS.md](ENV_FLAGS.md).
 
 ## Scenarios A–G
 
@@ -41,7 +55,8 @@ Mission Control chat uses the same autonomous runner (repair on by default).
 | Symptom | Meaning | Action |
 |---------|---------|--------|
 | `llm_error` in JSON | No API key or NIM unreachable | Set `NVIDIA_API_KEY`, retry |
-| Gate `preflight_ue_pie` fail | PIE not running | Play in UE |
+| Gate `preflight_ue_pie` fail | PIE not running | `forge pie start <project>` or Play in UE |
+| Editor `:8766` offline | Plugin not rebuilt / editor closed | Rebuild HephaestusBridge 1.0.1+, restart editor |
 | `plugin_version` mismatch | Stale DLL or header | `forge sync-plugin`, rebuild, restart editor |
 | `mission_control_dist` fail | No Vite build | `forge observe` (auto-build) or `forge build-mc` |
 | Grade `missing: ["nim_planner"]` | Autonomous path without NIM | Expected — not a bug |
