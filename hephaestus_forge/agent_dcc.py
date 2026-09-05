@@ -8,6 +8,7 @@ in-viewport without the operator running forge blender / dcc-import by hand.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any, Optional
@@ -67,7 +68,7 @@ _FOLLOWUP_ONLY = re.compile(
     re.IGNORECASE,
 )
 
-# In-process last DCC delivery (per project key)
+# In-process last DCC delivery (per project key); also mirrored to disk
 _LAST_DCC: dict[str, dict[str, Any]] = {}
 
 
@@ -75,18 +76,45 @@ def _project_key(project_root: Optional[Path]) -> str:
     return str(Path(project_root).resolve()) if project_root else ""
 
 
+def _last_dcc_path(project_root: Optional[Path]) -> Optional[Path]:
+    if not project_root:
+        return None
+    return Path(project_root).resolve() / ".hephaestus_forge" / "last_dcc.json"
+
+
 def remember_dcc(project_root: Optional[Path], meta: dict[str, Any]) -> None:
     key = _project_key(project_root)
-    _LAST_DCC[key] = {
+    payload = {
         "actor_path": meta.get("actor_path"),
         "asset_path": meta.get("asset_path"),
         "shape": meta.get("shape") or meta.get("dcc_shape"),
         "fbx": meta.get("fbx"),
     }
+    _LAST_DCC[key] = payload
+    disk = _last_dcc_path(project_root)
+    if disk is None:
+        return
+    try:
+        disk.parent.mkdir(parents=True, exist_ok=True)
+        disk.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    except OSError:
+        pass
 
 
 def last_dcc(project_root: Optional[Path] = None) -> Optional[dict[str, Any]]:
-    return _LAST_DCC.get(_project_key(project_root)) or None
+    key = _project_key(project_root)
+    if key in _LAST_DCC:
+        return _LAST_DCC[key]
+    disk = _last_dcc_path(project_root)
+    if disk and disk.is_file():
+        try:
+            data = json.loads(disk.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and data.get("actor_path"):
+                _LAST_DCC[key] = data
+                return data
+        except (OSError, json.JSONDecodeError, TypeError):
+            return None
+    return None
 
 
 def wants_spin(message: str) -> bool:
