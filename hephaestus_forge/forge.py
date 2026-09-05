@@ -2059,6 +2059,26 @@ def observe(
     if not report.ready:
         console.print("[yellow]Mission Control will open, but agent goals need PIE + HephaestusBridge online.[/yellow]")
 
+    # Ensure DCC :8084 is up for Author into PIE / blender path (non-blocking)
+    try:
+        from dcc_client import dcc_online, start_dcc_server
+    except ImportError:
+        try:
+            from hephaestus_forge.dcc_client import dcc_online, start_dcc_server  # type: ignore
+        except ImportError:
+            dcc_online = None  # type: ignore
+            start_dcc_server = None  # type: ignore
+    if dcc_online and start_dcc_server:
+        dcc_ok, _, dcc_detail = dcc_online()
+        if not dcc_ok:
+            started = start_dcc_server()
+            if started.get("ok"):
+                console.print("[green]OK[/] dcc: started on :8084")
+            else:
+                console.print(f"[yellow]WARN[/] dcc: {started.get('error') or dcc_detail}")
+        else:
+            console.print(f"[green]OK[/] dcc: {dcc_detail}")
+
     try:
         import webbrowser
 
