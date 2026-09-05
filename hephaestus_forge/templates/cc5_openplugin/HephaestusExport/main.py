@@ -278,7 +278,17 @@ def _load_content_assets(avatar, appearance: dict) -> dict:
             errors.append(f"missing:{path.name}")
             continue
         try:
-            obj = RLPy.RFileIO.LoadObject(str(path))
+            obj = None
+            # Prefer LoadObject; some content types need LoadFile
+            try:
+                obj = RLPy.RFileIO.LoadObject(str(path))
+            except Exception:
+                obj = None
+            if obj is None and hasattr(RLPy.RFileIO, "LoadFile"):
+                try:
+                    obj = RLPy.RFileIO.LoadFile(str(path))
+                except Exception:
+                    obj = None
             if obj is None:
                 errors.append(f"null:{path.name}")
                 continue
@@ -412,30 +422,69 @@ def _apply_morphs(avatar, appearance: dict) -> dict:
 
     def _find_id(needle: str):
         n = needle.strip().lower()
+        aliases = {
+            "muscle": ("male muscular body", "muscular body", "male muscular", "muscular"),
+            "bodybuilder": ("male muscular body", "male muscular chest", "muscular"),
+            "athletic": ("male muscular body", "body shape", "athletic"),
+            "thin": ("male skinny body", "skinny body", "male skinny", "skinny"),
+            "slender": ("male skinny body", "skinny"),
+            "heavy": ("heavy", "overweight", "body shape"),
+            "height": ("character height", "height", "body ratio"),
+            "face width": ("face width", "head shape", "head width"),
+        }
+        candidates = (n,) + tuple(aliases.get(n, ()))
         words = [w for w in re.split(r"[^a-z0-9]+", n) if len(w) > 2]
         best = None
         best_score = 0
         for k, v in catalog.items():
-            if any(x in k for x in ("eyeocclusion", "eo ", "/eo ", "tearline", "tl ")):
+            if any(x in k for x in ("eyeocclusion", "eo ", "/eo ", "tearline", "tl ", "eyeball", "teeth")):
                 continue
             score = 0
-            if n == k:
-                return v
-            if n in k:
-                score = 500 - min(len(k), 400)
-            elif words:
+            for cand in candidates:
+                if cand == k:
+                    return v
+                if cand and cand in k:
+                    # Prefer shorter/leaf keys and HD body muscular paths
+                    score = max(score, 600 - min(len(k), 500))
+            if score == 0 and words:
                 hits = sum(1 for w in words if w in k)
                 if not hits:
                     continue
                 score = hits * 40
-            else:
+            if score == 0:
                 continue
-            if any(t in k for t in ("full body", "character", "actor/body", "body/", "head/", "face")):
+            if "male muscular" in k or "male skinny" in k:
+                score += 120
+            if any(t in k for t in ("full body", "character height", "hd body", "body shape", "body ratio", "head/", "face")):
                 score += 80
+            # Penalize Actor Parts facial clutter
+            if "actor parts" in k or "parts/" in k:
+                score -= 200
             if score > best_score:
                 best_score = score
                 best = v
         return best if best_score >= 40 else None
+
+    # Trait-driven bulk apply when Free Resource embed morphs are present
+    traits = {str(t).lower() for t in ((appearance or {}).get("traits") or [])}
+    if "muscular" in traits:
+        mw = float(morphs.get("muscle") or 0.75)
+        for k, mid in catalog.items():
+            if "male muscular" in k and "actor parts" not in k:
+                try:
+                    shaping.SetShapingMorphWeight(mid, mw)
+                    applied.append(f"{k.split('/')[-1]}={mw:.2f}")
+                except Exception as exc:
+                    missed.append(f"{k}({exc})")
+    if "thin" in traits:
+        tw = float(morphs.get("thin") or 0.65)
+        for k, mid in catalog.items():
+            if "male skinny" in k and "actor parts" not in k:
+                try:
+                    shaping.SetShapingMorphWeight(mid, tw)
+                    applied.append(f"{k.split('/')[-1]}={tw:.2f}")
+                except Exception as exc:
+                    missed.append(f"{k}({exc})")
 
     for name, weight in morphs.items():
         mid = _find_id(str(name))
