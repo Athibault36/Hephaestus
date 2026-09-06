@@ -222,24 +222,38 @@ def _apply_scale_shape(avatar, appearance: dict) -> dict:
 
 
 def _load_outfit(avatar, appearance: dict) -> dict:
-    """Best-effort load of default cloth/hair templates onto the character."""
+    """
+    Fill gaps when Free Resource outfits are partial (e.g. Aaron set = pants+shoes only).
+
+    Always try AutoSkin Full_Body / Hair / Shoe when those slots were not already loaded.
+    """
     import RLPy
 
+    content_names = " ".join(
+        str(p).lower()
+        for p in list((appearance or {}).get("content_assets") or [])
+        + list((appearance or {}).get("wearable_assets") or [])
+    )
     root = _cc5_program_root()
     cloth_dir = root / "Program" / "CCBaseData" / "AutoSkin" / "RL_CC3_Plus"
     loaded: list[str] = []
     errors: list[str] = []
-    # Prefer a full-body or dress for female; cloak/other for variety by seed
     gender = str((appearance or {}).get("gender") or "")
-    seed = str((appearance or {}).get("seed") or "x")
-    picks = []
-    if gender == "female":
-        picks = ["Dress.ccCloth", "Hair.ccHair", "Shoe.ccShoes"]
-    else:
-        picks = ["Full_Body.ccCloth", "Hair.ccHair", "Shoe.ccShoes"]
-    # Mild variety
-    if abs(hash(seed)) % 2 == 0 and (cloth_dir / "Cloak.ccCloth").is_file():
-        picks.insert(0, "Cloak.ccCloth")
+
+    def _has(*needles: str) -> bool:
+        return any(n in content_names for n in needles)
+
+    picks: list[str] = []
+    # Upper/full body if Free Resource set didn't include a full outfit or shirt
+    if not _has("full_body", "dress", "apron", "sweater", "shirt", "top"):
+        if gender == "female":
+            picks.append("Dress.ccCloth")
+        else:
+            picks.append("Full_Body.ccCloth")
+    if not _has(".cchair", ".rlhair", "hair.cc"):
+        picks.append("Hair.ccHair")
+    if not _has(".ccshoes", "sneaker", "boot", "shoe"):
+        picks.append("Shoe.ccShoes")
 
     for name in picks:
         path = cloth_dir / name
@@ -259,17 +273,19 @@ def _load_outfit(avatar, appearance: dict) -> dict:
     return {"loaded": loaded, "errors": errors}
 
 
-def _load_content_assets(avatar, appearance: dict) -> dict:
+def _load_content_assets(avatar, appearance: dict, *, paths: list | None = None) -> dict:
     """
-    Apply Free Resource packs (ccAvatarPreset / ccSlider / ccSkin) from the plan.
+    Apply Free Resource packs from the plan.
 
-    Paths come from hephaestus_forge.cc5_appearance.resolve_content_assets.
+    Body packs (preset/slider/skin) come via appearance['content_assets'].
+    Wearables (cloth/hair) should be passed after morphs via wearable_assets.
     """
     import RLPy
 
     loaded: list[str] = []
     errors: list[str] = []
-    paths = list((appearance or {}).get("content_assets") or [])
+    if paths is None:
+        paths = list((appearance or {}).get("content_assets") or [])
     if not paths:
         return {"loaded": [], "errors": [], "skipped": True}
 
@@ -297,7 +313,9 @@ def _load_content_assets(avatar, appearance: dict) -> dict:
             # Cloth-like assets may need conform; presets/skins usually apply in-place
             try:
                 suf = path.suffix.lower()
-                if suf in (".cccloth", ".ccshoes", ".cchair") and hasattr(RLPy, "RCloth"):
+                if suf in (".cccloth", ".ccshoes", ".cchair", ".ccgloves", ".rlhair") and hasattr(
+                    RLPy, "RCloth"
+                ):
                     if hasattr(RLPy.RCloth, "Conform"):
                         RLPy.RCloth.Conform(obj, avatar)
             except Exception as exc:
@@ -314,6 +332,79 @@ def _load_content_assets(avatar, appearance: dict) -> dict:
         errors.append(f"modified:{exc}")
 
     return {"loaded": loaded, "errors": errors, "count": len(paths)}
+
+
+def _reconform_cloth(avatar) -> dict:
+    """Best-effort re-conform after morphs so wearables match the final body."""
+    import RLPy
+
+    reconformed = 0
+    errors: list[str] = []
+    try:
+        children = []
+        if hasattr(avatar, "GetChildren"):
+            children = list(avatar.GetChildren() or [])
+        elif hasattr(RLPy, "RScene") and hasattr(RLPy.RScene, "FindObjects"):
+            try:
+                children = list(RLPy.RScene.FindObjects(RLPy.EObjectType_Prop) or [])
+            except Exception:
+                children = []
+        for child in children:
+            try:
+                if hasattr(RLPy, "RCloth") and hasattr(RLPy.RCloth, "Conform"):
+                    RLPy.RCloth.Conform(child, avatar)
+                    reconformed += 1
+            except Exception as exc:
+                errors.append(str(exc)[:120])
+    except Exception as exc:
+        errors.append(f"reconform:{exc}")
+    return {"reconformed": reconformed, "errors": errors[:8]}
+
+
+def _apply_appearance(avatar, appearance: dict) -> dict:
+    """Body packs → morphs → wearables → AutoSkin gaps (never cloth-before-morphs)."""
+    if not appearance:
+        return {"skipped": True}
+    wear_suffixes = (".cccloth", ".ccshoes", ".cchair", ".ccgloves", ".rlhair")
+    all_content = list(appearance.get("content_assets") or [])
+    wear_paths = list(appearance.get("wearable_assets") or [])
+    if not wear_paths:
+        # Split mixed content_assets (PF-compat plans append wearables there)
+        body_paths = [p for p in all_content if Path(str(p)).suffix.lower() not in wear_suffixes]
+        wear_paths = [p for p in all_content if Path(str(p)).suffix.lower() in wear_suffixes]
+    else:
+        body_paths = [
+            p
+            for p in all_content
+            if Path(str(p)).suffix.lower() not in wear_suffixes
+        ]
+    content = _load_content_assets(avatar, appearance, paths=body_paths)
+    morphs = _apply_morphs(avatar, appearance)
+    wearables = (
+        _load_content_assets(avatar, appearance, paths=wear_paths)
+        if wear_paths
+        else {"loaded": [], "errors": [], "skipped": True}
+    )
+    outfit = _load_outfit(avatar, appearance)
+    reconform = _reconform_cloth(avatar)
+    return {
+        "traits": list(appearance.get("traits") or []),
+        "gender": appearance.get("gender"),
+        "content": content,
+        "scale": {"scaled": False, "deferred_to_pie": True},
+        "wearables": wearables,
+        "morphs": morphs,
+        "outfit": outfit,
+        "reconform": reconform,
+        "applied": [f"content:{n}" for n in (content.get("loaded") or [])]
+        + list(morphs.get("applied") or [])
+        + [f"wear:{n}" for n in (wearables.get("loaded") or [])]
+        + [f"outfit:{n}" for n in (outfit.get("loaded") or [])],
+        "missed": list(morphs.get("missed") or [])
+        + list(content.get("errors") or [])
+        + list(wearables.get("errors") or []),
+        "morph_count": morphs.get("morph_count") or 0,
+    }
 
 
 def _apply_morphs(avatar, appearance: dict) -> dict:
@@ -579,30 +670,6 @@ def _apply_morphs(avatar, appearance: dict) -> dict:
             for c in cat_summary
             if "parts" not in str(c).lower()
         ),
-    }
-
-
-def _apply_appearance(avatar, appearance: dict) -> dict:
-    """Create a distinct character: content packs + morphs + scale + outfit."""
-    if not appearance:
-        return {"skipped": True}
-    content = _load_content_assets(avatar, appearance)
-    morphs = _apply_morphs(avatar, appearance)
-    scale = _apply_scale_shape(avatar, appearance)
-    outfit = _load_outfit(avatar, appearance)
-    return {
-        "traits": list(appearance.get("traits") or []),
-        "gender": appearance.get("gender"),
-        "content": content,
-        "scale": scale,
-        "morphs": morphs,
-        "outfit": outfit,
-        "applied": [f"content:{n}" for n in (content.get("loaded") or [])]
-        + list(morphs.get("applied") or [])
-        + ([f"scale={scale.get('scale')}"] if scale.get("scaled") else [])
-        + [f"outfit:{n}" for n in (outfit.get("loaded") or [])],
-        "missed": list(morphs.get("missed") or []) + list(content.get("errors") or []),
-        "morph_count": morphs.get("morph_count") or 0,
     }
 
 

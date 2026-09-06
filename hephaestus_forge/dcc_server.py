@@ -294,7 +294,7 @@ def _handle_cc5_export(params: dict[str, Any]) -> dict[str, Any]:
         project_root=root,
         output_path=Path(params["output_path"]) if params.get("output_path") else None,
         include_morphs=bool(params.get("include_morphs", True)),
-        timeout_seconds=int(params.get("timeout") or 180),
+        timeout_seconds=int(params.get("timeout") or 600),
     )
     return result
 

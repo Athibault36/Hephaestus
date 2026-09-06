@@ -207,6 +207,58 @@ def test_resolve_content_assets_muscular_when_pack_present(tmp_path: Path, monke
     assert not any("Body Shape" in n for n in names)  # tall skips Body Shape
 
 
+def test_resolve_content_assets_includes_outfit_when_present(tmp_path: Path, monkeypatch):
+    from cc5_appearance import resolve_content_assets, resolve_wearable_assets
+
+    base = (
+        tmp_path
+        / "Documents"
+        / "Reallusion"
+        / "Reallusion Templates"
+        / "Reallusion 3D"
+        / "CC5 Characters"
+    )
+    outfit = base / "Cloth" / "Others" / "Aaron Outfit Set"
+    outfit.mkdir(parents=True)
+    (outfit / "Slim Fit Trousers.ccCloth").write_bytes(b"c")
+    (outfit / "Sport Sneakers.ccShoes").write_bytes(b"s")
+    hair = base / "Hair" / "Group" / "Hair"
+    hair.mkdir(parents=True)
+    (hair / "Classic Slick Back.rlHair").write_bytes(b"h")
+    preset = base / "Avatar Preset" / "Full Body Morph"
+    preset.mkdir(parents=True)
+    (preset / "HD Aaron.ccAvatarPreset").write_bytes(b"p")
+
+    monkeypatch.setenv("PUBLIC", str(tmp_path))
+    monkeypatch.setattr(
+        "cc5_appearance.content_library_roots",
+        lambda: [tmp_path / "Documents" / "Reallusion"],
+    )
+    plan = {"gender": "male", "traits": ["muscular"], "seed": "Hero", "prompt": "sporty"}
+    body = resolve_content_assets(plan)
+    wear = resolve_wearable_assets(plan)
+    body_names = [Path(p).name for p in body]
+    wear_names = [Path(p).name for p in wear]
+    assert "HD Aaron.ccAvatarPreset" in body_names
+    assert "Slim Fit Trousers.ccCloth" not in body_names  # body resolver stays body-only
+    assert "Slim Fit Trousers.ccCloth" in wear_names
+    assert "Sport Sneakers.ccShoes" in wear_names
+    assert "Classic Slick Back.rlHair" in wear_names
+    # Pants-only Aaron set should pull AutoSkin Full_Body when installed
+    if any(Path(p).name == "Full_Body.ccCloth" for p in wear):
+        assert "Full_Body.ccCloth" in wear_names
+    from cc5_appearance import infer_appearance
+
+    plan2 = infer_appearance("muscular sporty man named Hero", character_name="Hero")
+    mixed = [Path(p).name for p in plan2.get("content_assets") or []]
+    # PF-compat: infer appends wearables after body packs
+    assert "Slim Fit Trousers.ccCloth" in mixed
+    assert mixed.index("HD Aaron.ccAvatarPreset") < mixed.index("Slim Fit Trousers.ccCloth")
+    # Full_Body fill should appear after trousers when AutoSkin is present
+    if "Full_Body.ccCloth" in mixed:
+        assert mixed.index("Slim Fit Trousers.ccCloth") < mixed.index("Full_Body.ccCloth")
+
+
 def test_resolve_content_assets_non_tall_may_include_body_shape(tmp_path: Path, monkeypatch):
     from cc5_appearance import resolve_content_assets
 
