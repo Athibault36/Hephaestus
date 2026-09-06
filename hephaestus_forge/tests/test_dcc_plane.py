@@ -244,6 +244,9 @@ def test_resolve_content_assets_includes_outfit_when_present(tmp_path: Path, mon
     assert "Slim Fit Trousers.ccCloth" in wear_names
     assert "Sport Sneakers.ccShoes" in wear_names
     assert "Classic Slick Back.rlHair" in wear_names
+    # Pants-only Aaron set should pull AutoSkin Full_Body when installed
+    if any(Path(p).name == "Full_Body.ccCloth" for p in wear):
+        assert "Full_Body.ccCloth" in wear_names
     from cc5_appearance import infer_appearance
 
     plan2 = infer_appearance("muscular sporty man named Hero", character_name="Hero")
@@ -251,6 +254,9 @@ def test_resolve_content_assets_includes_outfit_when_present(tmp_path: Path, mon
     # PF-compat: infer appends wearables after body packs
     assert "Slim Fit Trousers.ccCloth" in mixed
     assert mixed.index("HD Aaron.ccAvatarPreset") < mixed.index("Slim Fit Trousers.ccCloth")
+    # Full_Body fill should appear after trousers when AutoSkin is present
+    if "Full_Body.ccCloth" in mixed:
+        assert mixed.index("Slim Fit Trousers.ccCloth") < mixed.index("Full_Body.ccCloth")
 
 
 def test_resolve_content_assets_non_tall_may_include_body_shape(tmp_path: Path, monkeypatch):

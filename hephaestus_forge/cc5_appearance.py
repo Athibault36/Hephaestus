@@ -167,7 +167,77 @@ def resolve_wearable_assets(plan: dict[str, Any]) -> list[str]:
     seed = str(plan.get("seed") or "x")
     prompt = str(plan.get("prompt") or "")
     picks = _resolve_outfit_paths(base, gender=gender, seed=seed, prompt=prompt)
-    return [str(p) for p in picks if p.is_file()]
+    picks.extend(_autoskin_gap_fills(picks, gender=gender))
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    out: list[str] = []
+    for p in picks:
+        if not p.is_file():
+            continue
+        key = str(p.resolve()) if p.exists() else str(p)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(str(p))
+    return out
+
+
+def _cc5_program_root() -> Optional[Path]:
+    """Character Creator 5 install root (…/Character Creator 5/)."""
+    try:
+        from cc5_bridge import find_cc5
+    except ImportError:
+        try:
+            from hephaestus_forge.cc5_bridge import find_cc5  # type: ignore
+        except ImportError:
+            find_cc5 = None  # type: ignore
+    if find_cc5:
+        exe = find_cc5()
+        if exe:
+            # …/Bin64/CharacterCreator.exe → parents[1] = Character Creator 5 root
+            return Path(exe).resolve().parents[1]
+    for candidate in (
+        Path(r"C:\Program Files\Reallusion\Character Creator 5\Character Creator 5"),
+        Path(r"D:\Program Files\Reallusion\Character Creator 5\Character Creator 5"),
+    ):
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
+def _autoskin_gap_fills(already: list[Path], *, gender: str) -> list[Path]:
+    """
+    Aaron Outfit Set is pants+shoes only — fill shirt/hair/shoes from AutoSkin when missing.
+
+    Uses Program/.../AutoSkin/RL_CC3_Plus (present on standard CC5 installs).
+    """
+    names = " ".join(p.name.lower() for p in already)
+    root = _cc5_program_root()
+    if root is None:
+        return []
+    cloth_dir = root / "Program" / "CCBaseData" / "AutoSkin" / "RL_CC3_Plus"
+    if not cloth_dir.is_dir():
+        return []
+    fills: list[Path] = []
+    has_top = any(
+        k in names
+        for k in ("full_body", "dress", "apron", "sweater", "shirt", "top", "halter", "jacket")
+    )
+    has_hair = ".rlhair" in names or ".cchair" in names or "hair.cc" in names
+    has_shoes = ".ccshoes" in names or "sneaker" in names or "boot" in names or "heel" in names
+    if not has_top:
+        top = cloth_dir / ("Dress.ccCloth" if gender == "female" else "Full_Body.ccCloth")
+        if top.is_file():
+            fills.append(top)
+    if not has_hair:
+        hair = cloth_dir / "Hair.ccHair"
+        if hair.is_file():
+            fills.append(hair)
+    if not has_shoes:
+        shoe = cloth_dir / "Shoe.ccShoes"
+        if shoe.is_file():
+            fills.append(shoe)
+    return fills
 
 
 def _resolve_outfit_paths(
