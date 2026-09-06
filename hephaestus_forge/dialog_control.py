@@ -186,6 +186,22 @@ KNOWN_DIALOGS: tuple[dict[str, Any], ...] = (
         "body_re": r"Unsaved project|unsaved changes",
     },
     {
+        "id": "cc5_apply_material",
+        "title_re": r"^Apply Material$|Apply Material Settings|Material Settings",
+        "process_re": r"CharacterCreator",
+        "buttons": ("Apply", "OK", "Yes", "Continue"),
+        "reason": "CC5 Apply Material blocks content/skin loads mid-job",
+        "check_dont_show_again": True,
+    },
+    {
+        "id": "cc5_apply_content",
+        "title_re": r"^Apply (Morph|Pose|Motion|Cloth|Hair|Skin|Content)|^Load (Content|Item)|^Conform",
+        "process_re": r"CharacterCreator",
+        "buttons": ("Apply", "OK", "Yes", "Continue", "Load"),
+        "reason": "CC5 apply/load content prompts during appearance",
+        "check_dont_show_again": True,
+    },
+    {
         "id": "cc5_export",
         "title_re": r"Export FBX|FBX Export|Export Options|Exporting|Overwrite File|File Exists",
         "process_re": r"CharacterCreator",
@@ -194,7 +210,7 @@ KNOWN_DIALOGS: tuple[dict[str, Any], ...] = (
     },
     {
         "id": "cc5_message",
-        "title_re": r"^Message$|^Warning$|^Error$|^Confirm$|^Information$",
+        "title_re": r"^Message$|^Warning$|^Error$|^Confirm$|^Information$|^Notice$",
         "process_re": r"CharacterCreator",
         "buttons": ("OK", "Yes", "Continue", "Close", "Cancel"),
         "reason": "CC5 MessageBox",
@@ -203,9 +219,17 @@ KNOWN_DIALOGS: tuple[dict[str, Any], ...] = (
         "id": "cc5_qt_modal",
         "title_re": r"^Character Creator 5$",
         "process_re": r"CharacterCreator",
-        "buttons": ("Cancel", "OK", "No", "Yes", "Close"),
+        "buttons": ("Cancel", "OK", "No", "Yes", "Close", "Apply"),
         "reason": "CC5 Qt modal with generic title",
         "prefer_small": True,
+    },
+    {
+        "id": "cc5_please_wait",
+        "title_re": r"Please wait|Please Wait",
+        "process_re": r"CharacterCreator",
+        "buttons": (),
+        "skip_auto": True,
+        "reason": "Progress dialog — wait, do not cancel",
     },
     {
         "id": "reallusion_hub",
@@ -318,7 +342,22 @@ def _list_via_pywinauto() -> list[DialogInfo]:
                 or bool(_known_match(title, ""))
                 or any(
                     k in title.lower()
-                    for k in ("restore", "save", "crash", "error", "warning", "confirm", "message")
+                    for k in (
+                        "restore",
+                        "save",
+                        "crash",
+                        "error",
+                        "warning",
+                        "confirm",
+                        "message",
+                        "apply",
+                        "material",
+                        "morph",
+                        "export",
+                        "import",
+                        "overwrite",
+                        "please wait",
+                    )
                 )
                 or (is_qt and is_small)
             )
@@ -473,13 +512,29 @@ def list_dialogs(*, include_main_windows: bool = False) -> dict[str, Any]:
                 filtered.append(d)
             elif any(
                 k in d.title.lower()
-                for k in ("restore", "save", "crash", "error", "warning", "confirm", "message")
+                for k in (
+                    "restore",
+                    "save",
+                    "crash",
+                    "error",
+                    "warning",
+                    "confirm",
+                    "message",
+                    "apply",
+                    "material",
+                    "morph",
+                    "export",
+                    "import",
+                    "overwrite",
+                )
             ):
                 filtered.append(d)
-            elif "qt" in (d.class_name or "").lower() and "charactercreator" in (
-                d.process_name or ""
-            ).lower():
-                # Small CC5 Qt windows (exact title "Character Creator 5") are modals
+            elif (
+                "qt" in (d.class_name or "").lower()
+                and "charactercreator" in (d.process_name or "").lower()
+                and d.title.strip().lower() in ("character creator 5", "apply material")
+            ):
+                # Small CC5 Qt modals (not the main editor frame)
                 filtered.append(d)
         dialogs = filtered
 
@@ -508,13 +563,54 @@ def _uia_buttons_and_body(hwnd: int) -> tuple[list[str], str]:
                     continue
                 if ctype == "button" and text not in buttons:
                     buttons.append(text)
-                elif ctype in ("text", "document", "edit") and len(text) > 8:
+                elif ctype in ("text", "document", "edit", "checkbox", "check box") and len(text) > 3:
                     body_bits.append(text)
             except Exception:
                 continue
     except Exception:
         pass
     return buttons, " ".join(body_bits)
+
+
+def _check_dont_show_again(hwnd: int) -> dict[str, Any]:
+    """Tick 'Don't show this again' on CC5 Apply Material / similar Qt dialogs."""
+    try:
+        from pywinauto import Application
+
+        app = Application(backend="uia").connect(handle=int(hwnd))
+        win = app.window(handle=int(hwnd))
+        needles = (
+            "don't show this again",
+            "dont show this again",
+            "do not show this again",
+            "don't show again",
+        )
+        for ctrl in win.descendants():
+            try:
+                ctype = (ctrl.element_info.control_type or "").lower()
+                if ctype not in ("checkbox", "check box"):
+                    continue
+                text = _normalize(ctrl.window_text() or "")
+                if not any(n in text for n in needles):
+                    continue
+                try:
+                    if hasattr(ctrl, "get_toggle_state") and ctrl.get_toggle_state() == 1:
+                        return {"ok": True, "checked": True, "already": True}
+                except Exception:
+                    pass
+                try:
+                    ctrl.toggle()
+                except Exception:
+                    try:
+                        ctrl.click_input()
+                    except Exception as exc:
+                        return {"ok": False, "error": str(exc)}
+                return {"ok": True, "checked": True, "method": "uia_checkbox"}
+            except Exception:
+                continue
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": False, "error": "dont_show_checkbox_not_found"}
 
 
 def _click_button_uia(hwnd: int, button_text: str) -> dict[str, Any]:
@@ -744,11 +840,186 @@ def _close_window(hwnd: int) -> dict[str, Any]:
             return {"ok": False, "error": f"close failed: {exc}; {exc2}"}
 
 
+def _dismiss_cc5_embedded_modals() -> list[dict[str, Any]]:
+    """
+    CC5 often shows Apply Material as a Qt dialog that is not a top-level
+    EnumWindows target. Find by win32 child titles first (fast), then UIA BFS
+    under CharacterCreator mains (depth-limited — never full descendants()).
+    """
+    handled: list[dict[str, Any]] = []
+    if sys.platform != "win32":
+        return handled
+    try:
+        import psutil
+        import win32gui
+        import win32process
+    except Exception as exc:
+        return [{"ok": False, "error": f"deps: {exc}"}]
+
+    cc5_pids = {
+        p.info["pid"]
+        for p in psutil.process_iter(["pid", "name"])
+        if "charactercreator" in ((p.info.get("name") or "").lower())
+        and "py" not in ((p.info.get("name") or "").lower())
+    }
+    if not cc5_pids:
+        return handled
+
+    title_needles = (
+        "apply material",
+        "apply morph",
+        "apply pose",
+        "apply cloth",
+        "apply hair",
+        "apply skin",
+        "apply content",
+    )
+    matches: list[tuple[int, str]] = []
+    # Small generic CC5 Qt modals (title often just "Character Creator 5")
+    cc5_small_modals: list[int] = []
+
+    def _pid_of(hwnd: int) -> int:
+        try:
+            _, pid = win32process.GetWindowThreadProcessId(hwnd)
+            return int(pid)
+        except Exception:
+            return 0
+
+    def _consider(hwnd: int) -> None:
+        try:
+            title = (win32gui.GetWindowText(hwnd) or "").strip()
+            if not title:
+                return
+            if _pid_of(hwnd) not in cc5_pids:
+                return
+            title_l = title.lower()
+            visible = bool(win32gui.IsWindowVisible(hwnd))
+            if any(n in title_l for n in title_needles) and visible:
+                matches.append((int(hwnd), title))
+                return
+            # Visible small "Character Creator 5" dialogs often host Apply Material chrome
+            if visible and title_l == "character creator 5":
+                try:
+                    left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+                    w, h = right - left, bottom - top
+                    if 180 < w < 900 and 120 < h < 700:
+                        cc5_small_modals.append(int(hwnd))
+                except Exception:
+                    pass
+        except Exception:
+            return
+
+    def _enum_child(hwnd, _):
+        _consider(hwnd)
+        return True
+
+    def _enum_top(hwnd, _):
+        try:
+            if _pid_of(hwnd) in cc5_pids:
+                _consider(hwnd)
+                win32gui.EnumChildWindows(hwnd, _enum_child, None)
+        except Exception:
+            pass
+        return True
+
+    try:
+        win32gui.EnumWindows(_enum_top, None)
+    except Exception as exc:
+        return [{"ok": False, "error": f"enum: {exc}"}]
+
+    # Probe small CC5 modals for an Apply button (covers painted-title Qt dialogs)
+    for hwnd in cc5_small_modals:
+        try:
+            buttons, body = _uia_buttons_and_body(hwnd)
+        except Exception:
+            continue
+        btn_l = {_normalize(b) for b in buttons}
+        body_l = _normalize(body)
+        if "apply" in btn_l or "don't show this again" in body_l or "dont show this again" in body_l:
+            matches.append((hwnd, "Character Creator 5 / Apply Material"))
+
+    # Optional deep UIA name search — only when a small modal exists but Apply wasn't
+    # enumerated yet (avoids walking the huge main-frame tree every poll).
+    if not matches and cc5_small_modals:
+        deadline = time.time() + 0.8
+        try:
+            from collections import deque
+            from pywinauto import Application
+
+            for hwnd in cc5_small_modals:
+                if time.time() > deadline:
+                    break
+                try:
+                    app = Application(backend="uia").connect(handle=int(hwnd))
+                    root = app.window(handle=int(hwnd))
+                except Exception:
+                    continue
+                q: deque = deque([(root, 0)])
+                while q and time.time() <= deadline:
+                    el, depth = q.popleft()
+                    try:
+                        name = (el.window_text() or getattr(el.element_info, "name", "") or "").strip()
+                    except Exception:
+                        name = ""
+                    if name and any(n in name.lower() for n in title_needles):
+                        matches.append((int(hwnd), name))
+                        break
+                    if depth >= 3:
+                        continue
+                    try:
+                        for child in el.children():
+                            q.append((child, depth + 1))
+                    except Exception:
+                        continue
+                if matches:
+                    break
+        except Exception:
+            pass
+
+    seen: set[int] = set()
+    for hwnd, title in matches:
+        if hwnd in seen:
+            continue
+        seen.add(hwnd)
+        try:
+            _check_dont_show_again(hwnd)
+        except Exception:
+            pass
+        clicked = None
+        for label in ("Apply", "OK", "Yes", "Continue"):
+            try:
+                res = _click_button_uia(hwnd, label)
+            except Exception as exc:
+                res = {"ok": False, "error": str(exc)}
+            if res.get("ok"):
+                clicked = res
+                break
+            try:
+                res2 = _click_button_win32(hwnd, label)
+            except Exception as exc:
+                res2 = {"ok": False, "error": str(exc)}
+            if res2.get("ok"):
+                clicked = res2
+                break
+        if clicked and clicked.get("ok"):
+            handled.append(
+                {
+                    "known_id": "cc5_apply_material",
+                    "title": title,
+                    "result": clicked,
+                    "reason": "CC5 embedded Apply Material / content modal",
+                    "hwnd": hwnd,
+                }
+            )
+    return handled
+
+
 def auto_dismiss(*, only_known: bool = True, target_processes_only: bool = True) -> dict[str, Any]:
     """
     Dismiss Hephaestus-relevant dialogs.
 
-    - Known UE/CC5 dialogs (Restore Packages, FBX Import, Message Log, …)
+    - Known UE/CC5 dialogs (Restore Packages, FBX Import, Message Log, Apply Material, …)
+    - Embedded CC5 Qt child modals (Apply Material under the main frame)
     - Any #32770 modal from UnrealEditor / CharacterCreator when only_known=False
       or when it has standard OK/Yes/Import buttons (process-scoped safe auto)
     Never touches Cursor, browsers, or unrelated apps.
@@ -762,6 +1033,17 @@ def auto_dismiss(*, only_known: bool = True, target_processes_only: bool = True)
 
     handled: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
+
+    # Always sweep CC5 embedded Apply Material first — these are not top-level.
+    try:
+        for ev in _dismiss_cc5_embedded_modals():
+            if ev.get("known_id") and isinstance(ev.get("result"), dict) and ev["result"].get("ok"):
+                handled.append(ev)
+            elif ev.get("error"):
+                skipped.append(ev)
+    except Exception as exc:
+        skipped.append({"reason": "embedded_sweep_failed", "error": str(exc)})
+
     for d in listing.get("dialogs") or []:
         title = d.get("title") or ""
         process = d.get("process_name") or ""
@@ -769,11 +1051,11 @@ def auto_dismiss(*, only_known: bool = True, target_processes_only: bool = True)
         if target_processes_only and process and not _target_process(process):
             continue
         if target_processes_only and not process:
-            # Keep known titles even without process attribution
-            if not _known_match(title, "UnrealEditor.exe"):
+            # Empty process attribution: match known titles without forcing UE process_re
+            if not _known_match(title, ""):
                 continue
 
-        spec = _known_match(title, process or "UnrealEditor.exe")
+        spec = _known_match(title, process or "")
         if spec and spec.get("skip_auto"):
             skipped.append({"title": title, "hwnd": d.get("hwnd"), "reason": "skip_auto"})
             continue
@@ -798,6 +1080,11 @@ def auto_dismiss(*, only_known: bool = True, target_processes_only: bool = True)
                     "overwrite",
                     "fbx",
                     "plugin",
+                    "apply",
+                    "material",
+                    "morph",
+                    "cloth",
+                    "conform",
                 )
             )
         )
@@ -835,9 +1122,15 @@ def auto_dismiss(*, only_known: bool = True, target_processes_only: bool = True)
         else:
             buttons_pref = ACTION_BUTTONS["dismiss"]
 
+        if spec and spec.get("check_dont_show_again"):
+            _check_dont_show_again(int(d["hwnd"]))
+
         available = list(d.get("buttons") or [])
         clicked = None
         last_err = None
+        # Known Apply dialogs: try Apply even before button enumeration
+        if spec and "Apply" in (spec.get("buttons") or ()) and "Apply" not in available:
+            available = ["Apply"] + available
         for pref in buttons_pref:
             label = _match_button(available, pref) if available else pref
             if not label:
@@ -848,8 +1141,8 @@ def auto_dismiss(*, only_known: bool = True, target_processes_only: bool = True)
                 break
             last_err = res
         if clicked is None and not available:
-            # No enumerated buttons — try OK then close
-            for label in ("OK", "Yes", "Close", "Cancel"):
+            # No enumerated buttons — try Apply/OK then close
+            for label in ("Apply", "OK", "Yes", "Close", "Cancel"):
                 res = click_dialog(hwnd=int(d["hwnd"]), button=label)
                 if res.get("ok"):
                     clicked = res

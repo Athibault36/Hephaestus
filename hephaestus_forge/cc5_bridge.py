@@ -449,6 +449,19 @@ def _export_via_job_queue(
     ensure_cc5_running()
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
+        # Clear CC5 Apply Material / Qt prompts that stall the OpenPlugin job
+        try:
+            from dialog_control import auto_dismiss
+        except ImportError:
+            try:
+                from hephaestus_forge.dialog_control import auto_dismiss  # type: ignore
+            except ImportError:
+                auto_dismiss = None  # type: ignore
+        if auto_dismiss:
+            try:
+                auto_dismiss(only_known=False, target_processes_only=True)
+            except Exception:
+                pass
         # Accept both export_id.result.json and legacy export_id.job.result.json
         candidates = [
             result_path,
@@ -499,7 +512,7 @@ def export_character_fbx(
     project_root: Optional[Path] = None,
     output_path: Optional[Path] = None,
     include_morphs: bool = True,
-    timeout_seconds: int = 300,
+    timeout_seconds: int = 600,
     prompt: str = "",
     appearance: Optional[dict] = None,
 ) -> dict:

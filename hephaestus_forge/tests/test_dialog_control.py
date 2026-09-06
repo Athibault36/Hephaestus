@@ -52,6 +52,52 @@ def test_known_match_cc5_unsaved_project():
     assert "Cancel" in spec["buttons"]
 
 
+def test_known_match_cc5_apply_material():
+    spec = dc._known_match("Apply Material", "CharacterCreator.exe")
+    assert spec is not None
+    assert spec["id"] == "cc5_apply_material"
+    assert "Apply" in spec["buttons"]
+    # Empty process still matches (watcher attribution gaps)
+    assert dc._known_match("Apply Material", "") is not None
+
+
+def test_auto_dismiss_applies_cc5_material(monkeypatch):
+    dialogs = [
+        {
+            "hwnd": 42,
+            "title": "Apply Material",
+            "process_name": "CharacterCreator.exe",
+            "buttons": ["Apply", "Cancel"],
+            "known_id": "cc5_apply_material",
+            "class_name": "Qt5152QWindowIcon",
+            "pid": 1,
+        }
+    ]
+    monkeypatch.setattr(
+        dc,
+        "list_dialogs",
+        lambda include_main_windows=False: {
+            "ok": True,
+            "backend": "test",
+            "dialogs": dialogs,
+            "count": 1,
+        },
+    )
+    clicks: list[str] = []
+
+    def _fake_click(*, hwnd=None, button=None, **kwargs):
+        clicks.append(button or "")
+        return {"ok": True, "clicked": button, "method": "test"}
+
+    monkeypatch.setattr(dc, "click_dialog", _fake_click)
+    monkeypatch.setattr(dc, "_check_dont_show_again", lambda hwnd: {"ok": True, "checked": True})
+    monkeypatch.setattr(dc, "_dismiss_cc5_embedded_modals", lambda: [])
+    res = dc.auto_dismiss(only_known=True, target_processes_only=True)
+    assert res["handled_count"] == 1
+    assert res["handled"][0]["known_id"] == "cc5_apply_material"
+    assert "Apply" in clicks
+
+
 def test_auto_dismiss_closes_message_log(monkeypatch):
     dialogs = [
         {
@@ -75,6 +121,7 @@ def test_auto_dismiss_closes_message_log(monkeypatch):
         },
     )
     monkeypatch.setattr(dc, "_close_window", lambda hwnd: {"ok": True, "clicked": "WM_CLOSE", "method": "test"})
+    monkeypatch.setattr(dc, "_dismiss_cc5_embedded_modals", lambda: [])
     res = dc.auto_dismiss(only_known=True, target_processes_only=True)
     assert res["handled_count"] == 1
     assert res["handled"][0]["result"]["clicked"] == "WM_CLOSE"

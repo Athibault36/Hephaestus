@@ -126,7 +126,8 @@ def resolve_content_assets(plan: dict[str, Any]) -> list[str]:
         base / "Skin" / "Overall" / "CC5 Stylized 2K",
     ]
     if gender == "female":
-        skin_names = ["HD Ariana_2K.ccSkin", "HD Mila_2K.ccSkin", "HD Neutral F_2K.ccSkin"]
+        # Ariana/Neutral F Overall skins are often absent; prefer installed Mila first
+        skin_names = ["HD Mila_2K.ccSkin", "HD Ariana_2K.ccSkin", "HD Neutral F_2K.ccSkin"]
     else:
         skin_names = ["HD Aaron_2K.ccSkin", "HD Neutral M_2K.ccSkin", "HD Gibro_2K.ccSkin"]
     for d in skin_dirs:
@@ -140,6 +141,9 @@ def resolve_content_assets(plan: dict[str, Any]) -> list[str]:
         if hit:
             break
 
+    # Wearables stay in resolve_wearable_assets — body packs only here so older
+    # OpenPlugin builds apply morphs before AutoSkin clothes (avoids floating gear).
+
     seen: set[str] = set()
     paths: list[str] = []
     for p in out:
@@ -152,6 +156,87 @@ def resolve_content_assets(plan: dict[str, Any]) -> list[str]:
         seen.add(key)
         paths.append(str(p))
     return paths
+
+
+def resolve_wearable_assets(plan: dict[str, Any]) -> list[str]:
+    """Free Resource cloth/hair for OpenPlugin builds that load wearables after morphs."""
+    base = _cc5_characters_dir()
+    if base is None:
+        return []
+    gender = str(plan.get("gender") or "male").lower()
+    seed = str(plan.get("seed") or "x")
+    prompt = str(plan.get("prompt") or "")
+    picks = _resolve_outfit_paths(base, gender=gender, seed=seed, prompt=prompt)
+    return [str(p) for p in picks if p.is_file()]
+
+
+def _resolve_outfit_paths(
+    base: Path, *, gender: str, seed: str, prompt: str = ""
+) -> list[Path]:
+    """Pick one clothing set + hair when Free Resource files exist."""
+    picks: list[Path] = []
+    cloth_root = base / "Cloth" / "Others"
+    text = f"{prompt} {seed}".lower()
+    want_work = bool(re.search(r"\b(work|apron|gibro|lab|uniform)\b", text))
+    if gender == "female":
+        set_dirs = [
+            cloth_root / "Ariana Party Set",
+            cloth_root / "Mila Outfit Set",
+        ]
+    elif want_work:
+        set_dirs = [
+            cloth_root / "Gibro Work Set",
+            cloth_root / "Aaron Outfit Set",
+        ]
+    else:
+        # Aaron trousers+sneakers conform reliably; Gibro apron/boots often float
+        # when loaded before morphs on older Program Files OpenPlugin builds.
+        set_dirs = [
+            cloth_root / "Aaron Outfit Set",
+            cloth_root / "Gibro Work Set",
+        ]
+    existing_sets = [d for d in set_dirs if d.is_dir()]
+    if existing_sets:
+        # Prefer first existing (Aaron for sporty/default male)
+        chosen = existing_sets[0]
+        if want_work and len(existing_sets) > 1:
+            chosen = existing_sets[abs(hash(seed)) % len(existing_sets)]
+        cloth_files = sorted(chosen.rglob("*.ccCloth"))
+        shoe_files = sorted(chosen.rglob("*.ccShoes"))
+        # Cap cloth pieces — skip accessories like glasses that export unbound
+        for bucket in (cloth_files[:2], shoe_files[:1]):
+            picks.extend(bucket)
+
+    hair_root = base / "Hair" / "Group" / "Hair"
+    hair_candidates: list[Path] = []
+    if hair_root.is_dir():
+        hair_candidates.extend(sorted(hair_root.glob("*.rlHair")))
+        hair_candidates.extend(sorted(hair_root.glob("*.ccHair")))
+    if gender == "female":
+        prefer = ("pixie", "wave", "bob", "long")
+    else:
+        prefer = ("slick", "short", "classic", "fade")
+    hair_pick: Optional[Path] = None
+    for pref in prefer:
+        for h in hair_candidates:
+            if pref in h.stem.lower():
+                hair_pick = h
+                break
+        if hair_pick:
+            break
+    if hair_pick is None and hair_candidates:
+        hair_pick = hair_candidates[abs(hash(seed)) % len(hair_candidates)]
+    if hair_pick:
+        picks.append(hair_pick)
+
+    # Eyebrows (subtle)
+    brow_dir = base / "Hair" / "Group" / "Eyebrows" / ("HD Brows_F" if gender == "female" else "HD Brows_M")
+    if brow_dir.is_dir():
+        brows = sorted(brow_dir.glob("*.rlHair")) + sorted(brow_dir.glob("*.ccHair"))
+        if brows:
+            picks.append(brows[0])
+
+    return picks
 
 
 def infer_appearance(
@@ -263,6 +348,14 @@ def infer_appearance(
         "force_new": True,
     }
     plan["content_assets"] = resolve_content_assets(plan)
+    plan["wearable_assets"] = resolve_wearable_assets(plan)
+    # Older Program Files OpenPlugin only reads content_assets and loads them
+    # before morphs. Append wearables after body packs so muscular/skin apply
+    # first; live OpenPlugin still prefers wearable_assets after morphs.
+    if plan["wearable_assets"]:
+        body = list(plan["content_assets"])
+        wear = list(plan["wearable_assets"])
+        plan["content_assets"] = body + [p for p in wear if p not in body]
     return plan
 
 
@@ -273,6 +366,9 @@ def appearance_summary(plan: Optional[dict[str, Any]]) -> str:
     traits = plan.get("traits") or []
     bits.extend(str(t) for t in traits[:4])
     assets = plan.get("content_assets") or []
+    wear = plan.get("wearable_assets") or []
     if assets:
         bits.append(f"{len(assets)} content packs")
+    if wear:
+        bits.append(f"{len(wear)} wearables")
     return ", ".join(b for b in bits if b)

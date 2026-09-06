@@ -1,6 +1,6 @@
 # Copyright (c) 2024 HephaestusForge. All Rights Reserved.
 """Single source of truth for factory + bridge release versions."""
 
-FORGE_VERSION = "1.0.7"
-BRIDGE_VERSION = "1.0.7"
+FORGE_VERSION = "1.0.9"
+BRIDGE_VERSION = "1.0.9"
 OPERATOR_MILESTONE = "v1.0"

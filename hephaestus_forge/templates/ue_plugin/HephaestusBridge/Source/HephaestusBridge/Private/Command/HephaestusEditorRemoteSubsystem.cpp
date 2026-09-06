@@ -160,7 +160,9 @@ namespace HephaestusFbxImport
 		UMaterialInterface* Parent,
 		UTexture* Diffuse,
 		UTexture* Normal,
-		UTexture* Opacity)
+		UTexture* Opacity,
+		UTexture* Metallic = nullptr,
+		UTexture* Roughness = nullptr)
 	{
 		if (!Parent)
 		{
@@ -215,6 +217,21 @@ namespace HephaestusFbxImport
 			MIC->SetTextureParameterValueEditorOnly(FName(TEXT("OpacityMaskMap")), Opacity);
 			MIC->SetScalarParameterValueEditorOnly(FName(TEXT("OpacityMapWeight")), 1.0f);
 			MIC->SetScalarParameterValueEditorOnly(FName(TEXT("OpacityMaskMapWeight")), 1.0f);
+		}
+		if (Metallic)
+		{
+			// Interchange Phong / PBR parents use several names across UE versions.
+			MIC->SetTextureParameterValueEditorOnly(FName(TEXT("MetallicMap")), Metallic);
+			MIC->SetTextureParameterValueEditorOnly(FName(TEXT("SpecularColorMap")), Metallic);
+			MIC->SetTextureParameterValueEditorOnly(FName(TEXT("SpecularMap")), Metallic);
+			MIC->SetScalarParameterValueEditorOnly(FName(TEXT("MetallicMapWeight")), 1.0f);
+			MIC->SetScalarParameterValueEditorOnly(FName(TEXT("SpecularColorMapWeight")), 1.0f);
+		}
+		if (Roughness)
+		{
+			MIC->SetTextureParameterValueEditorOnly(FName(TEXT("RoughnessMap")), Roughness);
+			MIC->SetTextureParameterValueEditorOnly(FName(TEXT("GlossinessMap")), Roughness);
+			MIC->SetScalarParameterValueEditorOnly(FName(TEXT("RoughnessMapWeight")), 1.0f);
 		}
 
 		MIC->PostEditChange();
@@ -316,11 +333,17 @@ namespace HephaestusFbxImport
 			UTexture* Diffuse = LoadCc5Texture(DestinationPath, MatName, TEXT("_Diffuse"));
 			UTexture* Normal = LoadCc5Texture(DestinationPath, MatName, TEXT("_Normal"));
 			UTexture* Opacity = LoadCc5Texture(DestinationPath, MatName, TEXT("_Opacity"));
+			UTexture* Metallic = LoadCc5Texture(DestinationPath, MatName, TEXT("_Metallic"));
+			UTexture* Roughness = LoadCc5Texture(DestinationPath, MatName, TEXT("_Roughness"));
+			if (!Roughness)
+			{
+				Roughness = LoadCc5Texture(DestinationPath, MatName, TEXT("_Glossiness"));
+			}
 			if (!Diffuse)
 			{
 				// Never replace a slot with a white Phong MIC when only normal/opacity
 				// exist — that produces pale skin and white jaw/teeth patches.
-				if (Normal || Opacity)
+				if (Normal || Opacity || Metallic)
 				{
 					UE_LOG(LogHephaestusBridge, Warning,
 						TEXT("editor.import_fbx: skip slot %d '%s' — no Diffuse (normal/opacity alone would wash out skin)"),
@@ -332,7 +355,7 @@ namespace HephaestusFbxImport
 			UMaterialInterface* Parent = (Opacity && ParentMasked) ? ParentMasked : ParentOpaque;
 			const FString MicName = MatName + TEXT("_MI");
 			UMaterialInstanceConstant* MIC = CreateOrUpdateMic(
-				DestinationPath, MicName, Parent, Diffuse, Normal, Opacity);
+				DestinationPath, MicName, Parent, Diffuse, Normal, Opacity, Metallic, Roughness);
 			if (!MIC)
 			{
 				continue;
@@ -340,11 +363,13 @@ namespace HephaestusFbxImport
 
 			Materials[Index].MaterialInterface = MIC;
 			UE_LOG(LogHephaestusBridge, Log,
-				TEXT("editor.import_fbx: slot %d '%s' -> %s (diffuse=%s normal=%s opacity=%s)"),
+				TEXT("editor.import_fbx: slot %d '%s' -> %s (diffuse=%s normal=%s opacity=%s metallic=%s roughness=%s)"),
 				Index, *MatName, *MIC->GetName(),
 				Diffuse ? *Diffuse->GetName() : TEXT("-"),
 				Normal ? *Normal->GetName() : TEXT("-"),
-				Opacity ? *Opacity->GetName() : TEXT("-"));
+				Opacity ? *Opacity->GetName() : TEXT("-"),
+				Metallic ? *Metallic->GetName() : TEXT("-"),
+				Roughness ? *Roughness->GetName() : TEXT("-"));
 			++Bound;
 		}
 

@@ -1611,7 +1611,7 @@ def cc5_export_cmd(
     ] = None,
     name: Annotated[str, typer.Option("--name", "-n", help="Character / output name")] = "Character",
     output: Annotated[Optional[Path], typer.Option("--output", "-o")] = None,
-    timeout: Annotated[float, typer.Option("--timeout", help="Seconds to wait for OpenPlugin job")] = 180.0,
+    timeout: Annotated[float, typer.Option("--timeout", help="Seconds to wait for OpenPlugin job")] = 600.0,
     as_json: Annotated[bool, typer.Option("--json")] = False,
 ):
     """Export character FBX via CC5 OpenPlugin job queue into .hephaestus_forge/dcc_exports."""
