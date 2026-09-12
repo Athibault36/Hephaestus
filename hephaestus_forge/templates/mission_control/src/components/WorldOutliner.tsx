@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { useMissionControlStore } from '../store/missionControlStore';
 import { ActorInfo } from '../store/missionControlStore';
+import { PanelState } from './PanelState';
 
 export function WorldOutliner() {
-  const { actors, selectedActor, selectActor, playLocomotion, frameActor, destroyActor } = useMissionControlStore();
+  const { actors, actorsLoading, actorsError, isConnected, selectedActor, selectActor, playLocomotion, frameActor, destroyActor } = useMissionControlStore();
   const [menu, setMenu] = useState<{ x: number; y: number; path: string } | null>(null);
 
   const getActorIcon = (className: string) => {
@@ -36,12 +37,24 @@ export function WorldOutliner() {
 
   return (
     <div className="actor-tree" role="tree" aria-label="World Outliner">
-      {actors.length === 0 ? (
-        <div className="outliner-empty">
-          <span className="empty-icon">🌍</span>
-          <p>No actors in scene</p>
-          <p className="empty-hint">Connect to UE to populate</p>
-        </div>
+      {!isConnected ? (
+        <PanelState
+          tone="offline"
+          icon="🌍"
+          title="World unavailable"
+          message="Start PIE with HephaestusBridge; actors will appear after the bridge connects."
+        />
+      ) : actorsLoading && actors.length === 0 ? (
+        <PanelState tone="loading" icon="🌍" title="Loading world" message="Reading actor names and details from the UE bridge." />
+      ) : actorsError && actors.length === 0 ? (
+        <PanelState tone="error" icon="⚠️" title="Could not load actors" message={actorsError} />
+      ) : actors.length === 0 ? (
+        <PanelState
+          tone="empty"
+          icon="🌍"
+          title="Scene is empty"
+          message="No PIE actors were returned yet. Author into PIE or spawn an asset to begin blocking the shot."
+        />
       ) : (
         <ul className="actor-list">
           {actors.map((actor: ActorInfo) => (

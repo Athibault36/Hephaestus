@@ -1,16 +1,39 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMissionControlStore } from '../store/missionControlStore';
+import { PanelState } from './PanelState';
+
+function isStructuredPayload(content: string) {
+  const trimmed = content.trim();
+  if (!trimmed || !/^[{[]/.test(trimmed)) return false;
+  try {
+    JSON.parse(trimmed);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function displayChatContent(role: 'user' | 'assistant', content: string) {
+  if (role === 'assistant' && isStructuredPayload(content)) {
+    return 'Structured response received. Use Export for the full session details.';
+  }
+  return content;
+}
 
 export function AgentConsole() {
   const {
     isConnected,
     agentBusy,
+    agentError,
     chatMessages,
     lastGrade,
     sendAgentChat,
     loadAgentHealth,
     preflightReady,
+    preflightHint,
     plannerAvailable,
+    agentHealthLoading,
+    agentHealthError,
     assetMatches,
     exportSession,
   } = useMissionControlStore();
@@ -31,15 +54,19 @@ export function AgentConsole() {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [chatMessages]);
 
+  const canRunAgent = isConnected && preflightReady && !agentBusy;
+  const preflightMessage = preflightHint || 'Run forge sync-plugin, rebuild HephaestusBridge, then start PIE.';
+  const chatEmptyTone = !isConnected ? 'offline' : !preflightReady ? 'degraded' : 'empty';
+
   const onSend = async (reset = false) => {
     const message = input.trim();
-    if (!message || agentBusy) return;
+    if (!message || !canRunAgent) return;
     setInput('');
     await sendAgentChat(message, { reset, mode });
   };
 
   const onAuthorIntoPie = async () => {
-    if (agentBusy) return;
+    if (!canRunAgent) return;
     let msg = `make a ${dccColor ? `${dccColor} ` : ''}${dccShape} and put it in the scene and frame it`;
     if (dccSpin) msg += ' and spin it slowly';
     setInput(msg);
@@ -49,24 +76,51 @@ export function AgentConsole() {
   return (
     <div className="agent-console">
       <div className="agent-status-row">
-        <span className={`pill ${preflightReady ? 'ok' : 'bad'}`}>
-          {preflightReady ? 'PIE ready' : 'PIE offline'}
+        <span className={`pill ${preflightReady ? 'ok' : agentHealthLoading ? '' : 'bad'}`}>
+          {agentHealthLoading ? 'Checking preflight' : preflightReady ? 'PIE ready' : 'Preflight blocked'}
         </span>
-        <span className={`pill ${plannerAvailable ? 'ok' : ''}`}>
-          {plannerAvailable ? 'Nemotron Ultra ready' : 'Heuristic mode'}
+        <span className={`pill ${plannerAvailable ? 'ok' : 'warn'}`}>
+          {agentHealthLoading ? 'Planner checking' : plannerAvailable ? 'Nemotron Ultra ready' : 'Planner unavailable'}
         </span>
         {agentBusy && <span className="pill busy">Agent working…</span>}
       </div>
 
+      {agentHealthError && (
+        <div className="agent-callout error" role="alert">
+          <strong>Director preflight unavailable.</strong> {agentHealthError}
+        </div>
+      )}
+
+      {isConnected && !preflightReady && !agentHealthLoading && !agentHealthError && (
+        <div className="agent-callout degraded" role="status">
+          <strong>Confirm before authoring into PIE.</strong> {preflightMessage}
+        </div>
+      )}
+
+      {agentError && (
+        <div className="agent-callout error" role="alert">
+          <strong>Agent request failed.</strong> {agentError}
+        </div>
+      )}
+
       <div className="agent-chat-log" ref={logRef}>
         {chatMessages.length === 0 ? (
-          <p className="agent-chat-empty">
-            Try: make a red cube, frame it, and spin it slowly — or use Author into PIE below
-          </p>
+          <PanelState
+            tone={chatEmptyTone}
+            icon="🤖"
+            title={!isConnected ? 'Director offline' : !preflightReady ? 'PIE preflight required' : 'Ready for a shot goal'}
+            message={
+              !isConnected
+                ? 'Start forge observe and PIE to connect the director to a live UE world.'
+                : !preflightReady
+                  ? preflightMessage
+                  : 'Try: make a red cube, frame it, and spin it slowly — or use Author into PIE below.'
+            }
+          />
         ) : (
           chatMessages.map((m, i) => (
             <div key={`${m.role}-${i}`} className={`agent-chat-line ${m.role}`}>
-              <strong>{m.role === 'user' ? 'You' : 'Hephaestus'}:</strong> {m.content}
+              <strong>{m.role === 'user' ? 'You' : 'Hephaestus'}:</strong> {displayChatContent(m.role, m.content)}
             </div>
           ))
         )}
@@ -93,7 +147,7 @@ export function AgentConsole() {
         <select
           value={dccShape}
           onChange={(e) => setDccShape(e.target.value)}
-          disabled={!isConnected || agentBusy}
+          disabled={!canRunAgent}
           aria-label="Shape"
         >
           <option value="cube">cube</option>
@@ -105,7 +159,7 @@ export function AgentConsole() {
         <select
           value={dccColor}
           onChange={(e) => setDccColor(e.target.value)}
-          disabled={!isConnected || agentBusy}
+          disabled={!canRunAgent}
           aria-label="Color"
         >
           <option value="">default</option>
@@ -119,14 +173,14 @@ export function AgentConsole() {
             type="checkbox"
             checked={dccSpin}
             onChange={(e) => setDccSpin(e.target.checked)}
-            disabled={!isConnected || agentBusy}
+            disabled={!canRunAgent}
           />
           spin
         </label>
         <button
           type="button"
           className="primary"
-          disabled={!isConnected || agentBusy}
+          disabled={!canRunAgent}
           onClick={() => void onAuthorIntoPie()}
         >
           Author into PIE
@@ -137,8 +191,8 @@ export function AgentConsole() {
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={isConnected ? 'Goal for the agent…' : 'Connect PIE first'}
-          disabled={!isConnected || agentBusy}
+          placeholder={!isConnected ? 'Connect PIE first' : !preflightReady ? 'PIE preflight must pass before sending a goal' : 'Goal for the agent…'}
+          disabled={!canRunAgent}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
@@ -147,15 +201,15 @@ export function AgentConsole() {
           }}
         />
         <div className="agent-input-actions">
-          <select value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}>
+          <select value={mode} onChange={(e) => setMode(e.target.value as typeof mode)} disabled={agentBusy}>
             <option value="auto">Auto</option>
             <option value="cinematic">Cinematic</option>
             <option value="gameplay">Gameplay</option>
           </select>
-          <button type="button" className="primary" disabled={!isConnected || agentBusy} onClick={() => onSend(false)}>
+          <button type="button" className="primary" disabled={!canRunAgent} onClick={() => onSend(false)}>
             Send
           </button>
-          <button type="button" disabled={agentBusy} onClick={() => onSend(true)}>
+          <button type="button" disabled={!canRunAgent} onClick={() => onSend(true)}>
             New
           </button>
           <button type="button" disabled={agentBusy} onClick={() => exportSession()}>

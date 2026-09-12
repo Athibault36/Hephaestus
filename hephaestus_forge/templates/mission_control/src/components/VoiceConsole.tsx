@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMissionControlStore } from '../store/missionControlStore';
+import { PanelState } from './PanelState';
 
 export function VoiceConsole() {
   const { isRecording, setIsRecording, audioLevel, isConnected, agentState } = useMissionControlStore();
   const [localAudioLevel, setLocalAudioLevel] = useState(0);
+  const [voiceError, setVoiceError] = useState('');
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -27,6 +29,7 @@ export function VoiceConsole() {
     if (!canRecord) return;
 
     try {
+      setVoiceError('');
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       
       // Setup audio visualization
@@ -55,7 +58,7 @@ export function VoiceConsole() {
       mediaRecorderRef.current.start(100); // Send chunks every 100ms
       setIsRecording(true);
     } catch (e) {
-      console.error('Failed to start recording:', e);
+      setVoiceError(e instanceof Error ? e.message : 'Microphone access was denied or unavailable.');
     }
   };
 
@@ -98,12 +101,25 @@ export function VoiceConsole() {
   return (
     <div className="voice-console">
       <div className="voice-visualizer">
-        <div className="voice-waveform" role="img" aria-label="Audio waveform">
-          {bars}
-        </div>
-        <div className="voice-status">
-          {isRecording ? '🔴 Recording...' : canRecord ? 'Click to speak' : 'Connect to UE first'}
-        </div>
+        {!isConnected ? (
+          <PanelState
+            tone="offline"
+            icon="🎤"
+            title="Voice optional"
+            message="Connect PIE to enable push-to-talk. Mission Control does not require TTS or vision sidecars to load."
+          />
+        ) : voiceError ? (
+          <PanelState tone="error" icon="⚠️" title="Microphone unavailable" message={voiceError} />
+        ) : (
+          <>
+            <div className="voice-waveform" role="img" aria-label="Audio waveform">
+              {bars}
+            </div>
+            <div className="voice-status">
+              {isRecording ? '🔴 Recording...' : canRecord ? 'Click to speak' : 'Agent is not ready for voice'}
+            </div>
+          </>
+        )}
       </div>
 
       <div className="voice-controls">
