@@ -1,4 +1,13 @@
 import { create } from 'zustand';
+import {
+  applyVoicePartial,
+  beginVoiceCapture,
+  cancelVoiceCapture,
+  failVoiceCapture,
+  finishVoiceCapture,
+  initialVoiceCaptureState,
+  type VoiceCaptureState,
+} from './voiceCaptureState';
 
 export interface ThoughtEntry {
   id: string;
@@ -57,7 +66,7 @@ export interface PerformanceMetrics {
   };
 }
 
-export type AgentState = 'idle' | 'listening' | 'thinking' | 'acting' | 'speaking' | 'error';
+export type AgentState = 'idle' | 'listening' | 'processing' | 'thinking' | 'acting' | 'speaking' | 'error';
 
 /** Same-origin when served by forge observe (proxies /v1 and /agent). */
 const API_BASE: string = (import.meta as { env?: { VITE_HEPHAESTUS_API?: string } }).env?.VITE_HEPHAESTUS_API ?? '';
@@ -135,10 +144,48 @@ interface MissionControlState {
   setIsRecording: (recording: boolean) => void;
   audioLevel: number;
   setAudioLevel: (level: number) => void;
+  voiceTurnId: string | null;
+  partialTranscript: string;
+  finalTranscript: string;
+  voiceError: string;
+  voiceCancelReason: string;
+  beginVoiceCapture: (turnId?: string) => string;
+  updatePartialTranscript: (turnId: string, transcript: string) => void;
+  finishVoiceCapture: (turnId: string, transcript: string) => void;
+  cancelVoiceCapture: (reason?: string) => void;
+  failVoiceCapture: (error: string) => void;
 }
 
 let healthTimer: number | undefined;
 let thoughtSource: EventSource | null = null;
+
+function currentVoiceState(state: MissionControlState): VoiceCaptureState {
+  return {
+    status: state.agentState === 'thinking' || state.agentState === 'acting' ? 'processing' : state.agentState,
+    isRecording: state.isRecording,
+    activeTurnId: state.voiceTurnId,
+    partialTranscript: state.partialTranscript,
+    finalTranscript: state.finalTranscript,
+    error: state.voiceError,
+    cancelReason: state.voiceCancelReason,
+  };
+}
+
+function voicePatch(voice: VoiceCaptureState): Partial<MissionControlState> {
+  return {
+    agentState: voice.status,
+    isRecording: voice.isRecording,
+    voiceTurnId: voice.activeTurnId,
+    partialTranscript: voice.partialTranscript,
+    finalTranscript: voice.finalTranscript,
+    voiceError: voice.error,
+    voiceCancelReason: voice.cancelReason,
+  };
+}
+
+function makeVoiceTurnId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `voice-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 
 export const useMissionControlStore = create<MissionControlState>((set, get) => ({
   isConnected: false,
@@ -417,6 +464,10 @@ export const useMissionControlStore = create<MissionControlState>((set, get) => 
       set({ agentState: data.ok ? 'idle' : 'error' });
       await get().refreshActors();
       await get().captureFrame();
+    } catch (exc) {
+      const message = exc instanceof Error ? exc.message : String(exc);
+      get().addThought({ type: 'error', content: `Agent chat failed: ${message}` });
+      set({ agentState: 'error' });
     } finally {
       set({ agentBusy: false });
     }
@@ -503,4 +554,26 @@ export const useMissionControlStore = create<MissionControlState>((set, get) => 
   setIsRecording: (recording) => set({ isRecording: recording }),
   audioLevel: 0,
   setAudioLevel: (level) => set({ audioLevel: level }),
+  voiceTurnId: initialVoiceCaptureState.activeTurnId,
+  partialTranscript: initialVoiceCaptureState.partialTranscript,
+  finalTranscript: initialVoiceCaptureState.finalTranscript,
+  voiceError: initialVoiceCaptureState.error,
+  voiceCancelReason: initialVoiceCaptureState.cancelReason,
+  beginVoiceCapture: (turnId) => {
+    const id = turnId || makeVoiceTurnId();
+    set((state) => voicePatch(beginVoiceCapture(currentVoiceState(state), id)));
+    return id;
+  },
+  updatePartialTranscript: (turnId, transcript) => {
+    set((state) => voicePatch(applyVoicePartial(currentVoiceState(state), turnId, transcript)));
+  },
+  finishVoiceCapture: (turnId, transcript) => {
+    set((state) => voicePatch(finishVoiceCapture(currentVoiceState(state), turnId, transcript)));
+  },
+  cancelVoiceCapture: (reason = 'cancelled') => {
+    set((state) => voicePatch(cancelVoiceCapture(currentVoiceState(state), reason)));
+  },
+  failVoiceCapture: (error) => {
+    set((state) => voicePatch(failVoiceCapture(currentVoiceState(state), error)));
+  },
 }));
