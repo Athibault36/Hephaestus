@@ -81,7 +81,6 @@ class TTSRequest:
     """TTS synthesis request."""
     text: str
     voice_id: str
-    engine: Optional[str] = None
     language: str = "en"
     speed: float = 1.0
     pitch: float = 1.0
@@ -600,6 +599,16 @@ class TTSManager:
         self.default_voice_id = config.get("default_voice", "hephaestus_default")
         self._initialized = False
 
+    def seed_default_voice_profile(self) -> VoiceProfile:
+        profile = self.voice_library.get_voice(self.default_voice_id)
+        if profile:
+            return profile
+        return self.voice_library.add_voice(VoiceProfile(
+            voice_id=self.default_voice_id,
+            name="Hephaestus Default Voice",
+            reference_audio_paths=[],
+        ))
+
     def _resolve_voice_profile(self, voice_id: str) -> Optional[VoiceProfile]:
         voice_profile = self.voice_library.get_or_create_from_references(voice_id)
         if voice_profile:
@@ -644,7 +653,6 @@ class TTSManager:
         engine_name: str = None
     ) -> TTSResult:
         """Synthesize with fallback."""
-        engine_name = engine_name or request.engine
         engine = self.get_engine(engine_name)
         if not engine:
             raise ValueError(f"Engine not found: {engine_name or self.primary_engine_name}")
@@ -768,6 +776,7 @@ async def create_tts_manager(config: Dict[str, Any]) -> TTSManager:
     manager.register_engine(RVCEngine(tts_config.get("rvc", {})))
     
     await manager.initialize()
+    manager.seed_default_voice_profile()
     return manager
 
 
@@ -785,6 +794,12 @@ try:
         text: str
         voice_id: str = "hephaestus_default"
         engine: Optional[str] = None
+
+    class OpenAISpeechRequest(BaseModel):
+        model: str = "fish-speech"
+        input: str
+        voice: str = "hephaestus_default"
+        response_format: str = "wav"
 
     @app.on_event("startup")
     async def _startup():
@@ -811,9 +826,24 @@ try:
     async def synthesize(req: SynthesizeRequest):
         if _tts_manager is None:
             raise HTTPException(status_code=503, detail="TTS not initialized")
-        request = TTSRequest(text=req.text, voice_id=req.voice_id, engine=req.engine)
-        result = await _tts_manager.synthesize(request)
+        request = TTSRequest(text=req.text, voice_id=req.voice_id)
+        result = await _tts_manager.synthesize(request, req.engine)
         return {"audio_b64": base64.b64encode(result.audio_data).decode(), "sample_rate": result.sample_rate}
+
+    @app.post("/v1/audio/speech")
+    async def openai_audio_speech(req: OpenAISpeechRequest):
+        if _tts_manager is None:
+            raise HTTPException(status_code=503, detail="TTS not initialized")
+        request = TTSRequest(text=req.input, voice_id=req.voice)
+        result = await _tts_manager.synthesize(request, req.model)
+        response_format = req.response_format.lower().strip()
+        media_type = {
+            "wav": "audio/wav",
+            "mp3": "audio/mpeg",
+            "opus": "audio/ogg",
+            "flac": "audio/flac",
+        }.get(response_format, "application/octet-stream")
+        return Response(content=result.audio_data, media_type=media_type)
 
     if __name__ == "__main__":
         host = os.getenv("TTS_HOST", "127.0.0.1")

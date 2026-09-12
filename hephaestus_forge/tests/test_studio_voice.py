@@ -8,6 +8,8 @@ import types
 import urllib.error
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
@@ -459,14 +461,102 @@ def test_template_synthesize_builds_voice_profile_from_reference_files(monkeypat
     })
     manager.register_engine(RecordingEngine({}))
 
-    result = asyncio.run(manager.synthesize(module.TTSRequest(
-        text="Welcome back.",
-        voice_id="hephaestus_default",
-        engine="fish-speech",
-    )))
+    request = module.TTSRequest(text="Welcome back.", voice_id="hephaestus_default")
+    result = asyncio.run(manager.synthesize(request, "fish-speech"))
 
     assert result.audio_data == b"audio"
     assert manager.voice_library.get_voice("hephaestus_default") is not None
+
+
+def test_template_tts_request_does_not_accept_engine_field(monkeypatch):
+    module = _load_voice_cloning_template(monkeypatch)
+
+    with pytest.raises(TypeError):
+        module.TTSRequest(text="Welcome back.", voice_id="hephaestus_default", engine="fish-speech")
+
+
+def test_template_create_manager_seeds_default_voice_profile(monkeypatch, tmp_path):
+    module = _load_voice_cloning_template(monkeypatch)
+    library_dir = tmp_path / "ProjectMemory" / "voice_library"
+
+    manager = asyncio.run(module.create_tts_manager({
+        "voice_library_dir": str(library_dir),
+        "default_voice": "hephaestus_default",
+        "models": {},
+    }))
+
+    profile = manager.voice_library.get_voice("hephaestus_default")
+    assert profile is not None
+    assert profile.voice_id == "hephaestus_default"
+
+
+def test_template_synthesize_endpoint_passes_engine_name_separately(monkeypatch):
+    module = _load_voice_cloning_template(monkeypatch)
+    testclient = pytest.importorskip("fastapi.testclient")
+    captured = {}
+
+    class FakeManager:
+        async def synthesize(self, request, engine_name=None):
+            captured["request"] = request
+            captured["engine_name"] = engine_name
+            return module.TTSResult(
+                audio_data=b"endpoint-audio",
+                sample_rate=24000,
+                duration=0.1,
+                voice_id=request.voice_id,
+                engine=engine_name or "fish-speech",
+            )
+
+    monkeypatch.setattr(module, "_tts_manager", FakeManager())
+    client = testclient.TestClient(module.app)
+
+    response = client.post(
+        "/synthesize",
+        json={"text": "Welcome back.", "voice_id": "hephaestus_default", "engine": "fish-speech"},
+    )
+
+    assert response.status_code == 200
+    assert base64.b64decode(response.json()["audio_b64"]) == b"endpoint-audio"
+    assert captured["engine_name"] == "fish-speech"
+    assert not hasattr(captured["request"], "engine")
+
+
+def test_template_openai_speech_endpoint_returns_audio_bytes(monkeypatch):
+    module = _load_voice_cloning_template(monkeypatch)
+    testclient = pytest.importorskip("fastapi.testclient")
+    captured = {}
+
+    class FakeManager:
+        async def synthesize(self, request, engine_name=None):
+            captured["request"] = request
+            captured["engine_name"] = engine_name
+            return module.TTSResult(
+                audio_data=b"shim-audio",
+                sample_rate=24000,
+                duration=0.1,
+                voice_id=request.voice_id,
+                engine=engine_name or "fish-speech",
+            )
+
+    monkeypatch.setattr(module, "_tts_manager", FakeManager())
+    client = testclient.TestClient(module.app)
+
+    response = client.post(
+        "/v1/audio/speech",
+        json={
+            "model": "fish-speech",
+            "input": "Welcome back.",
+            "voice": "hephaestus_default",
+            "response_format": "wav",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("audio/wav")
+    assert response.content == b"shim-audio"
+    assert captured["engine_name"] == "fish-speech"
+    assert captured["request"].text == "Welcome back."
+    assert captured["request"].voice_id == "hephaestus_default"
 
 
 def test_template_rejects_unsafe_voice_id_reference_lookup(monkeypatch, tmp_path):
@@ -494,11 +584,8 @@ def test_template_rejects_unsafe_voice_id_reference_lookup(monkeypatch, tmp_path
     manager.register_engine(RecordingEngine({}))
 
     try:
-        asyncio.run(manager.synthesize(module.TTSRequest(
-            text="No traversal.",
-            voice_id="../outside",
-            engine="fish-speech",
-        )))
+        request = module.TTSRequest(text="No traversal.", voice_id="../outside")
+        asyncio.run(manager.synthesize(request, "fish-speech"))
     except ValueError as exc:
         assert "Voice not found" in str(exc)
     else:
