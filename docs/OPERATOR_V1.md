@@ -85,6 +85,7 @@ Do not hardcode one game into factory docs as “the” project — use `<PATH-T
 | `plugin_version` mismatch | Stale DLL | rebuild HephaestusBridge, full editor restart |
 | `mission_control_dist` fail | No Vite build | `forge observe` or `forge build-mc` |
 | Identity mismatch | Another project's PIE on `:8765` | `forge down --quit-editor`, `forge up` correct target |
+| `/agent/voice/status` shows `engine: none` | Mission Control cannot see a healthy local or fallback TTS server | Start the TTS server on `:8082`, or set `HEPHAESTUS_TTS_8082_URL` / `HEPHAESTUS_TTS_BASE_URL`, then restart `forge observe` |
 
 ## Heuristic planner (dev only)
 

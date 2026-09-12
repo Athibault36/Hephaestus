@@ -1,6 +1,7 @@
 import base64
 import asyncio
 import importlib.util
+import io
 import json
 import sys
 import types
@@ -122,6 +123,50 @@ def test_synthesize_talkback_posts_to_local_tts_and_decodes_audio(monkeypatch, t
     assert result["audio_b64"] == base64.b64encode(expected_audio).decode("ascii")
     assert result["sample_rate"] == 24000
     assert calls
+
+
+def test_synthesize_talkback_falls_back_to_openai_speech_shim(monkeypatch, tmp_path):
+    _write_ref(tmp_path)
+    expected_audio = b"shim-wav"
+    calls = []
+
+    def fake_urlopen(req, timeout=None):
+        calls.append(req.full_url)
+        body = json.loads(req.data.decode("utf-8"))
+        if req.full_url == "http://127.0.0.1:8082/synthesize":
+            raise urllib.error.HTTPError(req.full_url, 404, "not found", {}, io.BytesIO(b"{}"))
+        assert req.full_url == "http://127.0.0.1:8082/v1/audio/speech"
+        assert body == {
+            "model": "fish-speech",
+            "input": "Welcome back.",
+            "voice": "hephaestus_default",
+            "response_format": "wav",
+        }
+        return _FakeResponse(expected_audio, headers={"Content-Type": "audio/wav"})
+
+    monkeypatch.setattr(
+        studio_voice,
+        "detect_engine",
+        lambda: {
+            "engine": "local_tts_8082",
+            "base_url": "http://127.0.0.1:8082",
+            "fallback": "none",
+        },
+    )
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    result = studio_voice.synthesize_talkback(
+        "Welcome back.",
+        project_root=tmp_path,
+        voice_id="hephaestus_default",
+        engine="fish-speech",
+    )
+
+    assert calls == ["http://127.0.0.1:8082/synthesize", "http://127.0.0.1:8082/v1/audio/speech"]
+    assert result["ok"] is True
+    assert result["engine"] == "local_tts_8082"
+    assert result["audio_b64"] == base64.b64encode(expected_audio).decode("ascii")
+    assert result["audio_bytes"] == len(expected_audio)
 
 
 def test_synthesize_talkback_does_not_count_browser_fallback_as_success(monkeypatch, tmp_path):

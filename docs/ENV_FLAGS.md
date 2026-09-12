@@ -13,6 +13,9 @@
 | `HEPHAESTUS_EDITOR_API` | `http://127.0.0.1:8766` | Editor control plane for `forge pie start` / `stop` / `editor.import_fbx` |
 | `HEPHAESTUS_UE_API` | `http://127.0.0.1:8765` | PIE world API (commands / frame) |
 | `HEPHAESTUS_DCC_API` | `http://127.0.0.1:8084` | DCC control plane (Blender/CC5) for `forge dcc` / `forge blender` |
+| `HEPHAESTUS_TTS_8082_URL` | `http://127.0.0.1:8082` | Preferred local clone/TTS server for Mission Control talkback |
+| `HEPHAESTUS_TTS_BASE_URL` | — | Fallback HTTP TTS server when the preferred local server is not healthy |
+| `HEPHAESTUS_VOICE_REF_MAX_BYTES` | `26214400` | Maximum decoded bytes accepted by `/agent/voice/enroll` |
 
 ## PIE engage / disengage (bridge ≥ 1.0.1)
 
@@ -54,12 +57,48 @@ forge pie stop
 | **8766** | Editor open (`-HephaestusEditorPort=` override) | `editor.play` / `editor.stop` / `editor.import_fbx` |
 | **8765** | Only while PIE (`-HephaestusRemotePort=`) | World / animation / vision commands |
 | **8084** | `forge dcc start` or `forge up` | `blender.export_fbx` / `blender.exec` / `cc5.export` |
+| **8082** | Agent runtime TTS server | Mission Control `/agent/voice/status` / `/agent/talkback` clone voice path |
 
 ```powershell
 forge dcc start
 forge blender export <PATH-TO-UE-PROJECT> --shape cube
 forge dcc-import <PATH-TO-UE-PROJECT> --name HephaestusPrimitive
 forge cc5 export <PATH-TO-UE-PROJECT> --name Character
+```
+
+### Mission Control talkback / TTS
+
+Mission Control probes the local clone/TTS server before falling back:
+
+1. `HEPHAESTUS_TTS_8082_URL` or `http://127.0.0.1:8082`
+2. `HEPHAESTUS_TTS_BASE_URL`
+3. importable Coqui `TTS`
+
+Browser `speechSynthesis` is only reported as a fallback. It is not a successful talkback engine.
+
+Restart `forge observe` after changing TTS environment variables so the Mission Control process sees them:
+
+```powershell
+# Default: relies on http://127.0.0.1:8082/health
+forge observe <PATH-TO-UE-PROJECT>
+
+# Override the preferred local TTS endpoint when it is not on the default URL.
+$env:HEPHAESTUS_TTS_8082_URL = "http://127.0.0.1:8082"
+forge observe <PATH-TO-UE-PROJECT>
+
+# Fallback HTTP TTS endpoint if the local 8082 service is down or not used.
+$env:HEPHAESTUS_TTS_BASE_URL = "http://127.0.0.1:8082"
+forge observe <PATH-TO-UE-PROJECT>
+```
+
+Dogfood check:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:3000/agent/voice/status
+Invoke-RestMethod http://127.0.0.1:3000/agent/talkback `
+  -Method Post `
+  -ContentType "application/json" `
+  -Body '{"text":"Welcome back.","voice_id":"hephaestus_default","engine":"fish-speech"}'
 ```
 
 ### Studio utterances (chat / Mission Control / `forge run`)

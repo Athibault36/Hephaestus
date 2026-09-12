@@ -9,6 +9,7 @@ import json
 import os
 import re
 import tempfile
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, Optional
@@ -174,15 +175,38 @@ def _synthesize_http(
     voice_id: str,
     engine: Optional[str] = None,
 ) -> dict[str, Any]:
+    base_url = base_url.rstrip("/")
     payload: dict[str, Any] = {"text": text, "voice_id": voice_id}
     if engine:
         payload["engine"] = engine
     req = urllib.request.Request(
-        base_url.rstrip("/") + "/synthesize",
+        base_url + "/synthesize",
         data=json.dumps(payload).encode("utf-8"),
         method="POST",
         headers={"Content-Type": "application/json"},
     )
+    try:
+        return _read_speech_response(req)
+    except urllib.error.HTTPError as exc:
+        if exc.code not in {404, 405, 501}:
+            raise
+
+    shim_payload = {
+        "model": engine or "tts-1",
+        "input": text,
+        "voice": voice_id,
+        "response_format": "wav",
+    }
+    shim_req = urllib.request.Request(
+        base_url + "/v1/audio/speech",
+        data=json.dumps(shim_payload).encode("utf-8"),
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    return _read_speech_response(shim_req)
+
+
+def _read_speech_response(req: urllib.request.Request) -> dict[str, Any]:
     with urllib.request.urlopen(req, timeout=60) as resp:
         content_type = resp.headers.get("Content-Type", "")
         raw = resp.read()
