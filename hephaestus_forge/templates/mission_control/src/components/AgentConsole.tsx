@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMissionControlStore } from '../store/missionControlStore';
+import { CreativeBriefPanel } from './CreativeBriefPanel';
 
 export function AgentConsole() {
   const {
@@ -57,6 +58,8 @@ export function AgentConsole() {
         </span>
         {agentBusy && <span className="pill busy">Agent working…</span>}
       </div>
+
+      <CreativeBriefPanel onUseBrief={setInput} />
 
       <div className="agent-chat-log" ref={logRef}>
         {chatMessages.length === 0 ? (

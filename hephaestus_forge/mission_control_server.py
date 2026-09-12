@@ -30,7 +30,10 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
 try:
     from hephaestus_forge.cloud.nim_client import DEFAULT_PLANNER_MODEL
 except ImportError:
-    from cloud.nim_client import DEFAULT_PLANNER_MODEL  # type: ignore
+    try:
+        from cloud.nim_client import DEFAULT_PLANNER_MODEL  # type: ignore
+    except ImportError:
+        DEFAULT_PLANNER_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
 
 
 def prepare_project_dashboard(project_root: Path, write_fallback) -> Path:
@@ -166,6 +169,23 @@ def make_handler(
                     self._json_response(200, {"ok": True, **bundle})
                 except Exception as exc:
                     self._json_response(500, {"ok": False, "error": str(exc)})
+                return True
+            if path == "/agent/brief/reference-image" and self.command == "POST":
+                length = int(self.headers.get("Content-Length", "0") or 0)
+                raw = self.rfile.read(length) if length > 0 else b"{}"
+                try:
+                    body = json.loads(raw.decode("utf-8") or "{}")
+                except json.JSONDecodeError:
+                    self._json_response(400, {"ok": False, "status": "error", "message": "invalid_json"})
+                    return True
+                try:
+                    sys.path.insert(0, str(FORGE_ROOT))
+                    from creative_brief import build_reference_image_brief_update
+
+                    payload = build_reference_image_brief_update(body)
+                    self._json_response(200 if payload.get("ok") else 400, payload)
+                except Exception as exc:
+                    self._json_response(500, {"ok": False, "status": "error", "message": str(exc)})
                 return True
             if path.startswith("/agent/job/") and self.command == "GET":
                 job_id = path.split("/agent/job/", 1)[-1].strip("/")
