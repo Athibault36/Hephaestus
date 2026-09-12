@@ -40,6 +40,32 @@ export interface GradeSummary {
   missing: string[];
 }
 
+export type CreativeBriefSlotName = 'cast' | 'style' | 'shot';
+export type CreativeBriefSlotState = 'empty' | 'pending' | 'constrained' | 'error';
+
+export interface CreativeBriefSlot {
+  state: CreativeBriefSlotState;
+  value: string;
+  source: '' | 'manual' | 'reference_image' | 'vision_caption';
+}
+
+export interface CreativeBriefReferenceImage {
+  name: string;
+  type: string;
+  size: number | null;
+  source: string;
+  previewUrl: string;
+  url: string;
+}
+
+export interface CreativeBriefState {
+  status: 'empty' | 'loading' | 'awaiting_vision_caption' | 'caption_received' | 'manual_constraints_applied' | 'error';
+  message: string;
+  error: string;
+  referenceImage: CreativeBriefReferenceImage | null;
+  slots: Record<CreativeBriefSlotName, CreativeBriefSlot>;
+}
+
 export interface PerformanceMetrics {
   fps: number;
   frameTime: number;
@@ -61,6 +87,35 @@ export type AgentState = 'idle' | 'listening' | 'thinking' | 'acting' | 'speakin
 
 /** Same-origin when served by forge observe (proxies /v1 and /agent). */
 const API_BASE: string = (import.meta as { env?: { VITE_HEPHAESTUS_API?: string } }).env?.VITE_HEPHAESTUS_API ?? '';
+
+const BRIEF_SLOT_NAMES: CreativeBriefSlotName[] = ['cast', 'style', 'shot'];
+
+function createEmptyBriefSlots(): Record<CreativeBriefSlotName, CreativeBriefSlot> {
+  return {
+    cast: { state: 'empty', value: '', source: '' },
+    style: { state: 'empty', value: '', source: '' },
+    shot: { state: 'empty', value: '', source: '' },
+  };
+}
+
+function createEmptyBrief(): CreativeBriefState {
+  return {
+    status: 'empty',
+    message: 'Attach a sketch or reference image to constrain the brief.',
+    error: '',
+    referenceImage: null,
+    slots: createEmptyBriefSlots(),
+  };
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('Could not read image file'));
+    reader.readAsDataURL(file);
+  });
+}
 
 async function postCommand(body: Record<string, unknown>) {
   const res = await fetch(`${API_BASE}/v1/command`, {
@@ -111,6 +166,11 @@ interface MissionControlState {
   sendAgentChat: (message: string, opts?: { reset?: boolean; mode?: string }) => Promise<void>;
   loadAgentHealth: () => Promise<void>;
   loadSession: () => Promise<void>;
+
+  creativeBrief: CreativeBriefState;
+  attachCreativeBriefReferenceImage: (file: File) => Promise<void>;
+  updateCreativeBriefSlot: (slot: CreativeBriefSlotName, value: string) => void;
+  resetCreativeBrief: () => void;
 
   thoughtLog: ThoughtEntry[];
   addThought: (entry: Omit<ThoughtEntry, 'id' | 'timestamp'>) => void;
@@ -292,6 +352,98 @@ export const useMissionControlStore = create<MissionControlState>((set, get) => 
   bridgeCapabilitiesOk: true,
   forgeVersion: '',
   operatorMilestone: '',
+
+  creativeBrief: createEmptyBrief(),
+  attachCreativeBriefReferenceImage: async (file) => {
+    set((state) => ({
+      creativeBrief: {
+        ...state.creativeBrief,
+        status: 'loading',
+        message: `Reading ${file.name}...`,
+        error: '',
+      },
+    }));
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      const res = await fetch(`${API_BASE}/agent/brief/reference-image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image_name: file.name,
+          image_type: file.type,
+          image_url: dataUrl,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.ok === false) {
+        throw new Error(String(data.message || data.error || 'Could not attach reference image'));
+      }
+
+      const nextSlots = createEmptyBriefSlots();
+      const serverSlots = (data.slots || {}) as Record<string, Partial<CreativeBriefSlot>>;
+      for (const name of BRIEF_SLOT_NAMES) {
+        const slot = serverSlots[name] || {};
+        nextSlots[name] = {
+          state: (slot.state as CreativeBriefSlotState) || 'pending',
+          value: String(slot.value || ''),
+          source: (slot.source as CreativeBriefSlot['source']) || 'reference_image',
+        };
+      }
+      const attachment = (data.attachment || {}) as Record<string, unknown>;
+      set({
+        creativeBrief: {
+          status: data.status || 'awaiting_vision_caption',
+          message: String(data.message || 'Reference image attached.'),
+          error: '',
+          referenceImage: {
+            name: String(attachment.name || file.name),
+            type: String(attachment.type || file.type || 'image'),
+            size: typeof attachment.size === 'number' ? attachment.size : file.size || null,
+            source: String(attachment.source || 'upload'),
+            previewUrl: dataUrl,
+            url: String(attachment.url || ''),
+          },
+          slots: nextSlots,
+        },
+      });
+    } catch (exc) {
+      const message = exc instanceof Error ? exc.message : String(exc);
+      set((state) => ({
+        creativeBrief: {
+          ...state.creativeBrief,
+          status: 'error',
+          message: 'Reference image was not attached.',
+          error: message,
+        },
+      }));
+    }
+  },
+  updateCreativeBriefSlot: (slot, value) => set((state) => {
+    const nextSlots = {
+      ...state.creativeBrief.slots,
+      [slot]: {
+        state: value.trim() ? 'constrained' : (state.creativeBrief.referenceImage ? 'pending' : 'empty'),
+        value,
+        source: value.trim() ? 'manual' : (state.creativeBrief.referenceImage ? 'reference_image' : ''),
+      },
+    } as Record<CreativeBriefSlotName, CreativeBriefSlot>;
+    const hasManualConstraints = BRIEF_SLOT_NAMES.some((name) => nextSlots[name].value.trim());
+    return {
+      creativeBrief: {
+        ...state.creativeBrief,
+        status: hasManualConstraints
+          ? 'manual_constraints_applied'
+          : (state.creativeBrief.referenceImage ? 'awaiting_vision_caption' : 'empty'),
+        message: hasManualConstraints
+          ? 'Manual Creative Brief constraints are applied.'
+          : (state.creativeBrief.referenceImage
+              ? 'Reference image attached; awaiting vision caption ingress. Add manual constraints meanwhile.'
+              : 'Attach a sketch or reference image to constrain the brief.'),
+        slots: nextSlots,
+      },
+    };
+  }),
+  resetCreativeBrief: () => set({ creativeBrief: createEmptyBrief() }),
 
   assetMatches: [],
   connectThoughtStream: () => {
