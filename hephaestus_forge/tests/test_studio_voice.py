@@ -92,6 +92,8 @@ def test_synthesize_talkback_posts_to_local_tts_and_decodes_audio(monkeypatch, t
 
     def fake_urlopen(req, timeout=None):
         calls.append((req, timeout))
+        if req.full_url == "http://127.0.0.1:8082/health":
+            return _FakeResponse({"status": "healthy", "engines": ["fish-speech"]})
         body = json.loads(req.data.decode("utf-8"))
         assert req.full_url == "http://127.0.0.1:8082/synthesize"
         assert body == {
@@ -101,15 +103,8 @@ def test_synthesize_talkback_posts_to_local_tts_and_decodes_audio(monkeypatch, t
         }
         return _FakeResponse({"audio_b64": base64.b64encode(expected_audio).decode("ascii"), "sample_rate": 24000})
 
-    monkeypatch.setattr(
-        studio_voice,
-        "detect_engine",
-        lambda: {
-            "engine": "local_tts_8082",
-            "base_url": "http://127.0.0.1:8082",
-            "fallback": "local",
-        },
-    )
+    monkeypatch.delenv("HEPHAESTUS_TTS_BASE_URL", raising=False)
+    monkeypatch.delenv("HEPHAESTUS_TTS_8082_URL", raising=False)
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
 
     result = studio_voice.synthesize_talkback(
@@ -134,6 +129,8 @@ def test_synthesize_talkback_falls_back_to_openai_speech_shim(monkeypatch, tmp_p
 
     def fake_urlopen(req, timeout=None):
         calls.append(req.full_url)
+        if req.full_url == "http://127.0.0.1:8082/health":
+            return _FakeResponse({"status": "healthy", "engines": ["fish-speech"]})
         body = json.loads(req.data.decode("utf-8"))
         if req.full_url == "http://127.0.0.1:8082/synthesize":
             raise urllib.error.HTTPError(req.full_url, 404, "not found", {}, io.BytesIO(b"{}"))
@@ -146,15 +143,8 @@ def test_synthesize_talkback_falls_back_to_openai_speech_shim(monkeypatch, tmp_p
         }
         return _FakeResponse(expected_audio, headers={"Content-Type": "audio/wav"})
 
-    monkeypatch.setattr(
-        studio_voice,
-        "detect_engine",
-        lambda: {
-            "engine": "local_tts_8082",
-            "base_url": "http://127.0.0.1:8082",
-            "fallback": "none",
-        },
-    )
+    monkeypatch.delenv("HEPHAESTUS_TTS_BASE_URL", raising=False)
+    monkeypatch.delenv("HEPHAESTUS_TTS_8082_URL", raising=False)
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
 
     result = studio_voice.synthesize_talkback(
@@ -164,19 +154,64 @@ def test_synthesize_talkback_falls_back_to_openai_speech_shim(monkeypatch, tmp_p
         engine="fish-speech",
     )
 
-    assert calls == ["http://127.0.0.1:8082/synthesize", "http://127.0.0.1:8082/v1/audio/speech"]
+    assert calls == [
+        "http://127.0.0.1:8082/health",
+        "http://127.0.0.1:8082/synthesize",
+        "http://127.0.0.1:8082/v1/audio/speech",
+    ]
     assert result["ok"] is True
     assert result["engine"] == "local_tts_8082"
     assert result["audio_b64"] == base64.b64encode(expected_audio).decode("ascii")
     assert result["audio_bytes"] == len(expected_audio)
 
 
-def test_synthesize_talkback_does_not_count_browser_fallback_as_success(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        studio_voice,
-        "detect_engine",
-        lambda: {"engine": None, "base_url": "", "fallback": "browser", "detail": "no tts engine"},
+def test_synthesize_talkback_tries_env_base_url_when_local_synthesis_fails(monkeypatch, tmp_path):
+    _write_ref(tmp_path)
+    expected_audio = b"remote-wav"
+    calls = []
+
+    def fake_urlopen(req, timeout=None):
+        calls.append(req.full_url)
+        if req.full_url == "http://127.0.0.1:8082/health":
+            return _FakeResponse({"status": "healthy", "engines": ["fish-speech"]})
+        if req.full_url == "http://127.0.0.1:8082/synthesize":
+            raise urllib.error.HTTPError(req.full_url, 500, "broken", {}, io.BytesIO(b"boom"))
+        if req.full_url == "http://tts.example/health":
+            return _FakeResponse({"ok": True, "engine": "remote-clone"})
+        if req.full_url == "http://tts.example/synthesize":
+            return _FakeResponse({"audio_b64": base64.b64encode(expected_audio).decode("ascii"), "sample_rate": 24000})
+        raise AssertionError(req.full_url)
+
+    monkeypatch.setenv("HEPHAESTUS_TTS_BASE_URL", "http://tts.example")
+    monkeypatch.delenv("HEPHAESTUS_TTS_8082_URL", raising=False)
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    result = studio_voice.synthesize_talkback(
+        "Welcome back.",
+        project_root=tmp_path,
+        voice_id="hephaestus_default",
+        engine="fish-speech",
     )
+
+    assert calls == [
+        "http://127.0.0.1:8082/health",
+        "http://127.0.0.1:8082/synthesize",
+        "http://tts.example/health",
+        "http://tts.example/synthesize",
+    ]
+    assert result["ok"] is True
+    assert result["engine"] == "remote_tts"
+    assert result["audio_b64"] == base64.b64encode(expected_audio).decode("ascii")
+
+
+def test_synthesize_talkback_does_not_count_browser_fallback_as_success(monkeypatch, tmp_path):
+    def fake_urlopen(req, timeout=None):
+        raise OSError("no tts engine")
+
+    monkeypatch.delenv("HEPHAESTUS_TTS_BASE_URL", raising=False)
+    monkeypatch.delenv("HEPHAESTUS_TTS_8082_URL", raising=False)
+    monkeypatch.setattr(studio_voice.importlib.util, "find_spec", lambda name: None if name == "TTS" else None)
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
 
     result = studio_voice.synthesize_talkback("Hello", project_root=tmp_path)
 

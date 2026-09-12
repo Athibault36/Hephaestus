@@ -97,6 +97,15 @@ def _probe_coqui() -> dict[str, Any]:
     }
 
 
+def _http_engine_candidates() -> list[tuple[str, str]]:
+    local_url = os.getenv("HEPHAESTUS_TTS_8082_URL", DEFAULT_LOCAL_TTS_URL).strip() or DEFAULT_LOCAL_TTS_URL
+    candidates = [(local_url.rstrip("/"), "local_tts_8082")]
+    env_url = os.getenv("HEPHAESTUS_TTS_BASE_URL", "").strip().rstrip("/")
+    if env_url and env_url != local_url.rstrip("/"):
+        candidates.append((env_url, "remote_tts"))
+    return candidates
+
+
 def detect_engine() -> dict[str, Any]:
     """Detect the best available talkback engine.
 
@@ -105,25 +114,15 @@ def detect_engine() -> dict[str, Any]:
     only as a fallback and is never a successful engine.
     """
 
-    local_url = os.getenv("HEPHAESTUS_TTS_8082_URL", DEFAULT_LOCAL_TTS_URL).strip() or DEFAULT_LOCAL_TTS_URL
     errors: list[str] = []
-    try:
-        local = _probe_http_engine(local_url, "local_tts_8082")
-        if local.get("ok"):
-            return local
-        errors.append(f"{local_url}/health: {local.get('detail', 'not ready')}")
-    except Exception as exc:
-        errors.append(f"{local_url}/health: {exc}")
-
-    env_url = os.getenv("HEPHAESTUS_TTS_BASE_URL", "").strip()
-    if env_url and env_url.rstrip("/") != local_url.rstrip("/"):
+    for base_url, engine_name in _http_engine_candidates():
         try:
-            remote = _probe_http_engine(env_url, "remote_tts")
-            if remote.get("ok"):
-                return remote
-            errors.append(f"{env_url.rstrip('/')}/health: {remote.get('detail', 'not ready')}")
+            detected = _probe_http_engine(base_url, engine_name)
+            if detected.get("ok"):
+                return detected
+            errors.append(f"{base_url}/health: {detected.get('detail', 'not ready')}")
         except Exception as exc:
-            errors.append(f"{env_url.rstrip('/')}/health: {exc}")
+            errors.append(f"{base_url}/health: {exc}")
 
     coqui = _probe_coqui()
     if coqui.get("ok"):
@@ -271,38 +270,53 @@ def synthesize_talkback(
     if not text:
         return {"ok": False, "error": "text required", "fallback": "browser"}
 
-    detected = detect_engine()
-    engine_name = detected.get("engine")
-    engine_ok = bool(detected.get("ok", bool(engine_name)))
-    if not engine_ok or not engine_name:
+    errors: list[str] = []
+    for base_url, candidate_name in _http_engine_candidates():
+        try:
+            detected = _probe_http_engine(base_url, candidate_name)
+        except Exception as exc:
+            errors.append(f"{candidate_name} health failed: {exc}")
+            continue
+        if not detected.get("ok"):
+            errors.append(f"{candidate_name} health not ready: {detected.get('detail', '')}")
+            continue
+        try:
+            audio = _synthesize_http(base_url, text, voice_id, engine)
+            return {
+                "ok": True,
+                "engine": candidate_name,
+                "fallback": detected.get("fallback", "none"),
+                "voice_id": voice_id,
+                **audio,
+            }
+        except Exception as exc:
+            errors.append(f"{candidate_name} synthesize failed: {exc}")
+
+    coqui = _probe_coqui()
+    if not coqui.get("ok"):
+        errors.append(str(coqui.get("detail", "Coqui TTS unavailable")))
         return {
             "ok": False,
-            "engine": engine_name,
-            "fallback": detected.get("fallback", "browser"),
-            "error": f"no real TTS engine available: {detected.get('detail', '')}",
+            "engine": None,
+            "fallback": "browser",
+            "error": f"no real TTS engine available: {'; '.join(errors)}",
             "voice_id": voice_id,
         }
-
     try:
-        if engine_name in {"local_tts_8082", "remote_tts"}:
-            audio = _synthesize_http(str(detected.get("base_url") or ""), text, voice_id, engine)
-        elif engine_name == "coqui":
-            audio = _synthesize_coqui(text, voice_id)
-        else:
-            raise ValueError(f"unsupported TTS engine: {engine_name}")
+        audio = _synthesize_coqui(text, voice_id)
     except Exception as exc:
         return {
             "ok": False,
-            "engine": engine_name,
+            "engine": "coqui",
             "fallback": "browser",
-            "error": str(exc),
+            "error": f"coqui synthesize failed: {exc}; {'; '.join(errors)}",
             "voice_id": voice_id,
         }
 
     return {
         "ok": True,
-        "engine": engine_name,
-        "fallback": detected.get("fallback", "none"),
+        "engine": "coqui",
+        "fallback": coqui.get("fallback", "none"),
         "voice_id": voice_id,
         **audio,
     }
