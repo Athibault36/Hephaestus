@@ -256,6 +256,28 @@ def test_env_base_url_remains_a_fallback_after_local_8082(monkeypatch):
     assert engine["base_url"] == "http://tts.example"
 
 
+def test_env_base_url_fallback_runs_when_local_health_is_unhealthy(monkeypatch):
+    responses = []
+
+    def fake_urlopen(req, timeout=None):
+        responses.append(req.full_url)
+        if req.full_url == "http://127.0.0.1:8082/health":
+            return _FakeResponse({"ok": False, "status": "starting"})
+        if req.full_url == "http://tts.example/health":
+            return _FakeResponse({"ok": True, "engine": "remote-clone"})
+        raise AssertionError(req.full_url)
+
+    monkeypatch.setenv("HEPHAESTUS_TTS_BASE_URL", "http://tts.example")
+    monkeypatch.delenv("HEPHAESTUS_TTS_8082_URL", raising=False)
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    engine = studio_voice.detect_engine()
+
+    assert responses == ["http://127.0.0.1:8082/health", "http://tts.example/health"]
+    assert engine["engine"] == "remote_tts"
+    assert engine["base_url"] == "http://tts.example"
+
+
 def test_mission_control_voice_status_and_talkback_routes(monkeypatch, tmp_path):
     dist = tmp_path / "dist"
     dist.mkdir()

@@ -108,14 +108,20 @@ def detect_engine() -> dict[str, Any]:
     local_url = os.getenv("HEPHAESTUS_TTS_8082_URL", DEFAULT_LOCAL_TTS_URL).strip() or DEFAULT_LOCAL_TTS_URL
     errors: list[str] = []
     try:
-        return _probe_http_engine(local_url, "local_tts_8082")
+        local = _probe_http_engine(local_url, "local_tts_8082")
+        if local.get("ok"):
+            return local
+        errors.append(f"{local_url}/health: {local.get('detail', 'not ready')}")
     except Exception as exc:
         errors.append(f"{local_url}/health: {exc}")
 
     env_url = os.getenv("HEPHAESTUS_TTS_BASE_URL", "").strip()
     if env_url and env_url.rstrip("/") != local_url.rstrip("/"):
         try:
-            return _probe_http_engine(env_url, "remote_tts")
+            remote = _probe_http_engine(env_url, "remote_tts")
+            if remote.get("ok"):
+                return remote
+            errors.append(f"{env_url.rstrip('/')}/health: {remote.get('detail', 'not ready')}")
         except Exception as exc:
             errors.append(f"{env_url.rstrip('/')}/health: {exc}")
 
