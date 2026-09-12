@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "test:primary-ui": "node tests/no-raw-json-primary-ui.mjs",
     "build": "tsc && vite build",
     "preview": "vite preview"
   },

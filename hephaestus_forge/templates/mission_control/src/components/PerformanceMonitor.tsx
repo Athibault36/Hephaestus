@@ -1,9 +1,11 @@
 import { useMissionControlStore } from '../store/missionControlStore';
+import { PanelState } from './PanelState';
 
 export function PerformanceMonitor() {
-  const { metrics } = useMissionControlStore();
+  const { metrics, isConnected, isConnecting, connectionError } = useMissionControlStore();
 
-  const getMetricStatus = (value: number, thresholds: { warning: number; critical: number }, lowerIsBetter = true) => {
+  const getMetricStatus = (value: number | null, thresholds: { warning: number; critical: number }, lowerIsBetter = true) => {
+    if (value === null) return 'unknown';
     if (lowerIsBetter) {
       if (value >= thresholds.critical) return 'critical';
       if (value >= thresholds.warning) return 'warning';
@@ -14,6 +16,18 @@ export function PerformanceMonitor() {
       return 'good';
     }
   };
+
+  const formatNumber = (value: number | null, fallback = 'Waiting') => (
+    value === null ? fallback : value.toLocaleString()
+  );
+
+  const formatMs = (value: number | null, fallback = 'Not reported') => (
+    value === null ? fallback : `${value.toFixed(1)} ms`
+  );
+
+  const formatLatency = (value: number | null, fallback = 'Optional') => (
+    value === null ? fallback : `${value} ms`
+  );
 
   const renderMetricCard = (
     title: string,
@@ -28,54 +42,73 @@ export function PerformanceMonitor() {
     </div>
   );
 
+  if (!isConnected && !isConnecting) {
+    return (
+      <PanelState
+        tone="offline"
+        icon="📊"
+        title="Performance offline"
+        message={connectionError || 'Start forge observe and PIE to populate bridge health metrics.'}
+      />
+    );
+  }
+
   if (!metrics) {
     return (
-      <div className="perf-grid">
-        {[1, 2, 3, 4].map(i => (
-          <div key={i} className="perf-card">
-            <div className="perf-card-title">Loading...</div>
-            <div className="perf-value">--</div>
-          </div>
-        ))}
-      </div>
+      <PanelState
+        tone={isConnecting ? 'loading' : 'empty'}
+        icon="📊"
+        title={isConnecting ? 'Checking bridge health' : 'Waiting for metrics'}
+        message={
+          isConnecting
+            ? 'Mission Control is probing the bridge before reporting performance.'
+            : 'Metrics will populate after the first successful bridge health check.'
+        }
+      />
     );
   }
 
   const fpsStatus = getMetricStatus(metrics.fps, { warning: 45, critical: 30 }, false);
   const gpuTimeStatus = getMetricStatus(metrics.gpuTime, { warning: 12, critical: 16 });
-  const drawCallsStatus = getMetricStatus(metrics.drawCalls, { warning: 2000, critical: 4000 });
-  const textureMemoryStatus = getMetricStatus(metrics.textureMemory / (1024 ** 3), { warning: 8, critical: 12 });
+  const actorStatus = metrics.drawCalls === null ? 'unknown' : 'good';
+  const textureGb = metrics.textureMemory === null ? null : metrics.textureMemory / (1024 ** 3);
+  const textureMemoryStatus = getMetricStatus(textureGb, { warning: 8, critical: 12 });
   const latencyStatus = getMetricStatus(metrics.latency.total, { warning: 300, critical: 500 });
+  const runtimeLatencyKnown = [metrics.latency.stt, metrics.latency.llm, metrics.latency.tool, metrics.latency.tts, metrics.latency.total]
+    .every((value) => typeof value === 'number');
+  const networkLatency = runtimeLatencyKnown
+    ? (metrics.latency.total as number) - (metrics.latency.stt as number) - (metrics.latency.llm as number) - (metrics.latency.tool as number) - (metrics.latency.tts as number)
+    : null;
 
   return (
     <div className="perf-grid">
       {renderMetricCard(
         'FPS',
-        metrics.fps,
+        formatNumber(metrics.fps),
         fpsStatus,
-        `${metrics.frameTime.toFixed(1)} ms/frame`
+        metrics.frameTime === null ? 'Frame timing not reported by bridge' : `${metrics.frameTime.toFixed(1)} ms bridge heartbeat`
       )}
       {renderMetricCard(
         'GPU Time',
-        `${metrics.gpuTime.toFixed(1)} ms`,
+        formatMs(metrics.gpuTime),
         gpuTimeStatus,
-        `CPU: ${metrics.cpuTime.toFixed(1)} ms`
+        `CPU: ${formatMs(metrics.cpuTime)}`
       )}
       {renderMetricCard(
-        'Draw Calls',
-        metrics.drawCalls.toLocaleString(),
-        drawCallsStatus,
-        `${(metrics.triangles / 1_000_000).toFixed(1)}M tris`
+        'World Actors',
+        formatNumber(metrics.drawCalls),
+        actorStatus,
+        'Latest outliner count'
       )}
       {renderMetricCard(
         'Texture Mem',
-        `${(metrics.textureMemory / (1024 ** 3)).toFixed(1)} GB`,
+        textureGb === null ? 'Not reported' : `${textureGb.toFixed(1)} GB`,
         textureMemoryStatus,
-        'Budget: 8 GB'
+        'GPU telemetry pending bridge support'
       )}
       {renderMetricCard(
         'Bridge RTT',
-        `${metrics.latency.tool} ms`,
+        formatLatency(metrics.latency.tool, 'Waiting'),
         latencyStatus,
         'Health endpoint round-trip'
       )}
@@ -84,24 +117,24 @@ export function PerformanceMonitor() {
         <div className="perf-card-title">Latency Breakdown</div>
         <div className="latency-breakdown">
           <div className="latency-item">
-            <span className="latency-label">STT (Whisper)</span>
-            <span className="latency-value">{metrics.latency.stt} ms</span>
+            <span className="latency-label">STT (optional)</span>
+            <span className="latency-value">{formatLatency(metrics.latency.stt)}</span>
           </div>
           <div className="latency-item">
             <span className="latency-label">LLM (Nemotron)</span>
-            <span className="latency-value">{metrics.latency.llm} ms</span>
+            <span className="latency-value">{formatLatency(metrics.latency.llm, 'Not reported')}</span>
           </div>
           <div className="latency-item">
             <span className="latency-label">Tool Execution</span>
-            <span className="latency-value">{metrics.latency.tool} ms</span>
+            <span className="latency-value">{formatLatency(metrics.latency.tool, 'Waiting')}</span>
           </div>
           <div className="latency-item">
-            <span className="latency-label">TTS (Kokoro)</span>
-            <span className="latency-value">{metrics.latency.tts} ms</span>
+            <span className="latency-label">TTS (optional)</span>
+            <span className="latency-value">{formatLatency(metrics.latency.tts)}</span>
           </div>
           <div className="latency-item">
             <span className="latency-label">Network</span>
-            <span className="latency-value">{metrics.latency.total - metrics.latency.stt - metrics.latency.llm - metrics.latency.tool - metrics.latency.tts} ms</span>
+            <span className="latency-value">{formatLatency(networkLatency, 'Not reported')}</span>
           </div>
         </div>
       </div>

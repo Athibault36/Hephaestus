@@ -66,6 +66,11 @@
   box-shadow: 0 0 8px #3fb950;
 }
 
+.connection-status.connecting .dot {
+  background: #d29922;
+  box-shadow: 0 0 8px #d29922;
+}
+
 .agent-status {
   display: flex;
   align-items: center;
@@ -215,6 +220,87 @@
   padding: 8px;
 }
 
+.panel-state {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 1rem;
+  text-align: center;
+  color: #8b949e;
+  background: linear-gradient(180deg, rgba(33, 38, 45, 0.55), rgba(13, 17, 23, 0.35));
+  border: 1px dashed #30363d;
+  border-radius: 8px;
+}
+
+.panel-state h3 {
+  margin: 0;
+  color: #c9d1d9;
+  font-size: 13px;
+}
+
+.panel-state p {
+  margin: 0;
+  max-width: 36rem;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.panel-state.error {
+  color: #f0c4c4;
+  border-color: rgba(248, 81, 73, 0.45);
+  background: rgba(248, 81, 73, 0.08);
+}
+
+.panel-state.degraded {
+  color: #f1d99b;
+  border-color: rgba(210, 153, 34, 0.5);
+  background: rgba(210, 153, 34, 0.08);
+}
+
+.panel-state.offline {
+  color: #9da7b3;
+}
+
+.panel-state-icon {
+  font-size: 24px;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.state-spinner {
+  width: 22px;
+  height: 22px;
+  border: 2px solid #30363d;
+  border-top-color: #58a6ff;
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.panel-state-actions {
+  margin-top: 0.25rem;
+}
+
+.asset-grid > .panel-state {
+  grid-column: 1 / -1;
+}
+
+button:disabled,
+select:disabled,
+input:disabled,
+textarea:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 8px;
@@ -337,10 +423,50 @@
   word-break: break-word;
 }
 
+.thought-metadata {
+  margin-top: 0.45rem;
+  color: #8b949e;
+}
+
+.thought-metadata summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: #58a6ff;
+}
+
+.metadata-summary-list {
+  margin: 0.45rem 0 0;
+}
+
+.metadata-summary-row {
+  display: grid;
+  grid-template-columns: 8rem 1fr;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.metadata-summary-row dt {
+  color: #8b949e;
+  font-weight: 600;
+}
+
+.metadata-summary-row dd {
+  margin: 0;
+  color: #c9d1d9;
+}
+
 /* World Outliner */
 .actor-tree {
   height: 100%;
   overflow-y: auto;
+  padding: 0.5rem;
+}
+
+.actor-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
 }
 
 .actor-item {
@@ -430,7 +556,27 @@
 
 .agent-status-row .pill.ok { color: #3fb950; border-color: #2f5d3a; }
 .agent-status-row .pill.bad { color: #f85149; border-color: #6a2f22; }
+.agent-status-row .pill.warn { color: #d29922; border-color: #6e5622; }
 .agent-status-row .pill.busy { color: #58a6ff; }
+
+.agent-callout {
+  padding: 0.5rem 0.65rem;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.agent-callout.error {
+  color: #f0c4c4;
+  background: rgba(248, 81, 73, 0.1);
+  border: 1px solid rgba(248, 81, 73, 0.35);
+}
+
+.agent-callout.degraded {
+  color: #f1d99b;
+  background: rgba(210, 153, 34, 0.1);
+  border: 1px solid rgba(210, 153, 34, 0.35);
+}
 
 .agent-chat-log {
   flex: 1;
@@ -522,6 +668,16 @@
   gap: 0.35rem;
   margin-top: 0.35rem;
   align-items: center;
+}
+
+.agent-input-actions select,
+.agent-input-actions button {
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  color: #c9d1d9;
+  padding: 0.35rem 0.55rem;
+  font-size: 12px;
 }
 
 .agent-input-actions button.primary {
@@ -638,6 +794,16 @@
   color: #c9d1d9;
   padding: 0.35rem 0.5rem;
   font-size: 12px;
+}
+
+.asset-search-row button {
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  color: #c9d1d9;
+  padding: 0.35rem 0.55rem;
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .viewport-stream {
@@ -852,6 +1018,7 @@
 .perf-value.warning { color: #d29922; }
 .perf-value.critical { color: #f85149; }
 .perf-value.good { color: #3fb950; }
+.perf-value.unknown { color: #8b949e; }
 
 .perf-subtitle {
   font-size: 11px;

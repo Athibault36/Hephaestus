@@ -28,7 +28,18 @@ export function MissionControl() {
     performance: true,
   });
 
-  const { connect, disconnect, isConnected, preflightReady, preflightHint, bridgeCapabilitiesOk, forgeVersion, operatorMilestone } = useMissionControlStore();
+  const {
+    connect,
+    disconnect,
+    isConnected,
+    isConnecting,
+    connectionError,
+    preflightReady,
+    preflightHint,
+    bridgeCapabilitiesOk,
+    forgeVersion,
+    operatorMilestone,
+  } = useMissionControlStore();
 
   useEffect(() => {
     connect();
@@ -45,7 +56,7 @@ export function MissionControl() {
               forge {forgeVersion} · {operatorMilestone || 'v0.9'}
             </span>
           ) : null}
-          <ConnectionStatus isConnected={isConnected} />
+          <ConnectionStatus isConnected={isConnected} isConnecting={isConnecting} connectionError={connectionError} />
         </div>
         <div className="header-center">
           <AgentStatus />
@@ -110,11 +121,20 @@ export function MissionControl() {
   );
 }
 
-function ConnectionStatus({ isConnected }: { isConnected: boolean }) {
+function ConnectionStatus({
+  isConnected,
+  isConnecting,
+  connectionError,
+}: {
+  isConnected: boolean;
+  isConnecting: boolean;
+  connectionError: string;
+}) {
+  const label = isConnected ? 'Connected' : isConnecting ? 'Connecting' : 'Disconnected';
   return (
-    <span className={`connection-status ${isConnected ? 'connected' : 'disconnected'}`}>
+    <span className={`connection-status ${isConnected ? 'connected' : isConnecting ? 'connecting' : 'disconnected'}`} title={connectionError || label}>
       <span className="dot" />
-      {isConnected ? 'Connected' : 'Disconnected'}
+      {label}
     </span>
   );
 }
@@ -154,6 +174,8 @@ function PanelToggles({
           className={`panel-toggle ${activePanels[key as keyof ActivePanels] ? 'active' : ''}`}
           onClick={() => setActivePanels((prev) => ({ ...prev, [key]: !prev[key as keyof ActivePanels] }))}
           title={label}
+          aria-label={`${activePanels[key as keyof ActivePanels] ? 'Hide' : 'Show'} ${label} panel`}
+          aria-pressed={activePanels[key as keyof ActivePanels]}
         >
           {icon}
         </button>
