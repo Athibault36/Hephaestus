@@ -1,8 +1,9 @@
 import { useEffect } from 'react';
 import { useMissionControlStore } from '../store/missionControlStore';
+import { PanelState } from './PanelState';
 
 export function ViewportStream() {
-  const { isConnected, frameUrl, captureFrame } = useMissionControlStore();
+  const { isConnected, frameUrl, frameLoading, frameError, captureFrame } = useMissionControlStore();
 
   useEffect(() => {
     if (!isConnected) return;
@@ -15,13 +16,27 @@ export function ViewportStream() {
     <div className="viewport-container">
       {frameUrl ? (
         <img src={frameUrl} alt="UE viewport" className="viewport-stream" />
+      ) : frameLoading ? (
+        <PanelState
+          tone="loading"
+          icon="📷"
+          title="Capturing viewport"
+          message="Mission Control is asking the UE bridge for the latest PIE frame."
+        />
+      ) : frameError && isConnected ? (
+        <PanelState tone="error" icon="⚠️" title="Viewport unavailable" message={frameError} />
       ) : (
         <div className="viewport-placeholder">
-          <div className="placeholder-content">
-            <span className="placeholder-icon">📷</span>
-            <p>{isConnected ? 'Capturing viewport…' : 'Waiting for PIE…'}</p>
-            <p className="placeholder-hint">Start Play in UE with HephaestusBridge</p>
-          </div>
+          <PanelState
+            tone={isConnected ? 'empty' : 'offline'}
+            icon="📷"
+            title={isConnected ? 'No frame captured yet' : 'Waiting for PIE'}
+            message={
+              isConnected
+                ? 'The bridge is connected; a viewport frame will appear after capture succeeds.'
+                : 'Start Play in UE with HephaestusBridge, then run Mission Control through forge observe.'
+            }
+          />
         </div>
       )}
     </div>

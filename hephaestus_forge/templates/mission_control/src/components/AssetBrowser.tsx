@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMissionControlStore } from '../store/missionControlStore';
 import { AssetInfo } from '../store/missionControlStore';
+import { PanelState } from './PanelState';
 
 const CLASS_FILTERS = [
   { id: '', label: 'All' },
@@ -11,7 +12,7 @@ const CLASS_FILTERS = [
 ];
 
 export function AssetBrowser() {
-  const { assets, searchAssets, spawnAsset } = useMissionControlStore();
+  const { assets, assetsLoading, assetsError, assetSearchAttempted, isConnected, searchAssets, spawnAsset } = useMissionControlStore();
   const [query, setQuery] = useState('');
   const [assetClass, setAssetClass] = useState('');
 
@@ -24,6 +25,7 @@ export function AssetBrowser() {
   };
 
   const onSearch = () => {
+    if (!isConnected || assetsLoading) return;
     searchAssets(query, assetClass || undefined);
   };
 
@@ -36,6 +38,7 @@ export function AssetBrowser() {
             type="button"
             className={`asset-filter-chip ${assetClass === f.id ? 'active' : ''}`}
             onClick={() => setAssetClass(f.id)}
+            disabled={!isConnected || assetsLoading}
           >
             {f.label}
           </button>
@@ -46,18 +49,31 @@ export function AssetBrowser() {
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search /Game assets…"
+          placeholder={isConnected ? 'Search /Game assets…' : 'Connect PIE before searching assets'}
+          disabled={!isConnected || assetsLoading}
           onKeyDown={(e) => e.key === 'Enter' && onSearch()}
         />
-        <button type="button" onClick={onSearch}>Search</button>
+        <button type="button" onClick={onSearch} disabled={!isConnected || assetsLoading}>Search</button>
       </div>
       <div className="asset-grid" role="grid" aria-label="Asset Browser">
-        {assets.length === 0 ? (
-          <div className="asset-empty" style={{ gridColumn: '1 / -1' }}>
-            <span className="empty-icon">📦</span>
-            <p>No assets yet</p>
-            <p className="empty-hint">Search by name (dog, cube, idle…)</p>
-          </div>
+        {!isConnected ? (
+          <PanelState
+            tone="offline"
+            icon="📦"
+            title="Asset search offline"
+            message="Asset search uses the UE bridge. Start PIE before browsing project assets."
+          />
+        ) : assetsLoading ? (
+          <PanelState tone="loading" icon="📦" title="Searching assets" message="Mission Control is asking UE for matching project assets." />
+        ) : assetsError ? (
+          <PanelState tone="error" icon="⚠️" title="Asset search failed" message={assetsError} />
+        ) : assets.length === 0 ? (
+          <PanelState
+            tone="empty"
+            icon="📦"
+            title={assetSearchAttempted ? 'No matching assets' : 'Search project assets'}
+            message={assetSearchAttempted ? 'Try a broader name or a different asset type filter.' : 'Search by name, type, or animation cue to find assets you can spawn into PIE.'}
+          />
         ) : (
           assets.map((asset: AssetInfo) => (
             <div

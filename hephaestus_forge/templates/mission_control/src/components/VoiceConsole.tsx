@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMissionControlStore } from '../store/missionControlStore';
+import { PanelState } from './PanelState';
 
 export function VoiceConsole() {
   const {
@@ -240,12 +241,25 @@ export function VoiceConsole() {
   return (
     <div className="voice-console">
       <div className="voice-visualizer">
-        <div className="voice-waveform" role="img" aria-label="Audio waveform">
-          {bars}
-        </div>
-        <div className="voice-status">
-          {statusText}
-        </div>
+        {!isConnected ? (
+          <PanelState
+            tone="offline"
+            icon="🎤"
+            title="Voice optional"
+            message="Connect PIE to enable push-to-talk. Mission Control does not require TTS or vision sidecars to load."
+          />
+        ) : voiceError ? (
+          <PanelState tone="error" icon="⚠️" title="Microphone unavailable" message={voiceError} />
+        ) : (
+          <>
+            <div className="voice-waveform" role="img" aria-label="Audio waveform">
+              {bars}
+            </div>
+            <div className="voice-status">
+              {statusText}
+            </div>
+          </>
+        )}
       </div>
 
       <div className="voice-controls">
