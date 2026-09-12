@@ -78,6 +78,7 @@ class TTSRequest:
     """TTS synthesis request."""
     text: str
     voice_id: str
+    engine: Optional[str] = None
     language: str = "en"
     speed: float = 1.0
     pitch: float = 1.0
@@ -598,6 +599,7 @@ class TTSManager:
         engine_name: str = None
     ) -> TTSResult:
         """Synthesize with fallback."""
+        engine_name = engine_name or request.engine
         engine = self.get_engine(engine_name)
         if not engine:
             raise ValueError(f"Engine not found: {engine_name or self.primary_engine_name}")
@@ -757,7 +759,7 @@ try:
             raise HTTPException(status_code=503, detail="TTS not initialized")
         request = TTSRequest(text=req.text, voice_id=req.voice_id, engine=req.engine)
         result = await _tts_manager.synthesize(request)
-        return {"audio_b64": base64.b64encode(result.audio).decode(), "sample_rate": result.sample_rate}
+        return {"audio_b64": base64.b64encode(result.audio_data).decode(), "sample_rate": result.sample_rate}
 
     if __name__ == "__main__":
         host = os.getenv("TTS_HOST", "127.0.0.1")
