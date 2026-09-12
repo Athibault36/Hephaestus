@@ -14,6 +14,9 @@ import mission_control_server  # noqa: E402
 import studio_voice  # noqa: E402
 
 
+VALID_WAV = b"RIFF$\0\0\0WAVEfmt "
+
+
 class _FakeResponse:
     def __init__(self, payload, status=200, headers=None):
         self.status = status
@@ -143,7 +146,7 @@ def test_enroll_voice_reference_saves_refs_without_engine(monkeypatch, tmp_path)
     )
 
     result = studio_voice.enroll_voice_reference(
-        base64.b64encode(b"reference-audio").decode("ascii"),
+        base64.b64encode(VALID_WAV).decode("ascii"),
         project_root=tmp_path,
         voice_id="hephaestus_default",
         filename="sample.wav",
@@ -154,7 +157,7 @@ def test_enroll_voice_reference_saves_refs_without_engine(monkeypatch, tmp_path)
     assert result["clone_ready"] is False
     assert result["engine"] is None
     saved = tmp_path / "ProjectMemory" / "voice_library" / "references" / "hephaestus_default" / "sample.wav"
-    assert saved.read_bytes() == b"reference-audio"
+    assert saved.read_bytes() == VALID_WAV
 
 
 def test_enroll_voice_reference_rejects_oversized_or_non_audio_refs(monkeypatch, tmp_path):
@@ -165,16 +168,24 @@ def test_enroll_voice_reference_rejects_oversized_or_non_audio_refs(monkeypatch,
         project_root=tmp_path,
         filename="sample.wav",
     )
+    monkeypatch.setenv("HEPHAESTUS_VOICE_REF_MAX_BYTES", "100")
     non_audio = studio_voice.enroll_voice_reference(
-        base64.b64encode(b"1234").decode("ascii"),
+        base64.b64encode(VALID_WAV).decode("ascii"),
         project_root=tmp_path,
         filename="sample.txt",
+    )
+    fake_wav = studio_voice.enroll_voice_reference(
+        base64.b64encode(b"not actually audio").decode("ascii"),
+        project_root=tmp_path,
+        filename="fake.wav",
     )
 
     assert oversized["ok"] is False
     assert "too large" in oversized["error"]
     assert non_audio["ok"] is False
     assert "audio" in non_audio["error"]
+    assert fake_wav["ok"] is False
+    assert "audio" in fake_wav["error"]
     assert not (tmp_path / "ProjectMemory" / "voice_library" / "references").exists()
 
 
@@ -389,3 +400,39 @@ def test_template_synthesize_builds_voice_profile_from_reference_files(monkeypat
 
     assert result.audio_data == b"audio"
     assert manager.voice_library.get_voice("hephaestus_default") is not None
+
+
+def test_template_rejects_unsafe_voice_id_reference_lookup(monkeypatch, tmp_path):
+    module = _load_voice_cloning_template(monkeypatch)
+    library_dir = tmp_path / "ProjectMemory" / "voice_library"
+    outside_ref_dir = library_dir / "outside"
+    outside_ref_dir.mkdir(parents=True)
+    (outside_ref_dir / "ref_0.wav").write_bytes(b"ref")
+
+    class RecordingEngine(module.FishSpeechEngine):
+        async def initialize(self):
+            self._initialized = True
+            return True
+
+        async def synthesize(self, request, voice_profile):
+            return module.TTSResult(
+                audio_data=b"audio",
+                sample_rate=24000,
+                duration=0.1,
+                voice_id=request.voice_id,
+                engine=self.name,
+            )
+
+    manager = module.TTSManager({"voice_library_dir": str(library_dir)})
+    manager.register_engine(RecordingEngine({}))
+
+    try:
+        asyncio.run(manager.synthesize(module.TTSRequest(
+            text="No traversal.",
+            voice_id="../outside",
+            engine="fish-speech",
+        )))
+    except ValueError as exc:
+        assert "Voice not found" in str(exc)
+    else:
+        raise AssertionError("unsafe voice_id should not resolve reference files outside references_dir")

@@ -9,6 +9,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import tempfile
 import uuid
 from abc import ABC, abstractmethod
@@ -19,6 +20,8 @@ from typing import AsyncGenerator, Dict, List, Optional, Any
 import numpy as np
 import torch
 import torchaudio
+
+_SAFE_VOICE_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 # ─── Data Models ──────────────────────────────────────────────────────────────
@@ -464,6 +467,13 @@ class VoiceLibrary:
         self.rvc_models_dir.mkdir(exist_ok=True)
         
         self._load_library()
+
+    def _safe_voice_id(self, voice_id: str) -> Optional[str]:
+        if not voice_id or Path(voice_id).name != voice_id:
+            return None
+        if not _SAFE_VOICE_ID_RE.fullmatch(voice_id) or not voice_id.strip("._"):
+            return None
+        return voice_id
     
     def _load_library(self):
         """Load all voice profiles from disk."""
@@ -523,10 +533,16 @@ class VoiceLibrary:
 
     def get_or_create_from_references(self, voice_id: str) -> Optional[VoiceProfile]:
         """Create a lightweight profile when enrollment refs exist but no index was written."""
+        voice_id = self._safe_voice_id(voice_id)
+        if not voice_id:
+            return None
         profile = self.get_voice(voice_id)
         if profile:
             return profile
-        voice_ref_dir = self.references_dir / voice_id
+        voice_ref_dir = (self.references_dir / voice_id).resolve()
+        references_root = self.references_dir.resolve()
+        if voice_ref_dir != references_root and references_root not in voice_ref_dir.parents:
+            return None
         if not voice_ref_dir.exists():
             return None
         refs = sorted(p for p in voice_ref_dir.iterdir() if p.is_file())

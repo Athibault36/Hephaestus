@@ -296,6 +296,25 @@ def _max_reference_bytes() -> int:
         return _DEFAULT_MAX_REFERENCE_BYTES
 
 
+def _looks_like_reference_audio(audio: bytes, filename: str) -> bool:
+    suffix = Path(filename).suffix.lower()
+    if suffix == ".wav":
+        return len(audio) >= 12 and audio.startswith(b"RIFF") and audio[8:12] == b"WAVE"
+    if suffix == ".webm":
+        return audio.startswith(b"\x1a\x45\xdf\xa3")
+    if suffix == ".ogg":
+        return audio.startswith(b"OggS")
+    if suffix == ".flac":
+        return audio.startswith(b"fLaC")
+    if suffix == ".mp3":
+        return audio.startswith(b"ID3") or (len(audio) >= 2 and audio[0] == 0xFF and (audio[1] & 0xE0) == 0xE0)
+    if suffix == ".m4a":
+        return len(audio) >= 12 and audio[4:8] == b"ftyp"
+    if suffix == ".aac":
+        return len(audio) >= 2 and audio[0] == 0xFF and (audio[1] & 0xF6) in {0xF0, 0xF2}
+    return False
+
+
 def enroll_voice_reference(
     audio_b64: str,
     project_root: Optional[Path] = None,
@@ -318,6 +337,8 @@ def enroll_voice_reference(
     name = _safe_filename(filename, ref_dir)
     if Path(name).suffix.lower() not in _ALLOWED_REFERENCE_EXTENSIONS:
         return {"ok": False, "error": "voice reference must use an audio filename", "voice_id": voice_id}
+    if not _looks_like_reference_audio(audio, name):
+        return {"ok": False, "error": "voice reference does not look like supported audio", "voice_id": voice_id}
 
     ref_dir.mkdir(parents=True, exist_ok=True)
     dest = ref_dir / name
