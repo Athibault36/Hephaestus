@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "test:voice": "node scripts/run-voice-tests.mjs",
     "build": "tsc && vite build",
     "preview": "vite preview"
   },

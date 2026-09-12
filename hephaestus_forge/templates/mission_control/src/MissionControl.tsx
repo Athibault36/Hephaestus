@@ -6,6 +6,7 @@ import { ActorActions } from './components/ActorActions';
 import { AssetBrowser } from './components/AssetBrowser';
 import { AgentConsole } from './components/AgentConsole';
 import { PerformanceMonitor } from './components/PerformanceMonitor';
+import { VoiceConsole } from './components/VoiceConsole';
 import { useMissionControlStore } from './store/missionControlStore';
 import './MissionControl.css';
 
@@ -95,6 +96,7 @@ export function MissionControl() {
         {activePanels.voiceConsole && (
           <section className="panel voice-console-panel" data-panel="voiceConsole">
             <PanelHeader title="Agent" icon="🤖" />
+            <VoiceConsole />
             <AgentConsole />
           </section>
         )}
