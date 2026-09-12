@@ -53,6 +53,11 @@ class PreflightReport:
         }
 
 
+HEALTHY_STATUSES = {"healthy", "ok", "up"}
+DEFAULT_TTS_HEALTH_URL = "http://127.0.0.1:8082/health"
+DEFAULT_VISION_HEALTH_URL = "http://127.0.0.1:8083/health"
+
+
 def _normalize_project_dir(path: Any) -> str:
     """Compare UE ProjectDir vs forge project_root across OS path quirks."""
     p = Path(str(path)).resolve()
@@ -67,6 +72,57 @@ def fetch_ue_health(remote_api: str, timeout: float = 2.0) -> dict[str, Any]:
         if resp.status != 200:
             raise RuntimeError(f"HTTP {resp.status}")
         return json.loads(resp.read().decode("utf-8") or "{}")
+
+
+def _fetch_health_url(url: str, timeout: float = 1.5) -> dict[str, Any]:
+    with urllib.request.urlopen(url, timeout=timeout) as resp:
+        if resp.status != 200:
+            raise RuntimeError(f"HTTP {resp.status}")
+        body = json.loads(resp.read().decode("utf-8") or "{}")
+        if not isinstance(body, dict):
+            raise RuntimeError("health payload was not an object")
+        return body
+
+
+def _is_healthy_payload(data: dict[str, Any]) -> bool:
+    if data.get("ok") is False:
+        return False
+    if data.get("ok") is True:
+        return True
+    return str(data.get("status", "")).strip().lower() in HEALTHY_STATUSES
+
+
+def _probe_tts(timeout: float = 1.5) -> HealthCheck:
+    """Non-blocking: local TTS server (:8082) used by studio/runtime paths."""
+    url = (os.environ.get("HEPHAESTUS_TTS_HEALTH_URL") or DEFAULT_TTS_HEALTH_URL).rstrip("/")
+    try:
+        health = _fetch_health_url(url, timeout=timeout)
+        if not _is_healthy_payload(health):
+            status = health.get("status", health.get("ok", "missing"))
+            return HealthCheck("tts", False, f"TTS health unhealthy ({status})", blocker=False)
+        engines = health.get("engines")
+        if isinstance(engines, list) and engines:
+            detail = f"TTS healthy ({len(engines)} engine{'s' if len(engines) != 1 else ''}: {', '.join(map(str, engines))})"
+        else:
+            detail = f"TTS healthy (status={health.get('status', 'ok')})"
+        return HealthCheck("tts", True, detail, blocker=False)
+    except Exception as exc:
+        return HealthCheck("tts", False, f"TTS offline at {url} ({exc})", blocker=False)
+
+
+def _probe_vision_health(timeout: float = 1.5) -> HealthCheck:
+    """Non-blocking: local vision stack (:8083) used by studio/runtime paths."""
+    url = (os.environ.get("HEPHAESTUS_VISION_HEALTH_URL") or DEFAULT_VISION_HEALTH_URL).rstrip("/")
+    try:
+        health = _fetch_health_url(url, timeout=timeout)
+        if not _is_healthy_payload(health):
+            status = health.get("status", health.get("ok", "missing"))
+            return HealthCheck("vision", False, f"Vision health unhealthy ({status})", blocker=False)
+        device = health.get("device")
+        detail = f"Vision healthy (device={device})" if device else f"Vision healthy (status={health.get('status', 'ok')})"
+        return HealthCheck("vision", True, detail, blocker=False)
+    except Exception as exc:
+        return HealthCheck("vision", False, f"Vision offline at {url} ({exc})", blocker=False)
 
 
 def pie_matches_project(health: dict[str, Any], project_root: Path) -> tuple[bool, str]:
@@ -375,6 +431,8 @@ def run_preflight(
         _probe_ue(remote_api, project_root=project_root),
         _probe_bridge_capabilities(remote_api),
         _probe_dcc(),
+        _probe_tts(),
+        _probe_vision_health(),
         _probe_nim_key(),
         _probe_planner(),
         _probe_vision_mode(),
