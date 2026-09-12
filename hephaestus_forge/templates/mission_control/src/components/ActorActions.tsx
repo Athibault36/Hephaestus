@@ -1,10 +1,19 @@
 import { useMissionControlStore } from '../store/missionControlStore';
+import { PanelState } from './PanelState';
 
 export function ActorActions() {
-  const { selectedActor, playLocomotion, playMontage, frameActor, destroyActor } = useMissionControlStore();
+  const { actors, actorsError, actorsLoading, isConnected, selectedActor, playLocomotion, playMontage, frameActor, destroyActor } = useMissionControlStore();
 
   if (!selectedActor) {
-    return <p className="actor-actions-hint">Select an actor in the outliner</p>;
+    if (!isConnected || actorsLoading || actorsError || actors.length === 0) return null;
+    return (
+      <PanelState
+        tone="empty"
+        icon="🎬"
+        title="No actor selected"
+        message="Select an actor in the outliner to frame, animate, or remove it from PIE."
+      />
+    );
   }
 
   return (
