@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+import urllib.error
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -103,3 +104,64 @@ def test_preflight_bridge_version_mismatch(tmp_path):
     bridge = next(c for c in report.checks if c.name == "bridge_template")
     assert bridge.ok is False
     assert BRIDGE_VERSION in bridge.detail or "sync-plugin" in bridge.detail
+
+
+def _json_response(payload: bytes, status: int = 200):
+    resp = MagicMock()
+    resp.status = status
+    resp.read.return_value = payload
+    resp.__enter__ = lambda s: s
+    resp.__exit__ = MagicMock(return_value=False)
+    return resp
+
+
+def test_tts_probe_accepts_status_healthy_payload():
+    from preflight_health import _probe_tts
+
+    with patch("urllib.request.urlopen", return_value=_json_response(b'{"status":"healthy","engines":["fish-speech"]}')):
+        check = _probe_tts()
+
+    assert check.name == "tts"
+    assert check.ok is True
+    assert check.blocker is False
+    assert "healthy" in check.detail.lower() or "fish-speech" in check.detail
+
+
+def test_vision_probe_accepts_status_healthy_payload():
+    from preflight_health import _probe_vision_health
+
+    with patch("urllib.request.urlopen", return_value=_json_response(b'{"status":"healthy","device":"cpu"}')):
+        check = _probe_vision_health()
+
+    assert check.name == "vision"
+    assert check.ok is True
+    assert check.blocker is False
+    assert "healthy" in check.detail.lower() or "cpu" in check.detail
+
+
+def test_tts_and_vision_probes_reject_explicit_unhealthy_payloads():
+    from preflight_health import _probe_tts, _probe_vision_health
+
+    with patch("urllib.request.urlopen", return_value=_json_response(b'{"ok":false,"status":"unhealthy"}')):
+        tts = _probe_tts()
+    with patch("urllib.request.urlopen", return_value=_json_response(b'{"status":"down"}')):
+        vision = _probe_vision_health()
+
+    assert tts.ok is False
+    assert tts.blocker is False
+    assert vision.ok is False
+    assert vision.blocker is False
+
+
+def test_tts_and_vision_probes_do_not_go_green_on_connection_errors():
+    from preflight_health import _probe_tts, _probe_vision_health
+
+    with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("refused")):
+        tts = _probe_tts()
+    with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("refused")):
+        vision = _probe_vision_health()
+
+    assert tts.ok is False
+    assert tts.blocker is False
+    assert vision.ok is False
+    assert vision.blocker is False
