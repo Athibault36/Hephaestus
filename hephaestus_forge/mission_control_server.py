@@ -109,6 +109,17 @@ def make_handler(
             self.end_headers()
             self.wfile.write(data)
 
+        def _read_json_body(self) -> tuple[Optional[dict], Optional[str]]:
+            length = int(self.headers.get("Content-Length", "0") or 0)
+            raw = self.rfile.read(length) if length > 0 else b"{}"
+            try:
+                payload = json.loads(raw.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                return None, "invalid_json"
+            if not isinstance(payload, dict):
+                return None, "invalid_json_object"
+            return payload, None
+
         def _handle_agent(self) -> bool:
             path = self.path.split("?")[0]
             if path == "/agent/health" and self.command == "GET":
@@ -145,6 +156,60 @@ def make_handler(
                         "ue": remote_api,
                         "project": str(project_root) if project_root else "",
                     })
+                return True
+            if path == "/agent/voice/status" and self.command == "GET":
+                try:
+                    from urllib.parse import parse_qs, urlparse
+
+                    sys.path.insert(0, str(FORGE_ROOT))
+                    from studio_voice import DEFAULT_VOICE_ID, voice_status
+
+                    qs = parse_qs(urlparse(self.path).query)
+                    voice_id = (qs.get("voice_id") or [DEFAULT_VOICE_ID])[0] or DEFAULT_VOICE_ID
+                    self._json_response(200, voice_status(project_root=project_root, voice_id=voice_id))
+                except Exception as exc:
+                    self._json_response(500, {"ok": False, "error": str(exc)})
+                return True
+            if path == "/agent/voice/enroll" and self.command == "POST":
+                body, error = self._read_json_body()
+                if error:
+                    self._json_response(400, {"ok": False, "error": error})
+                    return True
+                try:
+                    sys.path.insert(0, str(FORGE_ROOT))
+                    from studio_voice import DEFAULT_VOICE_ID, enroll_voice_reference
+
+                    audio_b64 = str((body or {}).get("audio_b64") or (body or {}).get("audio") or "")
+                    voice_id = str((body or {}).get("voice_id") or DEFAULT_VOICE_ID)
+                    filename = (body or {}).get("filename")
+                    payload = enroll_voice_reference(
+                        audio_b64,
+                        project_root=project_root,
+                        voice_id=voice_id,
+                        filename=str(filename) if filename else None,
+                    )
+                    self._json_response(200 if payload.get("ok") else 400, payload)
+                except Exception as exc:
+                    self._json_response(500, {"ok": False, "error": str(exc)})
+                return True
+            if path == "/agent/talkback" and self.command == "POST":
+                body, error = self._read_json_body()
+                if error:
+                    self._json_response(400, {"ok": False, "error": error})
+                    return True
+                try:
+                    sys.path.insert(0, str(FORGE_ROOT))
+                    from studio_voice import DEFAULT_VOICE_ID, synthesize_talkback
+
+                    payload = synthesize_talkback(
+                        str((body or {}).get("text") or ""),
+                        project_root=project_root,
+                        voice_id=str((body or {}).get("voice_id") or DEFAULT_VOICE_ID),
+                        engine=(body or {}).get("engine"),
+                    )
+                    self._json_response(200 if payload.get("ok") else 503, payload)
+                except Exception as exc:
+                    self._json_response(500, {"ok": False, "error": str(exc)})
                 return True
             if path == "/agent/session" and self.command == "GET":
                 try:

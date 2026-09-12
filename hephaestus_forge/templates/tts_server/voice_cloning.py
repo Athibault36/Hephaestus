@@ -9,6 +9,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import tempfile
 import uuid
 from abc import ABC, abstractmethod
@@ -19,6 +20,8 @@ from typing import AsyncGenerator, Dict, List, Optional, Any
 import numpy as np
 import torch
 import torchaudio
+
+_SAFE_VOICE_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 # ─── Data Models ──────────────────────────────────────────────────────────────
@@ -463,6 +466,13 @@ class VoiceLibrary:
         self.rvc_models_dir.mkdir(exist_ok=True)
         
         self._load_library()
+
+    def _safe_voice_id(self, voice_id: str) -> Optional[str]:
+        if not voice_id or Path(voice_id).name != voice_id:
+            return None
+        if not _SAFE_VOICE_ID_RE.fullmatch(voice_id) or not voice_id.strip("._"):
+            return None
+        return voice_id
     
     def _load_library(self):
         """Load all voice profiles from disk."""
@@ -519,6 +529,30 @@ class VoiceLibrary:
     
     def get_voice(self, voice_id: str) -> Optional[VoiceProfile]:
         return self.profiles.get(voice_id)
+
+    def get_or_create_from_references(self, voice_id: str) -> Optional[VoiceProfile]:
+        """Create a lightweight profile when enrollment refs exist but no index was written."""
+        voice_id = self._safe_voice_id(voice_id)
+        if not voice_id:
+            return None
+        profile = self.get_voice(voice_id)
+        if profile:
+            return profile
+        voice_ref_dir = (self.references_dir / voice_id).resolve()
+        references_root = self.references_dir.resolve()
+        if voice_ref_dir != references_root and references_root not in voice_ref_dir.parents:
+            return None
+        if not voice_ref_dir.exists():
+            return None
+        refs = sorted(p for p in voice_ref_dir.iterdir() if p.is_file())
+        if not refs:
+            return None
+        profile = VoiceProfile(
+            voice_id=voice_id,
+            name=f"Reference Voice {voice_id[:8]}",
+            reference_audio_paths=[str(p) for p in refs],
+        )
+        return self.add_voice(profile)
     
     def list_voices(self) -> List[VoiceProfile]:
         return list(self.profiles.values())
@@ -564,6 +598,24 @@ class TTSManager:
         self.voice_library = VoiceLibrary(config.get("voice_library_dir", "ProjectMemory/voice_library"))
         self.default_voice_id = config.get("default_voice", "hephaestus_default")
         self._initialized = False
+
+    def seed_default_voice_profile(self) -> VoiceProfile:
+        profile = self.voice_library.get_voice(self.default_voice_id)
+        if profile:
+            return profile
+        return self.voice_library.add_voice(VoiceProfile(
+            voice_id=self.default_voice_id,
+            name="Hephaestus Default Voice",
+            reference_audio_paths=[],
+        ))
+
+    def _resolve_voice_profile(self, voice_id: str) -> Optional[VoiceProfile]:
+        voice_profile = self.voice_library.get_or_create_from_references(voice_id)
+        if voice_profile:
+            return voice_profile
+        if voice_id != self.default_voice_id:
+            return self.voice_library.get_or_create_from_references(self.default_voice_id)
+        return None
     
     def register_engine(self, engine: TTSEngine):
         self.engines[engine.name] = engine
@@ -587,6 +639,9 @@ class TTSManager:
         
         self._initialized = True
         return any(ok for _, ok in results)
+
+    def is_ready(self) -> bool:
+        return self._initialized and any(engine.is_initialized() for engine in self.engines.values())
     
     def get_engine(self, name: str = None) -> Optional[TTSEngine]:
         name = name or self.primary_engine_name
@@ -602,10 +657,7 @@ class TTSManager:
         if not engine:
             raise ValueError(f"Engine not found: {engine_name or self.primary_engine_name}")
         
-        voice_profile = self.voice_library.get_voice(request.voice_id)
-        if not voice_profile:
-            # Try default voice
-            voice_profile = self.voice_library.get_voice(self.default_voice_id)
+        voice_profile = self._resolve_voice_profile(request.voice_id)
         if not voice_profile:
             raise ValueError(f"Voice not found: {request.voice_id}")
         
@@ -628,9 +680,7 @@ class TTSManager:
         if not engine:
             raise ValueError(f"Engine not found: {engine_name or self.primary_engine_name}")
         
-        voice_profile = self.voice_library.get_voice(request.voice_id)
-        if not voice_profile:
-            voice_profile = self.voice_library.get_voice(self.default_voice_id)
+        voice_profile = self._resolve_voice_profile(request.voice_id)
         if not voice_profile:
             raise ValueError(f"Voice not found: {request.voice_id}")
         
@@ -705,6 +755,14 @@ class TTSManager:
 
 # ─── Factory ──────────────────────────────────────────────────────────────────
 
+def default_voice_library_dir() -> str:
+    """Resolve the target project's voice library from Agent_Runtime/tts_server."""
+    env_dir = os.getenv("HEPHAESTUS_VOICE_LIBRARY_DIR")
+    if env_dir:
+        return env_dir
+    return str(Path(__file__).resolve().parents[2] / "ProjectMemory" / "voice_library")
+
+
 async def create_tts_manager(config: Dict[str, Any]) -> TTSManager:
     """Create and initialize TTS manager with all engines."""
     manager = TTSManager(config)
@@ -718,13 +776,14 @@ async def create_tts_manager(config: Dict[str, Any]) -> TTSManager:
     manager.register_engine(RVCEngine(tts_config.get("rvc", {})))
     
     await manager.initialize()
+    manager.seed_default_voice_profile()
     return manager
 
 
 # ─── FastAPI Server ───────────────────────────────────────────────────────────
 
 try:
-    from fastapi import FastAPI, HTTPException
+    from fastapi import FastAPI, HTTPException, Response
     from pydantic import BaseModel, Field
     import uvicorn
 
@@ -736,10 +795,18 @@ try:
         voice_id: str = "hephaestus_default"
         engine: Optional[str] = None
 
+    class OpenAISpeechRequest(BaseModel):
+        model: str = "fish-speech"
+        input: str
+        voice: str = "hephaestus_default"
+        response_format: str = "wav"
+
     @app.on_event("startup")
     async def _startup():
         global _tts_manager
         config = {
+            "voice_library_dir": default_voice_library_dir(),
+            "default_voice": os.getenv("HEPHAESTUS_TTS_DEFAULT_VOICE", "hephaestus_default"),
             "models": {
                 "fish_speech": {"model_path": os.getenv("FISH_SPEECH_MODEL", "models/fish-speech-1.5-q4_k_m.gguf")},
                 "xtts": {"model_path": os.getenv("XTTS_MODEL", "models/xtts_v2.onnx")},
@@ -748,16 +815,35 @@ try:
         _tts_manager = await create_tts_manager(config)
 
     @app.get("/health")
-    async def health():
-        return {"status": "healthy", "engines": _tts_manager.get_available_engines() if _tts_manager else []}
+    async def health(response: Response):
+        engines = _tts_manager.get_available_engines() if _tts_manager else []
+        ready = bool(_tts_manager and _tts_manager.is_ready())
+        if not ready:
+            response.status_code = 503
+        return {"ok": ready, "status": "healthy" if ready else "unhealthy", "engines": engines}
 
     @app.post("/synthesize")
     async def synthesize(req: SynthesizeRequest):
         if _tts_manager is None:
             raise HTTPException(status_code=503, detail="TTS not initialized")
-        request = TTSRequest(text=req.text, voice_id=req.voice_id, engine=req.engine)
-        result = await _tts_manager.synthesize(request)
-        return {"audio_b64": base64.b64encode(result.audio).decode(), "sample_rate": result.sample_rate}
+        request = TTSRequest(text=req.text, voice_id=req.voice_id)
+        result = await _tts_manager.synthesize(request, req.engine)
+        return {"audio_b64": base64.b64encode(result.audio_data).decode(), "sample_rate": result.sample_rate}
+
+    @app.post("/v1/audio/speech")
+    async def openai_audio_speech(req: OpenAISpeechRequest):
+        if _tts_manager is None:
+            raise HTTPException(status_code=503, detail="TTS not initialized")
+        request = TTSRequest(text=req.input, voice_id=req.voice)
+        result = await _tts_manager.synthesize(request, req.model)
+        response_format = req.response_format.lower().strip()
+        media_type = {
+            "wav": "audio/wav",
+            "mp3": "audio/mpeg",
+            "opus": "audio/ogg",
+            "flac": "audio/flac",
+        }.get(response_format, "application/octet-stream")
+        return Response(content=result.audio_data, media_type=media_type)
 
     if __name__ == "__main__":
         host = os.getenv("TTS_HOST", "127.0.0.1")
