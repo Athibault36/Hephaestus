@@ -520,6 +520,24 @@ class VoiceLibrary:
     
     def get_voice(self, voice_id: str) -> Optional[VoiceProfile]:
         return self.profiles.get(voice_id)
+
+    def get_or_create_from_references(self, voice_id: str) -> Optional[VoiceProfile]:
+        """Create a lightweight profile when enrollment refs exist but no index was written."""
+        profile = self.get_voice(voice_id)
+        if profile:
+            return profile
+        voice_ref_dir = self.references_dir / voice_id
+        if not voice_ref_dir.exists():
+            return None
+        refs = sorted(p for p in voice_ref_dir.iterdir() if p.is_file())
+        if not refs:
+            return None
+        profile = VoiceProfile(
+            voice_id=voice_id,
+            name=f"Reference Voice {voice_id[:8]}",
+            reference_audio_paths=[str(p) for p in refs],
+        )
+        return self.add_voice(profile)
     
     def list_voices(self) -> List[VoiceProfile]:
         return list(self.profiles.values())
@@ -565,6 +583,14 @@ class TTSManager:
         self.voice_library = VoiceLibrary(config.get("voice_library_dir", "ProjectMemory/voice_library"))
         self.default_voice_id = config.get("default_voice", "hephaestus_default")
         self._initialized = False
+
+    def _resolve_voice_profile(self, voice_id: str) -> Optional[VoiceProfile]:
+        voice_profile = self.voice_library.get_or_create_from_references(voice_id)
+        if voice_profile:
+            return voice_profile
+        if voice_id != self.default_voice_id:
+            return self.voice_library.get_or_create_from_references(self.default_voice_id)
+        return None
     
     def register_engine(self, engine: TTSEngine):
         self.engines[engine.name] = engine
@@ -588,6 +614,9 @@ class TTSManager:
         
         self._initialized = True
         return any(ok for _, ok in results)
+
+    def is_ready(self) -> bool:
+        return self._initialized and any(engine.is_initialized() for engine in self.engines.values())
     
     def get_engine(self, name: str = None) -> Optional[TTSEngine]:
         name = name or self.primary_engine_name
@@ -604,10 +633,7 @@ class TTSManager:
         if not engine:
             raise ValueError(f"Engine not found: {engine_name or self.primary_engine_name}")
         
-        voice_profile = self.voice_library.get_voice(request.voice_id)
-        if not voice_profile:
-            # Try default voice
-            voice_profile = self.voice_library.get_voice(self.default_voice_id)
+        voice_profile = self._resolve_voice_profile(request.voice_id)
         if not voice_profile:
             raise ValueError(f"Voice not found: {request.voice_id}")
         
@@ -630,9 +656,7 @@ class TTSManager:
         if not engine:
             raise ValueError(f"Engine not found: {engine_name or self.primary_engine_name}")
         
-        voice_profile = self.voice_library.get_voice(request.voice_id)
-        if not voice_profile:
-            voice_profile = self.voice_library.get_voice(self.default_voice_id)
+        voice_profile = self._resolve_voice_profile(request.voice_id)
         if not voice_profile:
             raise ValueError(f"Voice not found: {request.voice_id}")
         
@@ -707,6 +731,14 @@ class TTSManager:
 
 # ─── Factory ──────────────────────────────────────────────────────────────────
 
+def default_voice_library_dir() -> str:
+    """Resolve the target project's voice library from Agent_Runtime/tts_server."""
+    env_dir = os.getenv("HEPHAESTUS_VOICE_LIBRARY_DIR")
+    if env_dir:
+        return env_dir
+    return str(Path(__file__).resolve().parents[2] / "ProjectMemory" / "voice_library")
+
+
 async def create_tts_manager(config: Dict[str, Any]) -> TTSManager:
     """Create and initialize TTS manager with all engines."""
     manager = TTSManager(config)
@@ -726,7 +758,7 @@ async def create_tts_manager(config: Dict[str, Any]) -> TTSManager:
 # ─── FastAPI Server ───────────────────────────────────────────────────────────
 
 try:
-    from fastapi import FastAPI, HTTPException
+    from fastapi import FastAPI, HTTPException, Response
     from pydantic import BaseModel, Field
     import uvicorn
 
@@ -742,6 +774,8 @@ try:
     async def _startup():
         global _tts_manager
         config = {
+            "voice_library_dir": default_voice_library_dir(),
+            "default_voice": os.getenv("HEPHAESTUS_TTS_DEFAULT_VOICE", "hephaestus_default"),
             "models": {
                 "fish_speech": {"model_path": os.getenv("FISH_SPEECH_MODEL", "models/fish-speech-1.5-q4_k_m.gguf")},
                 "xtts": {"model_path": os.getenv("XTTS_MODEL", "models/xtts_v2.onnx")},
@@ -750,8 +784,12 @@ try:
         _tts_manager = await create_tts_manager(config)
 
     @app.get("/health")
-    async def health():
-        return {"status": "healthy", "engines": _tts_manager.get_available_engines() if _tts_manager else []}
+    async def health(response: Response):
+        engines = _tts_manager.get_available_engines() if _tts_manager else []
+        ready = bool(_tts_manager and _tts_manager.is_ready())
+        if not ready:
+            response.status_code = 503
+        return {"ok": ready, "status": "healthy" if ready else "unhealthy", "engines": engines}
 
     @app.post("/synthesize")
     async def synthesize(req: SynthesizeRequest):

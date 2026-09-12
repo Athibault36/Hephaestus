@@ -113,9 +113,12 @@ def make_handler(
             length = int(self.headers.get("Content-Length", "0") or 0)
             raw = self.rfile.read(length) if length > 0 else b"{}"
             try:
-                return json.loads(raw.decode("utf-8") or "{}"), None
+                payload = json.loads(raw.decode("utf-8") or "{}")
             except json.JSONDecodeError:
                 return None, "invalid_json"
+            if not isinstance(payload, dict):
+                return None, "invalid_json_object"
+            return payload, None
 
         def _handle_agent(self) -> bool:
             path = self.path.split("?")[0]

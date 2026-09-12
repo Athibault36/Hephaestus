@@ -18,6 +18,8 @@ DEFAULT_LOCAL_TTS_URL = "http://127.0.0.1:8082"
 DEFAULT_VOICE_ID = "hephaestus_default"
 REFERENCE_ROOT = Path("ProjectMemory") / "voice_library" / "references"
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9_.-]+")
+_ALLOWED_REFERENCE_EXTENSIONS = {".aac", ".flac", ".m4a", ".mp3", ".ogg", ".wav", ".webm"}
+_DEFAULT_MAX_REFERENCE_BYTES = 25 * 1024 * 1024
 
 
 def _project_root(project_root: Optional[Path]) -> Path:
@@ -284,6 +286,16 @@ def _safe_filename(filename: Optional[str], ref_dir: Path) -> str:
     return f"ref_{len(list(ref_dir.glob('ref_*'))) + 1}.webm"
 
 
+def _max_reference_bytes() -> int:
+    raw = os.getenv("HEPHAESTUS_VOICE_REF_MAX_BYTES", "").strip()
+    if not raw:
+        return _DEFAULT_MAX_REFERENCE_BYTES
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return _DEFAULT_MAX_REFERENCE_BYTES
+
+
 def enroll_voice_reference(
     audio_b64: str,
     project_root: Optional[Path] = None,
@@ -299,10 +311,15 @@ def enroll_voice_reference(
         return {"ok": False, "error": "invalid audio_b64", "voice_id": voice_id}
     if not audio:
         return {"ok": False, "error": "audio_b64 decoded to empty audio", "voice_id": voice_id}
+    if len(audio) > _max_reference_bytes():
+        return {"ok": False, "error": "voice reference audio is too large", "voice_id": voice_id}
 
     ref_dir = _references_dir(project_root, voice_id)
-    ref_dir.mkdir(parents=True, exist_ok=True)
     name = _safe_filename(filename, ref_dir)
+    if Path(name).suffix.lower() not in _ALLOWED_REFERENCE_EXTENSIONS:
+        return {"ok": False, "error": "voice reference must use an audio filename", "voice_id": voice_id}
+
+    ref_dir.mkdir(parents=True, exist_ok=True)
     dest = ref_dir / name
     if dest.exists():
         stem = dest.stem

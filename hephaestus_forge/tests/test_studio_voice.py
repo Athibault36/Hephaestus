@@ -1,6 +1,10 @@
 import base64
+import asyncio
+import importlib.util
 import json
 import sys
+import types
+import urllib.error
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -153,6 +157,27 @@ def test_enroll_voice_reference_saves_refs_without_engine(monkeypatch, tmp_path)
     assert saved.read_bytes() == b"reference-audio"
 
 
+def test_enroll_voice_reference_rejects_oversized_or_non_audio_refs(monkeypatch, tmp_path):
+    monkeypatch.setenv("HEPHAESTUS_VOICE_REF_MAX_BYTES", "4")
+
+    oversized = studio_voice.enroll_voice_reference(
+        base64.b64encode(b"12345").decode("ascii"),
+        project_root=tmp_path,
+        filename="sample.wav",
+    )
+    non_audio = studio_voice.enroll_voice_reference(
+        base64.b64encode(b"1234").decode("ascii"),
+        project_root=tmp_path,
+        filename="sample.txt",
+    )
+
+    assert oversized["ok"] is False
+    assert "too large" in oversized["error"]
+    assert non_audio["ok"] is False
+    assert "audio" in non_audio["error"]
+    assert not (tmp_path / "ProjectMemory" / "voice_library" / "references").exists()
+
+
 def test_env_base_url_remains_a_fallback_after_local_8082(monkeypatch):
     responses = []
 
@@ -255,6 +280,112 @@ def test_mission_control_voice_status_and_talkback_routes(monkeypatch, tmp_path)
             enrolled = json.loads(resp.read().decode("utf-8"))
         assert enrolled["ok"] is True
         assert enrolled["voice_id"] == "speaker"
+
+        bad_req = mission_control_server.urllib.request.Request(
+            f"http://127.0.0.1:{port}/agent/talkback",
+            data=b"[]",
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            mission_control_server.urllib.request.urlopen(bad_req, timeout=5)
+        except urllib.error.HTTPError as exc:
+            payload = json.loads(exc.read().decode("utf-8"))
+            assert exc.code == 400
+            assert payload["error"] == "invalid_json_object"
+        else:
+            raise AssertionError("non-object JSON should return 400")
     finally:
         server.shutdown()
         server.server_close()
+
+
+def _load_voice_cloning_template(monkeypatch):
+    class FakeArray:
+        def __init__(self, samples):
+            self.samples = samples
+
+        def tobytes(self):
+            return b"\0" * self.samples * 2
+
+    fake_np = types.SimpleNamespace(
+        ndarray=object,
+        int16="int16",
+        zeros=lambda samples, dtype=None: FakeArray(samples),
+        load=lambda path: None,
+        save=lambda path, value: None,
+    )
+    fake_torch = types.SimpleNamespace(
+        cuda=types.SimpleNamespace(is_available=lambda: False),
+        device=lambda name: name,
+    )
+    monkeypatch.setitem(sys.modules, "numpy", fake_np)
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setitem(sys.modules, "torchaudio", types.SimpleNamespace())
+
+    module_name = "voice_cloning_template_under_test"
+    path = ROOT / "templates" / "tts_server" / "voice_cloning.py"
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, module_name, module)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_template_synthesize_builds_voice_profile_from_reference_files(monkeypatch, tmp_path):
+    module = _load_voice_cloning_template(monkeypatch)
+    library_dir = tmp_path / "ProjectMemory" / "voice_library"
+    ref_dir = library_dir / "references" / "hephaestus_default"
+    ref_dir.mkdir(parents=True)
+    (ref_dir / "ref_0.wav").write_bytes(b"ref")
+
+    class RecordingEngine(module.TTSEngine):
+        name = "fish-speech"
+        supports_cloning = True
+        supports_streaming = True
+        supports_emotions = False
+        sample_rate = 24000
+
+        async def initialize(self):
+            self._initialized = True
+            return True
+
+        async def synthesize(self, request, voice_profile):
+            assert voice_profile.voice_id == "hephaestus_default"
+            assert voice_profile.reference_audio_paths == [str(ref_dir / "ref_0.wav")]
+            return module.TTSResult(
+                audio_data=b"audio",
+                sample_rate=24000,
+                duration=0.1,
+                voice_id=request.voice_id,
+                engine=self.name,
+            )
+
+        async def synthesize_stream(self, request, voice_profile):
+            yield b"audio"
+
+        async def clone_voice(self, reference_audio_paths, voice_id):
+            return module.VoiceProfile(
+                voice_id=voice_id,
+                name="from refs",
+                reference_audio_paths=reference_audio_paths,
+            )
+
+        def get_supported_languages(self):
+            return ["en"]
+
+    manager = module.TTSManager({
+        "voice_library_dir": str(library_dir),
+        "default_voice": "hephaestus_default",
+    })
+    manager.register_engine(RecordingEngine({}))
+
+    result = asyncio.run(manager.synthesize(module.TTSRequest(
+        text="Welcome back.",
+        voice_id="hephaestus_default",
+        engine="fish-speech",
+    )))
+
+    assert result.audio_data == b"audio"
+    assert manager.voice_library.get_voice("hephaestus_default") is not None
