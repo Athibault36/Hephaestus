@@ -1208,6 +1208,13 @@ cc5_app = typer.Typer(
 )
 app.add_typer(cc5_app, name="cc5")
 
+gaea_app = typer.Typer(
+    name="gaea",
+    help="Gaea 2 terrain build (:8084) — heightmap + weightmap masks + textures.",
+    no_args_is_help=True,
+)
+app.add_typer(gaea_app, name="gaea")
+
 dialog_app = typer.Typer(
     name="dialog",
     help="Control Windows / Unreal dialog boxes (list, click, auto-dismiss).",
@@ -1566,6 +1573,82 @@ def blender_exec_cmd(
         console.print("[green]✓ blender.exec[/green]")
         raise typer.Exit(0)
     console.print(f"[red]✗ blender.exec[/red]: {res.get('error')}")
+    raise typer.Exit(1)
+
+
+@gaea_app.command("build")
+def gaea_build_cmd(
+    terrain: Annotated[Path, typer.Argument(help="Gaea graph file (.terrain or legacy .tor)")],
+    project_path: Annotated[
+        Optional[Path],
+        typer.Option("--project", "-p", help="Adopted UE project (build under .hephaestus_forge/gaea_builds)"),
+    ] = None,
+    profile: Annotated[Optional[str], typer.Option("--profile", help="Gaea Build Profile")] = None,
+    region: Annotated[Optional[str], typer.Option("--region", help="Gaea Region to build")] = None,
+    seed: Annotated[Optional[int], typer.Option("--seed", help="Mutation seed")] = None,
+    ignore_cache: Annotated[bool, typer.Option("--ignore-cache", help="Force clean build")] = False,
+    build_folder: Annotated[Optional[Path], typer.Option("--out", "-o", help="Explicit build folder")] = None,
+    direct: Annotated[
+        bool, typer.Option("--direct", help="Call gaea_bridge locally instead of DCC :8084")
+    ] = False,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+):
+    """Build a Gaea terrain graph → heightmap + weightmap masks + textures on disk."""
+    project_root = _resolve_active_project(project_path)
+    params: dict = {"terrain_file": str(terrain)}
+    if project_root:
+        params["project_root"] = str(project_root)
+    if profile:
+        params["profile"] = profile
+    if region:
+        params["region"] = region
+    if seed is not None:
+        params["seed"] = seed
+    if ignore_cache:
+        params["ignore_cache"] = True
+    if build_folder:
+        params["build_folder"] = str(build_folder)
+
+    if direct:
+        try:
+            from gaea_bridge import build_terrain
+        except ImportError:
+            from hephaestus_forge.gaea_bridge import build_terrain  # type: ignore
+        result = build_terrain(
+            terrain,
+            project_root=project_root,
+            build_folder=build_folder,
+            profile=profile,
+            region=region,
+            seed=seed,
+            ignore_cache=ignore_cache,
+        )
+        res = result.to_dict()
+        res["success"] = result.success
+    else:
+        try:
+            from dcc_client import DccClient, dcc_online, start_dcc_server
+        except ImportError:
+            from hephaestus_forge.dcc_client import DccClient, dcc_online, start_dcc_server  # type: ignore
+        ok, _, _ = dcc_online()
+        if not ok:
+            start_dcc_server()
+        res = DccClient(timeout=1800.0).command("gaea.build", params)
+
+    if as_json:
+        import json as _json
+
+        typer.echo(_json.dumps(res, indent=2, ensure_ascii=True))
+        raise typer.Exit(0 if res.get("success") else 1)
+    if res.get("success"):
+        console.print(f"[green]✓ gaea.build[/green] → {res.get('heightmap') or res.get('build_folder')}")
+        masks = res.get("masks") or []
+        textures = res.get("textures") or []
+        console.print(f"[dim]{len(masks)} mask(s), {len(textures)} texture(s)[/dim]")
+        for step in res.get("next_steps") or []:
+            console.print(f"[dim]→ {step}[/dim]")
+        raise typer.Exit(0)
+    console.print(f"[red]✗ gaea.build[/red]: {res.get('error')}")
     raise typer.Exit(1)
 
 
