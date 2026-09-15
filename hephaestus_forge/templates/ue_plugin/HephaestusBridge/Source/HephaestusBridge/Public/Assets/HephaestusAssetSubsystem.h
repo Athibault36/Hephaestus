@@ -120,4 +120,16 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Hephaestus|Assets")
     bool MigrateAssets(const TArray<FString>& SourcePaths, const FString& DestinationPath,
         bool bExecute, bool bFixupRedirectors, FString& OutJson);
+
+    /** Create a Material Parameter Collection asset with scalar/vector defaults (editor-only). */
+    UFUNCTION(BlueprintCallable, Category = "Hephaestus|Assets")
+    bool CreateParameterCollection(const FString& Name, const FString& DestinationPath,
+        const TMap<FString, float>& Scalars, const TMap<FString, FLinearColor>& Vectors,
+        FString& OutPath, FString& OutError);
+
+    /** Update an existing Material Parameter Collection's default values (editor-only). */
+    UFUNCTION(BlueprintCallable, Category = "Hephaestus|Assets")
+    bool SetParameterCollection(const FString& CollectionPath,
+        const TMap<FString, float>& Scalars, const TMap<FString, FLinearColor>& Vectors,
+        FString& OutError);
 };

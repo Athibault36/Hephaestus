@@ -40,6 +40,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Hephaestus|Animation")
 	UObject* CreateControlRig(USkeletalMesh* SkeletalMesh, const FHephaestusControlRigDesc& RigDesc);
 
+	/**
+	 * Create a real UAnimBlueprint asset targeting a skeleton (editor-only).
+	 * Returns the created blueprint's package path in OutPath, or false + error.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Hephaestus|Animation")
+	bool CreateAnimBlueprint(const FString& SkeletonOrMeshPath, const FString& Name,
+		const FString& DestinationPath, const FString& ParentClassPath, FString& OutPath, FString& OutError);
+
 	UFUNCTION(BlueprintCallable, Category = "Hephaestus|Animation")
 	UAnimSequence* RetargetAnimation(UAnimSequence* Source, USkeletalMesh* Target, UObject* IKRig);
 

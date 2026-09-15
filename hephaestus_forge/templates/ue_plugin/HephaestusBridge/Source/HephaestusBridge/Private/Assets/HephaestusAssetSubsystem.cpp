@@ -4,6 +4,7 @@
 #include "HephaestusBridge.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialParameterCollection.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Modules/ModuleManager.h"
 #include "UObject/SoftObjectPath.h"
@@ -424,6 +425,121 @@ namespace
 		}
 		return FPackageName::GetLongPackagePath(ObjectPath);
 	}
+}
+
+bool UHephaestusAssetSubsystem::CreateParameterCollection(
+	const FString& Name, const FString& DestinationPath,
+	const TMap<FString, float>& Scalars, const TMap<FString, FLinearColor>& Vectors,
+	FString& OutPath, FString& OutError)
+{
+#if WITH_EDITOR
+	if (Name.IsEmpty())
+	{
+		OutError = TEXT("name required");
+		return false;
+	}
+	const FString Dest = DestinationPath.IsEmpty() ? FString(TEXT("/Game/Hephaestus/MPC")) : DestinationPath;
+	const FString PackageName = FString::Printf(TEXT("%s/%s"), *Dest, *Name);
+
+	UMaterialParameterCollection* Collection = LoadObject<UMaterialParameterCollection>(nullptr, *PackageName);
+	if (!Collection)
+	{
+		UPackage* Package = CreatePackage(*PackageName);
+		if (!Package)
+		{
+			OutError = FString::Printf(TEXT("failed to create package %s"), *PackageName);
+			return false;
+		}
+		Collection = NewObject<UMaterialParameterCollection>(
+			Package, FName(*Name), RF_Public | RF_Standalone);
+		FAssetRegistryModule::AssetCreated(Collection);
+	}
+
+	for (const TPair<FString, float>& Pair : Scalars)
+	{
+		FCollectionScalarParameter Param;
+		Param.ParameterName = FName(*Pair.Key);
+		Param.DefaultValue = Pair.Value;
+		Param.Id = FGuid::NewGuid();
+		Collection->ScalarParameters.Add(Param);
+	}
+	for (const TPair<FString, FLinearColor>& Pair : Vectors)
+	{
+		FCollectionVectorParameter Param;
+		Param.ParameterName = FName(*Pair.Key);
+		Param.DefaultValue = Pair.Value;
+		Param.Id = FGuid::NewGuid();
+		Collection->VectorParameters.Add(Param);
+	}
+	Collection->MarkPackageDirty();
+	OutPath = Collection->GetPathName();
+	return true;
+#else
+	OutError = TEXT("create_parameter_collection requires an editor build of HephaestusBridge");
+	return false;
+#endif
+}
+
+bool UHephaestusAssetSubsystem::SetParameterCollection(
+	const FString& CollectionPath,
+	const TMap<FString, float>& Scalars, const TMap<FString, FLinearColor>& Vectors,
+	FString& OutError)
+{
+#if WITH_EDITOR
+	UMaterialParameterCollection* Collection = LoadObject<UMaterialParameterCollection>(nullptr, *CollectionPath);
+	if (!Collection)
+	{
+		OutError = FString::Printf(TEXT("parameter collection not found: %s"), *CollectionPath);
+		return false;
+	}
+	for (const TPair<FString, float>& Pair : Scalars)
+	{
+		bool bFound = false;
+		for (FCollectionScalarParameter& Param : Collection->ScalarParameters)
+		{
+			if (Param.ParameterName == FName(*Pair.Key))
+			{
+				Param.DefaultValue = Pair.Value;
+				bFound = true;
+				break;
+			}
+		}
+		if (!bFound)
+		{
+			FCollectionScalarParameter Param;
+			Param.ParameterName = FName(*Pair.Key);
+			Param.DefaultValue = Pair.Value;
+			Param.Id = FGuid::NewGuid();
+			Collection->ScalarParameters.Add(Param);
+		}
+	}
+	for (const TPair<FString, FLinearColor>& Pair : Vectors)
+	{
+		bool bFound = false;
+		for (FCollectionVectorParameter& Param : Collection->VectorParameters)
+		{
+			if (Param.ParameterName == FName(*Pair.Key))
+			{
+				Param.DefaultValue = Pair.Value;
+				bFound = true;
+				break;
+			}
+		}
+		if (!bFound)
+		{
+			FCollectionVectorParameter Param;
+			Param.ParameterName = FName(*Pair.Key);
+			Param.DefaultValue = Pair.Value;
+			Param.Id = FGuid::NewGuid();
+			Collection->VectorParameters.Add(Param);
+		}
+	}
+	Collection->MarkPackageDirty();
+	return true;
+#else
+	OutError = TEXT("set_parameter_collection requires an editor build of HephaestusBridge");
+	return false;
+#endif
 }
 
 bool UHephaestusAssetSubsystem::MigrateAssets(

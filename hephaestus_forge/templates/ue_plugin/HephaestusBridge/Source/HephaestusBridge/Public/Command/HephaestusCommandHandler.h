@@ -137,6 +137,7 @@ protected:
 	FHephaestusCommandResult HandleAudioCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params);
 	FHephaestusCommandResult HandleVisionCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params);
 	FHephaestusCommandResult HandleLandscapeCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params);
+	FHephaestusCommandResult HandleMaterialCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params);
 	FHephaestusCommandResult HandleCustomCommand(const TSharedPtr<FJsonObject>& Params);
 
 	bool ParseTransform(const TSharedPtr<FJsonObject>& Json, FTransform& OutTransform) const;

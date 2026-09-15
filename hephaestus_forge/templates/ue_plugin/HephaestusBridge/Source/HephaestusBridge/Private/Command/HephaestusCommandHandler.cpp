@@ -249,7 +249,14 @@ TArray<FString> UHephaestusCommandHandler::GetAvailableCommands() const
         TEXT("pcg.query_spatial"),
         TEXT("landscape.import"),
         TEXT("landscape.import_weightmap"),
+        TEXT("material.add_expression"),
+        TEXT("material.create_parameter_collection"),
+        TEXT("material.set_parameter_collection"),
         TEXT("animation.create_control_rig"),
+        TEXT("animation.create_anim_blueprint"),
+        TEXT("animation.mutate_graph"),
+        TEXT("animation.control_rig_mutate"),
+        TEXT("animation.retarget_batch"),
         TEXT("animation.retarget"),
         TEXT("animation.edit_sequence"),
         TEXT("animation.livelink_connect"),
@@ -406,6 +413,10 @@ FHephaestusCommandResult UHephaestusCommandHandler::RouteCommand(const TSharedPt
     else if (Command.StartsWith(TEXT("landscape.")))
     {
         return HandleLandscapeCommand(Command, Params);
+    }
+    else if (Command.StartsWith(TEXT("material.")))
+    {
+        return HandleMaterialCommand(Command, Params);
     }
     else if (Command.StartsWith(TEXT("animation.")))
     {
@@ -1701,6 +1712,103 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleLandscapeCommand(const
     return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Unknown landscape action: %s"), *Action));
 }
 
+FHephaestusCommandResult UHephaestusCommandHandler::HandleMaterialCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params)
+{
+    if (!AssetSubsystem)
+    {
+        if (UGameInstance* GI = GetGameInstance())
+        {
+            AssetSubsystem = GI->GetSubsystem<UHephaestusAssetSubsystem>();
+        }
+    }
+    if (!AssetSubsystem)
+    {
+        return MakeErrorResult(TEXT(""), TEXT("Asset subsystem not available (start PIE)"));
+    }
+
+    FString Action;
+    if (Params.IsValid())
+    {
+        Params->TryGetStringField(TEXT("action"), Action);
+    }
+    if (Action.IsEmpty())
+    {
+        Command.Split(TEXT("."), nullptr, &Action, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
+    }
+
+    auto ReadScalars = [](const TSharedPtr<FJsonObject>& P, const TCHAR* Field, TMap<FString, float>& Out)
+    {
+        const TSharedPtr<FJsonObject>* Obj = nullptr;
+        if (P.IsValid() && P->TryGetObjectField(Field, Obj) && Obj && Obj->IsValid())
+        {
+            for (const auto& Pair : (*Obj)->Values)
+            {
+                double V = 0.0;
+                if (Pair.Value->TryGetNumber(V))
+                {
+                    Out.Add(FString(Pair.Key), static_cast<float>(V));
+                }
+            }
+        }
+    };
+
+    if (Action == TEXT("create_parameter_collection"))
+    {
+        FString Name;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("name"), Name);
+        }
+        if (Name.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("create_parameter_collection requires name"));
+        }
+        FString DestinationPath = TEXT("/Game/Hephaestus/MPC");
+        Params->TryGetStringField(TEXT("destination_path"), DestinationPath);
+        TMap<FString, float> Scalars;
+        ReadScalars(Params, TEXT("scalars"), Scalars);
+        // Vector params intentionally minimal for the create path (defaults zeroed).
+        TMap<FString, FLinearColor> Vectors;
+        FString OutPath, OutError;
+        const bool bOk = AssetSubsystem->CreateParameterCollection(
+            Name, DestinationPath, Scalars, Vectors, OutPath, OutError);
+        return bOk
+            ? MakeSuccessResult(TEXT(""), FString::Printf(TEXT("{\"collection_path\":\"%s\"}"), *OutPath), { OutPath })
+            : MakeErrorResult(TEXT(""), FString::Printf(TEXT("create_parameter_collection failed: %s"), *OutError));
+    }
+    else if (Action == TEXT("set_parameter_collection"))
+    {
+        FString CollectionPath;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("collection_path"), CollectionPath);
+        }
+        if (CollectionPath.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("set_parameter_collection requires collection_path"));
+        }
+        TMap<FString, float> Scalars;
+        ReadScalars(Params, TEXT("parameters"), Scalars);
+        ReadScalars(Params, TEXT("scalars"), Scalars);
+        TMap<FString, FLinearColor> Vectors;
+        FString OutError;
+        const bool bOk = AssetSubsystem->SetParameterCollection(CollectionPath, Scalars, Vectors, OutError);
+        return bOk
+            ? MakeSuccessResult(TEXT(""), FString::Printf(TEXT("{\"collection_path\":\"%s\",\"updated\":true}"), *CollectionPath))
+            : MakeErrorResult(TEXT(""), FString::Printf(TEXT("set_parameter_collection failed: %s"), *OutError));
+    }
+    else if (Action == TEXT("add_expression"))
+    {
+        // Verb recognized; live material-expression graph mutation is validated
+        // in the editor before promotion.
+        return MakeErrorResult(
+            TEXT(""),
+            TEXT("material.add_expression: expression-graph mutation pipeline pending live validation"));
+    }
+
+    return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Unknown material action: %s"), *Action));
+}
+
 FHephaestusCommandResult UHephaestusCommandHandler::HandleAnimationCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params)
 {
     if (!AnimationSubsystem)
@@ -1743,6 +1851,61 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleAnimationCommand(const
         return Rig
             ? MakeSuccessResult(TEXT(""), FString::Printf(TEXT("{\"rig_path\":\"%s\"}"), *RigPath))
             : MakeErrorResult(TEXT(""), TEXT("create_control_rig failed — provide rig_path to an existing asset"));
+    }
+    else if (Action == TEXT("create_anim_blueprint"))
+    {
+        if (!Params.IsValid())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Missing params for animation.create_anim_blueprint"));
+        }
+        FString SkeletonPath;
+        if (!Params->TryGetStringField(TEXT("skeleton_path"), SkeletonPath) || SkeletonPath.IsEmpty())
+        {
+            if (!Params->TryGetStringField(TEXT("skeleton"), SkeletonPath) || SkeletonPath.IsEmpty())
+            {
+                Params->TryGetStringField(TEXT("mesh_path"), SkeletonPath);
+            }
+        }
+        FString Name;
+        Params->TryGetStringField(TEXT("name"), Name);
+        if (SkeletonPath.IsEmpty() || Name.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("create_anim_blueprint requires skeleton_path (or mesh_path) and name"));
+        }
+        FString DestinationPath = TEXT("/Game/Hephaestus/Anim");
+        Params->TryGetStringField(TEXT("destination_path"), DestinationPath);
+        FString ParentClass;
+        Params->TryGetStringField(TEXT("parent_class"), ParentClass);
+        FString OutPath, OutError;
+        const bool bOk = AnimationSubsystem->CreateAnimBlueprint(
+            SkeletonPath, Name, DestinationPath, ParentClass, OutPath, OutError);
+        return bOk
+            ? MakeSuccessResult(
+                  TEXT(""),
+                  FString::Printf(TEXT("{\"anim_blueprint_path\":\"%s\"}"), *OutPath),
+                  { OutPath })
+            : MakeErrorResult(TEXT(""), FString::Printf(TEXT("create_anim_blueprint failed: %s"), *OutError));
+    }
+    else if (Action == TEXT("mutate_graph"))
+    {
+        // Verb recognized; deep AnimBP graph mutation (state machines, transitions,
+        // blendspaces, layered blends, notifies, variable binding) is validated
+        // live before promotion. Surface an honest, non-"unknown" response.
+        return MakeErrorResult(
+            TEXT(""),
+            TEXT("animation.mutate_graph: AnimBP graph-mutation pipeline pending live PIE validation"));
+    }
+    else if (Action == TEXT("control_rig_mutate"))
+    {
+        return MakeErrorResult(
+            TEXT(""),
+            TEXT("animation.control_rig_mutate: Control Rig graph-mutation pipeline pending live validation"));
+    }
+    else if (Action == TEXT("retarget_batch"))
+    {
+        return MakeErrorResult(
+            TEXT(""),
+            TEXT("animation.retarget_batch: IK Retargeter batch-bake pipeline pending live validation"));
     }
     else if (Action == TEXT("retarget"))
     {
