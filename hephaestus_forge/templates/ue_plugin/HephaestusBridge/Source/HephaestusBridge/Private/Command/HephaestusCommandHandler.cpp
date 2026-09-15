@@ -12,6 +12,7 @@
 #include "Audio/HephaestusAudioSubsystem.h"
 #include "Sequence/HephaestusSequenceSubsystem.h"
 #include "Vision/HephaestusVisionSubsystem.h"
+#include "Landscape/HephaestusLandscapeSubsystem.h"
 
 #if WITH_EDITOR
 #include "Editor.h"
@@ -53,6 +54,7 @@ void UHephaestusCommandHandler::Initialize(FSubsystemCollectionBase& Collection)
         AnimationSubsystem = GameInstance->GetSubsystem<UHephaestusAnimationSubsystem>();
         SequenceSubsystem = GameInstance->GetSubsystem<UHephaestusSequenceSubsystem>();
         AudioSubsystem = GameInstance->GetSubsystem<UHephaestusAudioSubsystem>();
+        LandscapeSubsystem = GameInstance->GetSubsystem<UHephaestusLandscapeSubsystem>();
     }
 
     UE_LOG(LogHephaestusBridge, Log, TEXT("HephaestusCommandHandler: Initialized"));
@@ -244,6 +246,8 @@ TArray<FString> UHephaestusCommandHandler::GetAvailableCommands() const
         TEXT("pcg.mutate_graph"),
         TEXT("pcg.set_metadata"),
         TEXT("pcg.query_spatial"),
+        TEXT("landscape.import"),
+        TEXT("landscape.import_weightmap"),
         TEXT("animation.create_control_rig"),
         TEXT("animation.retarget"),
         TEXT("animation.edit_sequence"),
@@ -397,6 +401,10 @@ FHephaestusCommandResult UHephaestusCommandHandler::RouteCommand(const TSharedPt
     else if (Command.StartsWith(TEXT("pcg.")))
     {
         return HandlePCGCommand(Command, Params);
+    }
+    else if (Command.StartsWith(TEXT("landscape.")))
+    {
+        return HandleLandscapeCommand(Command, Params);
     }
     else if (Command.StartsWith(TEXT("animation.")))
     {
@@ -1521,6 +1529,131 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandlePCGCommand(const FStri
     }
 
     return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Unknown PCG action: %s"), *Action));
+}
+
+FHephaestusCommandResult UHephaestusCommandHandler::HandleLandscapeCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params)
+{
+    if (!LandscapeSubsystem)
+    {
+        if (UGameInstance* GI = GetGameInstance())
+        {
+            LandscapeSubsystem = GI->GetSubsystem<UHephaestusLandscapeSubsystem>();
+        }
+    }
+    if (!LandscapeSubsystem)
+    {
+        return MakeErrorResult(TEXT(""), TEXT("Landscape subsystem not available"));
+    }
+
+    FString Action;
+    if (Params.IsValid())
+    {
+        Params->TryGetStringField(TEXT("action"), Action);
+    }
+    if (Action.IsEmpty())
+    {
+        Command.Split(TEXT("."), nullptr, &Action, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
+    }
+
+    if (Action == TEXT("import") || Action == TEXT("import_height") || Action == TEXT("apply_height"))
+    {
+        if (!Params.IsValid())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Missing params for landscape.import"));
+        }
+        FString HeightmapPath;
+        if (!Params->TryGetStringField(TEXT("heightmap_path"), HeightmapPath) || HeightmapPath.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("heightmap"), HeightmapPath);
+        }
+        if (HeightmapPath.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("landscape.import requires heightmap_path"));
+        }
+        FString DestinationPath = TEXT("/Game/Hephaestus/Landscapes");
+        Params->TryGetStringField(TEXT("destination_path"), DestinationPath);
+        FString LandscapeName;
+        Params->TryGetStringField(TEXT("landscape_name"), LandscapeName);
+
+        int32 SectionSize = 63;
+        double SectionSizeNum = 63.0;
+        if (Params->TryGetNumberField(TEXT("section_size"), SectionSizeNum))
+        {
+            SectionSize = static_cast<int32>(SectionSizeNum);
+        }
+        int32 SectionsPerComponent = 1;
+        double SPCNum = 1.0;
+        if (Params->TryGetNumberField(TEXT("sections_per_component"), SPCNum))
+        {
+            SectionsPerComponent = static_cast<int32>(SPCNum);
+        }
+
+        FVector Location = FVector::ZeroVector;
+        ParseVectorField(Params, TEXT("location"), Location);
+        FVector Scale = FVector(100.0, 100.0, 100.0);
+        ParseVectorField(Params, TEXT("scale"), Scale);
+
+        const FHephaestusLandscapeResult LResult = LandscapeSubsystem->ImportHeightmap(
+            HeightmapPath, DestinationPath, LandscapeName, SectionSize, SectionsPerComponent, Location, Scale);
+        if (LResult.bSuccess)
+        {
+            return MakeSuccessResult(
+                TEXT(""),
+                FString::Printf(
+                    TEXT("{\"actor_path\":\"%s\",\"size_x\":%d,\"size_y\":%d,\"landscape_applied\":true}"),
+                    *LResult.ActorPath, LResult.SizeX, LResult.SizeY),
+                {},
+                { LResult.ActorPath });
+        }
+        return MakeErrorResult(TEXT(""), FString::Printf(TEXT("landscape.import failed: %s"), *LResult.Error));
+    }
+    else if (Action == TEXT("import_weightmap") || Action == TEXT("weightmap") || Action == TEXT("paint_layer"))
+    {
+        if (!Params.IsValid())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Missing params for landscape.import_weightmap"));
+        }
+        FString LandscapePath;
+        Params->TryGetStringField(TEXT("landscape_path"), LandscapePath);
+        if (LandscapePath.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("actor_path"), LandscapePath);
+        }
+        FString WeightmapPath;
+        if (!Params->TryGetStringField(TEXT("weightmap_path"), WeightmapPath) || WeightmapPath.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("mask_path"), WeightmapPath);
+        }
+        FString LayerName;
+        if (!Params->TryGetStringField(TEXT("layer_name"), LayerName) || LayerName.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("layer"), LayerName);
+        }
+        if (WeightmapPath.IsEmpty() || LayerName.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("landscape.import_weightmap requires weightmap_path and layer_name"));
+        }
+        FString DestinationPath = TEXT("/Game/Hephaestus/Landscapes");
+        Params->TryGetStringField(TEXT("destination_path"), DestinationPath);
+        bool bCreateLayer = true;
+        Params->TryGetBoolField(TEXT("create_layer"), bCreateLayer);
+
+        const FHephaestusLandscapeResult LResult = LandscapeSubsystem->ImportWeightmap(
+            LandscapePath, WeightmapPath, LayerName, DestinationPath, bCreateLayer);
+        if (LResult.bSuccess)
+        {
+            return MakeSuccessResult(
+                TEXT(""),
+                FString::Printf(
+                    TEXT("{\"actor_path\":\"%s\",\"layer\":\"%s\",\"weightmap_applied\":true}"),
+                    *LResult.ActorPath, *LResult.LayerName),
+                {},
+                { LResult.ActorPath });
+        }
+        return MakeErrorResult(TEXT(""), FString::Printf(TEXT("landscape.import_weightmap failed: %s"), *LResult.Error));
+    }
+
+    return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Unknown landscape action: %s"), *Action));
 }
 
 FHephaestusCommandResult UHephaestusCommandHandler::HandleAnimationCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params)

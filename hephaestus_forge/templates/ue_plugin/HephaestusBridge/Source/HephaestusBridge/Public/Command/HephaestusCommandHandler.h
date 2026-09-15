@@ -14,6 +14,7 @@ class UHephaestusPCGSubsystem;
 class UHephaestusAnimationSubsystem;
 class UHephaestusAudioSubsystem;
 class UHephaestusSequenceSubsystem;
+class UHephaestusLandscapeSubsystem;
 
 /** Command execution result */
 USTRUCT(BlueprintType)
@@ -135,6 +136,7 @@ protected:
 	FHephaestusCommandResult HandleSequenceCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params);
 	FHephaestusCommandResult HandleAudioCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params);
 	FHephaestusCommandResult HandleVisionCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params);
+	FHephaestusCommandResult HandleLandscapeCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params);
 	FHephaestusCommandResult HandleCustomCommand(const TSharedPtr<FJsonObject>& Params);
 
 	bool ParseTransform(const TSharedPtr<FJsonObject>& Json, FTransform& OutTransform) const;
@@ -159,6 +161,7 @@ private:
 	TObjectPtr<UHephaestusAnimationSubsystem> AnimationSubsystem;
 	TObjectPtr<UHephaestusSequenceSubsystem> SequenceSubsystem;
 	TObjectPtr<UHephaestusAudioSubsystem> AudioSubsystem;
+	TObjectPtr<UHephaestusLandscapeSubsystem> LandscapeSubsystem;
 
 	TMap<FString, FHephaestusCustomCommandDelegate> CustomCommands;
 	mutable FCriticalSection CustomCommandsLock;

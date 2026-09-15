@@ -23,6 +23,7 @@ public class HephaestusBridge : ModuleRules
 			Path.Combine(ModuleDirectory, "Public", "Animation"),
 			Path.Combine(ModuleDirectory, "Public", "Audio"),
 			Path.Combine(ModuleDirectory, "Public", "Sequence"),
+			Path.Combine(ModuleDirectory, "Public", "Landscape"),
 		});
 
 		PublicDependencyModuleNames.AddRange(new string[]
@@ -47,6 +48,7 @@ public class HephaestusBridge : ModuleRules
 			"AudioMixer",
 			"LevelSequence",
 			"MovieScene",
+			"Landscape",
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]
@@ -72,6 +74,7 @@ public class HephaestusBridge : ModuleRules
 				"EditorStyle",
 				"DeveloperSettings",
 				"LevelEditor",
+				"LandscapeEditor",
 			});
 			PublicDefinitions.Add("WITH_HEPHAESTUS_EDITOR_REMOTE=1");
 		}
@@ -90,6 +93,7 @@ public class HephaestusBridge : ModuleRules
 			"WITH_HEPHAESTUS_SEQUENCE=1",
 			"WITH_HEPHAESTUS_REMOTE_API=1",
 			"WITH_HEPHAESTUS_METASOUND=1",
+			"WITH_HEPHAESTUS_LANDSCAPE=1",
 		});
 
 		PrivateDependencyModuleNames.Add("MetasoundEngine");
