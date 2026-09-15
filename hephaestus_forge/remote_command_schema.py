@@ -358,3 +358,266 @@ def validate_pcg_set_metadata(command_obj: dict[str, Any]) -> list[str]:
         errors.append("missing component_path")
     return errors
 
+
+# --- Landscape (Gaea → UE height apply / weightmap paint layers) --------------
+
+def validate_landscape_import(command_obj: dict[str, Any]) -> list[str]:
+    """landscape.import — apply a Gaea/heightmap raster to a real UE Landscape."""
+    errors: list[str] = []
+    if command_obj.get("command") != "landscape.import":
+        errors.append("command must be landscape.import")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not (params.get("heightmap_path") or params.get("heightmap")):
+        errors.append("missing heightmap_path")
+    return errors
+
+
+def validate_landscape_import_weightmap(command_obj: dict[str, Any]) -> list[str]:
+    """landscape.import_weightmap — import a mask as a landscape paint layer."""
+    errors: list[str] = []
+    if command_obj.get("command") != "landscape.import_weightmap":
+        errors.append("command must be landscape.import_weightmap")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not (params.get("weightmap_path") or params.get("mask_path")):
+        errors.append("missing weightmap_path")
+    if not (params.get("layer_name") or params.get("layer")):
+        errors.append("missing layer_name")
+    if not (params.get("landscape_path") or params.get("landscape") or params.get("actor_path")):
+        errors.append("missing landscape_path")
+    return errors
+
+
+# --- PCG (create graph + terrain / vegetation binding) ------------------------
+
+def validate_pcg_create_graph(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "pcg.create_graph":
+        errors.append("command must be pcg.create_graph")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not (params.get("name") or params.get("graph_path") or params.get("path")):
+        errors.append("missing name or graph_path")
+    return errors
+
+
+def validate_pcg_bind_terrain(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "pcg.bind_terrain":
+        errors.append("command must be pcg.bind_terrain")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not (params.get("graph_path") or params.get("component_path") or params.get("path")):
+        errors.append("missing graph_path or component_path")
+    if not (params.get("landscape_path") or params.get("landscape") or params.get("actor_path")):
+        errors.append("missing landscape_path")
+    return errors
+
+
+def validate_pcg_bind_vegetation(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "pcg.bind_vegetation":
+        errors.append("command must be pcg.bind_vegetation")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not (params.get("graph_path") or params.get("component_path") or params.get("path")):
+        errors.append("missing graph_path or component_path")
+    meshes = params.get("meshes") or params.get("static_meshes")
+    if not meshes or not isinstance(meshes, (list, tuple)) or len(meshes) == 0:
+        errors.append("missing meshes (non-empty list of static mesh paths)")
+    return errors
+
+
+# --- Animation Blueprint (create + graph mutation) + Control Rig graph --------
+
+def validate_animation_create_anim_blueprint(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "animation.create_anim_blueprint":
+        errors.append("command must be animation.create_anim_blueprint")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not (params.get("skeleton_path") or params.get("skeleton") or params.get("mesh_path")):
+        errors.append("missing skeleton_path or mesh_path")
+    if not (params.get("name") or params.get("anim_blueprint_path") or params.get("destination_path")):
+        errors.append("missing name or anim_blueprint_path")
+    return errors
+
+
+_ANIM_GRAPH_MUTATIONS = {
+    "add_state",
+    "add_transition",
+    "add_blendspace",
+    "add_layered_blend",
+    "add_notify",
+    "bind_variable",
+    "set_entry_state",
+    "add_state_machine",
+}
+
+
+def validate_animation_mutate_graph(command_obj: dict[str, Any]) -> list[str]:
+    """animation.mutate_graph — state machines, transitions, blendspaces, notifies."""
+    errors: list[str] = []
+    if command_obj.get("command") != "animation.mutate_graph":
+        errors.append("command must be animation.mutate_graph")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not (params.get("anim_blueprint_path") or params.get("blueprint_path") or params.get("path")):
+        errors.append("missing anim_blueprint_path")
+    mutations = params.get("mutations")
+    if not mutations or not isinstance(mutations, (list, tuple)) or len(mutations) == 0:
+        errors.append("missing mutations (non-empty list)")
+    else:
+        for i, mut in enumerate(mutations):
+            if not isinstance(mut, dict):
+                errors.append(f"mutation[{i}] must be an object")
+                continue
+            mtype = mut.get("type")
+            if not mtype:
+                errors.append(f"mutation[{i}] missing type")
+            elif mtype not in _ANIM_GRAPH_MUTATIONS:
+                errors.append(
+                    f"mutation[{i}] unknown type {mtype!r} "
+                    f"(expected one of {sorted(_ANIM_GRAPH_MUTATIONS)})"
+                )
+    return errors
+
+
+_CONTROL_RIG_MUTATIONS = {
+    "add_node",
+    "remove_node",
+    "set_pin",
+    "add_constraint",
+    "add_solver",
+    "add_physics_node",
+    "connect",
+}
+
+
+def validate_animation_control_rig_mutate(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "animation.control_rig_mutate":
+        errors.append("command must be animation.control_rig_mutate")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not (params.get("rig_path") or params.get("path")):
+        errors.append("missing rig_path")
+    mutations = params.get("mutations")
+    if not mutations or not isinstance(mutations, (list, tuple)) or len(mutations) == 0:
+        errors.append("missing mutations (non-empty list)")
+    else:
+        for i, mut in enumerate(mutations):
+            if not isinstance(mut, dict):
+                errors.append(f"mutation[{i}] must be an object")
+                continue
+            mtype = mut.get("type")
+            if not mtype:
+                errors.append(f"mutation[{i}] missing type")
+            elif mtype not in _CONTROL_RIG_MUTATIONS:
+                errors.append(
+                    f"mutation[{i}] unknown type {mtype!r} "
+                    f"(expected one of {sorted(_CONTROL_RIG_MUTATIONS)})"
+                )
+    return errors
+
+
+def validate_animation_retarget_batch(command_obj: dict[str, Any]) -> list[str]:
+    """animation.retarget_batch — IK Retargeter batch bake across many anims."""
+    errors: list[str] = []
+    if command_obj.get("command") != "animation.retarget_batch":
+        errors.append("command must be animation.retarget_batch")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not (params.get("retargeter_path") or params.get("ik_retargeter") or (
+        params.get("source_mesh") and params.get("target_mesh")
+    )):
+        errors.append("missing retargeter_path or source_mesh+target_mesh")
+    anims = params.get("anim_paths") or params.get("animations")
+    if not anims or not isinstance(anims, (list, tuple)) or len(anims) == 0:
+        errors.append("missing anim_paths (non-empty list)")
+    return errors
+
+
+# --- Materials (expression graph + Material Parameter Collection) -------------
+
+def validate_material_add_expression(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "material.add_expression":
+        errors.append("command must be material.add_expression")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not (params.get("material_path") or params.get("path")):
+        errors.append("missing material_path")
+    if not (params.get("expression_class") or params.get("expression") or params.get("node")):
+        errors.append("missing expression_class")
+    return errors
+
+
+def validate_material_create_parameter_collection(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "material.create_parameter_collection":
+        errors.append("command must be material.create_parameter_collection")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not (params.get("name") or params.get("collection_path") or params.get("path")):
+        errors.append("missing name or collection_path")
+    return errors
+
+
+def validate_material_set_parameter_collection(command_obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if command_obj.get("command") != "material.set_parameter_collection":
+        errors.append("command must be material.set_parameter_collection")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not (params.get("collection_path") or params.get("path")):
+        errors.append("missing collection_path")
+    params_map = params.get("parameters") or params.get("scalars") or params.get("vectors")
+    if not params_map or not isinstance(params_map, dict):
+        errors.append("missing parameters object")
+    return errors
+
+
+# --- Bulk asset migrate (execute move/rename with redirector fixup) -----------
+
+def validate_asset_migrate(command_obj: dict[str, Any]) -> list[str]:
+    """asset.migrate — execute a move/rename with redirector fixup (not just plan)."""
+    errors: list[str] = []
+    if command_obj.get("command") != "asset.migrate":
+        errors.append("command must be asset.migrate")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    sources = params.get("source_paths") or params.get("assets") or params.get("asset_paths")
+    if not sources or not isinstance(sources, (list, tuple)) or len(sources) == 0:
+        errors.append("missing source_paths (non-empty list)")
+    if not (params.get("destination_path") or params.get("destination")):
+        errors.append("missing destination_path")
+    return errors
+
