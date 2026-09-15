@@ -236,6 +236,7 @@ TArray<FString> UHephaestusCommandHandler::GetAvailableCommands() const
         TEXT("asset.export"),
         TEXT("asset.create_instance"),
         TEXT("asset.search"),
+        TEXT("asset.migrate"),
         TEXT("blueprint.compile"),
         TEXT("blueprint.add_function"),
         TEXT("blueprint.set_property"),
@@ -1194,6 +1195,50 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleAssetCommand(const FSt
                       TEXT("{\"parent_material\":\"%s\",\"transient\":true,\"instance\":\"material_instance_dynamic\"}"),
                       *ParentPath))
             : MakeErrorResult(TEXT(""), TEXT("create_instance failed"));
+    }
+    else if (Action == TEXT("migrate"))
+    {
+        if (!Params.IsValid())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Missing params for asset.migrate"));
+        }
+        TArray<FString> SourcePaths;
+        const TArray<TSharedPtr<FJsonValue>>* SourcesArr = nullptr;
+        if (!Params->TryGetArrayField(TEXT("source_paths"), SourcesArr))
+        {
+            if (!Params->TryGetArrayField(TEXT("assets"), SourcesArr))
+            {
+                Params->TryGetArrayField(TEXT("asset_paths"), SourcesArr);
+            }
+        }
+        if (SourcesArr)
+        {
+            for (const TSharedPtr<FJsonValue>& Val : *SourcesArr)
+            {
+                if (Val.IsValid())
+                {
+                    SourcePaths.Add(Val->AsString());
+                }
+            }
+        }
+        FString DestinationPath;
+        if (!Params->TryGetStringField(TEXT("destination_path"), DestinationPath))
+        {
+            Params->TryGetStringField(TEXT("destination"), DestinationPath);
+        }
+        if (SourcePaths.Num() == 0 || DestinationPath.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("asset.migrate requires source_paths and destination_path"));
+        }
+        bool bExecute = false;
+        Params->TryGetBoolField(TEXT("execute"), bExecute);
+        bool bFixup = true;
+        Params->TryGetBoolField(TEXT("fixup_redirectors"), bFixup);
+        FString ResultJson;
+        const bool bOk = AssetSubsystem->MigrateAssets(SourcePaths, DestinationPath, bExecute, bFixup, ResultJson);
+        return bOk
+            ? MakeSuccessResult(TEXT(""), ResultJson)
+            : MakeErrorResult(TEXT(""), FString::Printf(TEXT("asset.migrate failed: %s"), *ResultJson));
     }
 
     return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Unknown asset action: %s"), *Action));

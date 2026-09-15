@@ -23,6 +23,8 @@
 #include "AssetToolsModule.h"
 #include "AutomatedAssetImportData.h"
 #include "IAssetTools.h"
+#include "AssetRenameManager.h"
+#include "UObject/ObjectRedirector.h"
 #endif
 
 void UHephaestusAssetSubsystem::Initialize(FSubsystemCollectionBase& Collection)
@@ -396,4 +398,136 @@ bool UHephaestusAssetSubsystem::SearchAssetsJson(
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutJson);
 	FJsonSerializer::Serialize(ResultObj, Writer);
 	return true;
+}
+
+namespace
+{
+	FString MigrateAssetName(const FString& AssetPath)
+	{
+		// "/Game/Old/Foo.Foo" or "/Game/Old/Foo" → "Foo"
+		FString ObjectPath = AssetPath;
+		FString Left, Right;
+		if (ObjectPath.Split(TEXT("."), &Left, &Right))
+		{
+			return Right;
+		}
+		return FPaths::GetCleanFilename(ObjectPath);
+	}
+
+	FString MigratePackagePath(const FString& AssetPath)
+	{
+		FString ObjectPath = AssetPath;
+		FString Left, Right;
+		if (ObjectPath.Split(TEXT("."), &Left, &Right))
+		{
+			ObjectPath = Left;
+		}
+		return FPackageName::GetLongPackagePath(ObjectPath);
+	}
+}
+
+bool UHephaestusAssetSubsystem::MigrateAssets(
+	const TArray<FString>& SourcePaths, const FString& DestinationPath,
+	bool bExecute, bool bFixupRedirectors, FString& OutJson)
+{
+	TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+	Root->SetBoolField(TEXT("executed"), bExecute);
+	Root->SetStringField(TEXT("destination_path"), DestinationPath);
+	TArray<TSharedPtr<FJsonValue>> Moves;
+
+	auto Finish = [&](bool bSuccess, const FString& Error) -> bool
+	{
+		Root->SetArrayField(TEXT("moves"), Moves);
+		Root->SetBoolField(TEXT("success"), bSuccess);
+		if (!Error.IsEmpty())
+		{
+			Root->SetStringField(TEXT("error"), Error);
+		}
+		TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutJson);
+		FJsonSerializer::Serialize(Root, Writer);
+		return bSuccess;
+	};
+
+	if (DestinationPath.IsEmpty() || SourcePaths.Num() == 0)
+	{
+		return Finish(false, TEXT("destination_path and non-empty source_paths required"));
+	}
+
+#if WITH_EDITOR
+	if (GIsPlayInEditorWorld && bExecute)
+	{
+		return Finish(false, TEXT("asset.migrate execute is disabled during PIE — stop Play and retry"));
+	}
+
+	// Build the plan first (always), so a dry run (bExecute=false) is honest.
+	struct FPlannedMove { FString Source; FString Dest; FString Name; };
+	TArray<FPlannedMove> Plan;
+	for (const FString& Src : SourcePaths)
+	{
+		const FString Name = MigrateAssetName(Src);
+		const FString Dest = FString::Printf(TEXT("%s/%s"), *DestinationPath, *Name);
+		Plan.Add({Src, Dest, Name});
+		TSharedRef<FJsonObject> MoveObj = MakeShared<FJsonObject>();
+		MoveObj->SetStringField(TEXT("source"), Src);
+		MoveObj->SetStringField(TEXT("destination"), Dest);
+		Moves.Add(MakeShared<FJsonValueObject>(MoveObj));
+	}
+
+	if (!bExecute)
+	{
+		return Finish(true, FString());
+	}
+
+	FAssetToolsModule& AssetToolsModule =
+		FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools");
+	IAssetTools& AssetTools = AssetToolsModule.Get();
+
+	TArray<FAssetRenameData> Renames;
+	for (const FPlannedMove& Move : Plan)
+	{
+		UObject* Asset = FindAsset(Move.Source);
+		if (!Asset)
+		{
+			return Finish(false, FString::Printf(TEXT("asset not found: %s"), *Move.Source));
+		}
+		Renames.Add(FAssetRenameData(Asset, DestinationPath, Move.Name));
+	}
+
+	// RenameAssets performs the move and leaves redirectors at the old paths.
+	AssetTools.RenameAssets(Renames);
+
+	if (bFixupRedirectors)
+	{
+		FARFilter Filter;
+		Filter.bRecursivePaths = true;
+		for (const FString& Src : SourcePaths)
+		{
+			Filter.PackagePaths.Add(FName(*MigratePackagePath(Src)));
+		}
+		Filter.ClassPaths.Add(UObjectRedirector::StaticClass()->GetClassPathName());
+
+		FAssetRegistryModule& AssetRegistryModule =
+			FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+		TArray<FAssetData> RedirectorData;
+		AssetRegistryModule.Get().GetAssets(Filter, RedirectorData);
+
+		TArray<UObjectRedirector*> Redirectors;
+		for (const FAssetData& Data : RedirectorData)
+		{
+			if (UObjectRedirector* Redirector = Cast<UObjectRedirector>(Data.GetAsset()))
+			{
+				Redirectors.Add(Redirector);
+			}
+		}
+		if (Redirectors.Num() > 0)
+		{
+			AssetTools.FixupReferencers(Redirectors);
+		}
+		Root->SetNumberField(TEXT("redirectors_fixed"), Redirectors.Num());
+	}
+
+	return Finish(true, FString());
+#else
+	return Finish(false, TEXT("asset.migrate requires an editor build of HephaestusBridge"));
+#endif
 }
