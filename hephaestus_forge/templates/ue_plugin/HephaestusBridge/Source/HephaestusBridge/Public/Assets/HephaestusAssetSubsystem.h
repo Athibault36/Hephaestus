@@ -108,4 +108,28 @@ public:
     /** Search /Game assets whose name or path contains Query (JSON array in OutJson) */
     UFUNCTION(BlueprintCallable, Category = "Hephaestus|Assets")
     bool SearchAssetsJson(const FString& Query, const FString& AssetClass, int32 Limit, FString& OutJson) const;
+
+    /**
+     * Plan or execute a bulk asset move/rename with redirector fixup.
+     *
+     * When bExecute is false, returns the planned {source -> destination} moves
+     * only. When true, performs the rename via AssetTools (leaving redirectors)
+     * and, when bFixupRedirectors, resaves referencers to remove them.
+     * Editor-only; refuses during PIE. Plan/result is returned as JSON.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Hephaestus|Assets")
+    bool MigrateAssets(const TArray<FString>& SourcePaths, const FString& DestinationPath,
+        bool bExecute, bool bFixupRedirectors, FString& OutJson);
+
+    /** Create a Material Parameter Collection asset with scalar/vector defaults (editor-only). */
+    UFUNCTION(BlueprintCallable, Category = "Hephaestus|Assets")
+    bool CreateParameterCollection(const FString& Name, const FString& DestinationPath,
+        const TMap<FString, float>& Scalars, const TMap<FString, FLinearColor>& Vectors,
+        FString& OutPath, FString& OutError);
+
+    /** Update an existing Material Parameter Collection's default values (editor-only). */
+    UFUNCTION(BlueprintCallable, Category = "Hephaestus|Assets")
+    bool SetParameterCollection(const FString& CollectionPath,
+        const TMap<FString, float>& Scalars, const TMap<FString, FLinearColor>& Vectors,
+        FString& OutError);
 };

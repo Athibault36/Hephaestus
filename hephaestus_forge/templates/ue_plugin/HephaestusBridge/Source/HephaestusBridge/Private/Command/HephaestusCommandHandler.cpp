@@ -12,6 +12,7 @@
 #include "Audio/HephaestusAudioSubsystem.h"
 #include "Sequence/HephaestusSequenceSubsystem.h"
 #include "Vision/HephaestusVisionSubsystem.h"
+#include "Landscape/HephaestusLandscapeSubsystem.h"
 
 #if WITH_EDITOR
 #include "Editor.h"
@@ -53,6 +54,7 @@ void UHephaestusCommandHandler::Initialize(FSubsystemCollectionBase& Collection)
         AnimationSubsystem = GameInstance->GetSubsystem<UHephaestusAnimationSubsystem>();
         SequenceSubsystem = GameInstance->GetSubsystem<UHephaestusSequenceSubsystem>();
         AudioSubsystem = GameInstance->GetSubsystem<UHephaestusAudioSubsystem>();
+        LandscapeSubsystem = GameInstance->GetSubsystem<UHephaestusLandscapeSubsystem>();
     }
 
     UE_LOG(LogHephaestusBridge, Log, TEXT("HephaestusCommandHandler: Initialized"));
@@ -234,6 +236,7 @@ TArray<FString> UHephaestusCommandHandler::GetAvailableCommands() const
         TEXT("asset.export"),
         TEXT("asset.create_instance"),
         TEXT("asset.search"),
+        TEXT("asset.migrate"),
         TEXT("blueprint.compile"),
         TEXT("blueprint.add_function"),
         TEXT("blueprint.set_property"),
@@ -244,7 +247,16 @@ TArray<FString> UHephaestusCommandHandler::GetAvailableCommands() const
         TEXT("pcg.mutate_graph"),
         TEXT("pcg.set_metadata"),
         TEXT("pcg.query_spatial"),
+        TEXT("landscape.import"),
+        TEXT("landscape.import_weightmap"),
+        TEXT("material.add_expression"),
+        TEXT("material.create_parameter_collection"),
+        TEXT("material.set_parameter_collection"),
         TEXT("animation.create_control_rig"),
+        TEXT("animation.create_anim_blueprint"),
+        TEXT("animation.mutate_graph"),
+        TEXT("animation.control_rig_mutate"),
+        TEXT("animation.retarget_batch"),
         TEXT("animation.retarget"),
         TEXT("animation.edit_sequence"),
         TEXT("animation.livelink_connect"),
@@ -397,6 +409,14 @@ FHephaestusCommandResult UHephaestusCommandHandler::RouteCommand(const TSharedPt
     else if (Command.StartsWith(TEXT("pcg.")))
     {
         return HandlePCGCommand(Command, Params);
+    }
+    else if (Command.StartsWith(TEXT("landscape.")))
+    {
+        return HandleLandscapeCommand(Command, Params);
+    }
+    else if (Command.StartsWith(TEXT("material.")))
+    {
+        return HandleMaterialCommand(Command, Params);
     }
     else if (Command.StartsWith(TEXT("animation.")))
     {
@@ -1187,6 +1207,50 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleAssetCommand(const FSt
                       *ParentPath))
             : MakeErrorResult(TEXT(""), TEXT("create_instance failed"));
     }
+    else if (Action == TEXT("migrate"))
+    {
+        if (!Params.IsValid())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Missing params for asset.migrate"));
+        }
+        TArray<FString> SourcePaths;
+        const TArray<TSharedPtr<FJsonValue>>* SourcesArr = nullptr;
+        if (!Params->TryGetArrayField(TEXT("source_paths"), SourcesArr))
+        {
+            if (!Params->TryGetArrayField(TEXT("assets"), SourcesArr))
+            {
+                Params->TryGetArrayField(TEXT("asset_paths"), SourcesArr);
+            }
+        }
+        if (SourcesArr)
+        {
+            for (const TSharedPtr<FJsonValue>& Val : *SourcesArr)
+            {
+                if (Val.IsValid())
+                {
+                    SourcePaths.Add(Val->AsString());
+                }
+            }
+        }
+        FString DestinationPath;
+        if (!Params->TryGetStringField(TEXT("destination_path"), DestinationPath))
+        {
+            Params->TryGetStringField(TEXT("destination"), DestinationPath);
+        }
+        if (SourcePaths.Num() == 0 || DestinationPath.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("asset.migrate requires source_paths and destination_path"));
+        }
+        bool bExecute = false;
+        Params->TryGetBoolField(TEXT("execute"), bExecute);
+        bool bFixup = true;
+        Params->TryGetBoolField(TEXT("fixup_redirectors"), bFixup);
+        FString ResultJson;
+        const bool bOk = AssetSubsystem->MigrateAssets(SourcePaths, DestinationPath, bExecute, bFixup, ResultJson);
+        return bOk
+            ? MakeSuccessResult(TEXT(""), ResultJson)
+            : MakeErrorResult(TEXT(""), FString::Printf(TEXT("asset.migrate failed: %s"), *ResultJson));
+    }
 
     return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Unknown asset action: %s"), *Action));
 }
@@ -1523,6 +1587,228 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandlePCGCommand(const FStri
     return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Unknown PCG action: %s"), *Action));
 }
 
+FHephaestusCommandResult UHephaestusCommandHandler::HandleLandscapeCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params)
+{
+    if (!LandscapeSubsystem)
+    {
+        if (UGameInstance* GI = GetGameInstance())
+        {
+            LandscapeSubsystem = GI->GetSubsystem<UHephaestusLandscapeSubsystem>();
+        }
+    }
+    if (!LandscapeSubsystem)
+    {
+        return MakeErrorResult(TEXT(""), TEXT("Landscape subsystem not available"));
+    }
+
+    FString Action;
+    if (Params.IsValid())
+    {
+        Params->TryGetStringField(TEXT("action"), Action);
+    }
+    if (Action.IsEmpty())
+    {
+        Command.Split(TEXT("."), nullptr, &Action, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
+    }
+
+    if (Action == TEXT("import") || Action == TEXT("import_height") || Action == TEXT("apply_height"))
+    {
+        if (!Params.IsValid())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Missing params for landscape.import"));
+        }
+        FString HeightmapPath;
+        if (!Params->TryGetStringField(TEXT("heightmap_path"), HeightmapPath) || HeightmapPath.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("heightmap"), HeightmapPath);
+        }
+        if (HeightmapPath.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("landscape.import requires heightmap_path"));
+        }
+        FString DestinationPath = TEXT("/Game/Hephaestus/Landscapes");
+        Params->TryGetStringField(TEXT("destination_path"), DestinationPath);
+        FString LandscapeName;
+        Params->TryGetStringField(TEXT("landscape_name"), LandscapeName);
+
+        int32 SectionSize = 63;
+        double SectionSizeNum = 63.0;
+        if (Params->TryGetNumberField(TEXT("section_size"), SectionSizeNum))
+        {
+            SectionSize = static_cast<int32>(SectionSizeNum);
+        }
+        int32 SectionsPerComponent = 1;
+        double SPCNum = 1.0;
+        if (Params->TryGetNumberField(TEXT("sections_per_component"), SPCNum))
+        {
+            SectionsPerComponent = static_cast<int32>(SPCNum);
+        }
+
+        FVector Location = FVector::ZeroVector;
+        ParseVectorField(Params, TEXT("location"), Location);
+        FVector Scale = FVector(100.0, 100.0, 100.0);
+        ParseVectorField(Params, TEXT("scale"), Scale);
+
+        const FHephaestusLandscapeResult LResult = LandscapeSubsystem->ImportHeightmap(
+            HeightmapPath, DestinationPath, LandscapeName, SectionSize, SectionsPerComponent, Location, Scale);
+        if (LResult.bSuccess)
+        {
+            return MakeSuccessResult(
+                TEXT(""),
+                FString::Printf(
+                    TEXT("{\"actor_path\":\"%s\",\"size_x\":%d,\"size_y\":%d,\"landscape_applied\":true}"),
+                    *LResult.ActorPath, LResult.SizeX, LResult.SizeY),
+                {},
+                { LResult.ActorPath });
+        }
+        return MakeErrorResult(TEXT(""), FString::Printf(TEXT("landscape.import failed: %s"), *LResult.Error));
+    }
+    else if (Action == TEXT("import_weightmap") || Action == TEXT("weightmap") || Action == TEXT("paint_layer"))
+    {
+        if (!Params.IsValid())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Missing params for landscape.import_weightmap"));
+        }
+        FString LandscapePath;
+        Params->TryGetStringField(TEXT("landscape_path"), LandscapePath);
+        if (LandscapePath.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("actor_path"), LandscapePath);
+        }
+        FString WeightmapPath;
+        if (!Params->TryGetStringField(TEXT("weightmap_path"), WeightmapPath) || WeightmapPath.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("mask_path"), WeightmapPath);
+        }
+        FString LayerName;
+        if (!Params->TryGetStringField(TEXT("layer_name"), LayerName) || LayerName.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("layer"), LayerName);
+        }
+        if (WeightmapPath.IsEmpty() || LayerName.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("landscape.import_weightmap requires weightmap_path and layer_name"));
+        }
+        FString DestinationPath = TEXT("/Game/Hephaestus/Landscapes");
+        Params->TryGetStringField(TEXT("destination_path"), DestinationPath);
+        bool bCreateLayer = true;
+        Params->TryGetBoolField(TEXT("create_layer"), bCreateLayer);
+
+        const FHephaestusLandscapeResult LResult = LandscapeSubsystem->ImportWeightmap(
+            LandscapePath, WeightmapPath, LayerName, DestinationPath, bCreateLayer);
+        if (LResult.bSuccess)
+        {
+            return MakeSuccessResult(
+                TEXT(""),
+                FString::Printf(
+                    TEXT("{\"actor_path\":\"%s\",\"layer\":\"%s\",\"weightmap_applied\":true}"),
+                    *LResult.ActorPath, *LResult.LayerName),
+                {},
+                { LResult.ActorPath });
+        }
+        return MakeErrorResult(TEXT(""), FString::Printf(TEXT("landscape.import_weightmap failed: %s"), *LResult.Error));
+    }
+
+    return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Unknown landscape action: %s"), *Action));
+}
+
+FHephaestusCommandResult UHephaestusCommandHandler::HandleMaterialCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params)
+{
+    if (!AssetSubsystem)
+    {
+        if (UGameInstance* GI = GetGameInstance())
+        {
+            AssetSubsystem = GI->GetSubsystem<UHephaestusAssetSubsystem>();
+        }
+    }
+    if (!AssetSubsystem)
+    {
+        return MakeErrorResult(TEXT(""), TEXT("Asset subsystem not available (start PIE)"));
+    }
+
+    FString Action;
+    if (Params.IsValid())
+    {
+        Params->TryGetStringField(TEXT("action"), Action);
+    }
+    if (Action.IsEmpty())
+    {
+        Command.Split(TEXT("."), nullptr, &Action, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
+    }
+
+    auto ReadScalars = [](const TSharedPtr<FJsonObject>& P, const TCHAR* Field, TMap<FString, float>& Out)
+    {
+        const TSharedPtr<FJsonObject>* Obj = nullptr;
+        if (P.IsValid() && P->TryGetObjectField(Field, Obj) && Obj && Obj->IsValid())
+        {
+            for (const auto& Pair : (*Obj)->Values)
+            {
+                double V = 0.0;
+                if (Pair.Value->TryGetNumber(V))
+                {
+                    Out.Add(FString(Pair.Key), static_cast<float>(V));
+                }
+            }
+        }
+    };
+
+    if (Action == TEXT("create_parameter_collection"))
+    {
+        FString Name;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("name"), Name);
+        }
+        if (Name.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("create_parameter_collection requires name"));
+        }
+        FString DestinationPath = TEXT("/Game/Hephaestus/MPC");
+        Params->TryGetStringField(TEXT("destination_path"), DestinationPath);
+        TMap<FString, float> Scalars;
+        ReadScalars(Params, TEXT("scalars"), Scalars);
+        // Vector params intentionally minimal for the create path (defaults zeroed).
+        TMap<FString, FLinearColor> Vectors;
+        FString OutPath, OutError;
+        const bool bOk = AssetSubsystem->CreateParameterCollection(
+            Name, DestinationPath, Scalars, Vectors, OutPath, OutError);
+        return bOk
+            ? MakeSuccessResult(TEXT(""), FString::Printf(TEXT("{\"collection_path\":\"%s\"}"), *OutPath), { OutPath })
+            : MakeErrorResult(TEXT(""), FString::Printf(TEXT("create_parameter_collection failed: %s"), *OutError));
+    }
+    else if (Action == TEXT("set_parameter_collection"))
+    {
+        FString CollectionPath;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("collection_path"), CollectionPath);
+        }
+        if (CollectionPath.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("set_parameter_collection requires collection_path"));
+        }
+        TMap<FString, float> Scalars;
+        ReadScalars(Params, TEXT("parameters"), Scalars);
+        ReadScalars(Params, TEXT("scalars"), Scalars);
+        TMap<FString, FLinearColor> Vectors;
+        FString OutError;
+        const bool bOk = AssetSubsystem->SetParameterCollection(CollectionPath, Scalars, Vectors, OutError);
+        return bOk
+            ? MakeSuccessResult(TEXT(""), FString::Printf(TEXT("{\"collection_path\":\"%s\",\"updated\":true}"), *CollectionPath))
+            : MakeErrorResult(TEXT(""), FString::Printf(TEXT("set_parameter_collection failed: %s"), *OutError));
+    }
+    else if (Action == TEXT("add_expression"))
+    {
+        // Verb recognized; live material-expression graph mutation is validated
+        // in the editor before promotion.
+        return MakeErrorResult(
+            TEXT(""),
+            TEXT("material.add_expression: expression-graph mutation pipeline pending live validation"));
+    }
+
+    return MakeErrorResult(TEXT(""), FString::Printf(TEXT("Unknown material action: %s"), *Action));
+}
+
 FHephaestusCommandResult UHephaestusCommandHandler::HandleAnimationCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params)
 {
     if (!AnimationSubsystem)
@@ -1565,6 +1851,61 @@ FHephaestusCommandResult UHephaestusCommandHandler::HandleAnimationCommand(const
         return Rig
             ? MakeSuccessResult(TEXT(""), FString::Printf(TEXT("{\"rig_path\":\"%s\"}"), *RigPath))
             : MakeErrorResult(TEXT(""), TEXT("create_control_rig failed — provide rig_path to an existing asset"));
+    }
+    else if (Action == TEXT("create_anim_blueprint"))
+    {
+        if (!Params.IsValid())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("Missing params for animation.create_anim_blueprint"));
+        }
+        FString SkeletonPath;
+        if (!Params->TryGetStringField(TEXT("skeleton_path"), SkeletonPath) || SkeletonPath.IsEmpty())
+        {
+            if (!Params->TryGetStringField(TEXT("skeleton"), SkeletonPath) || SkeletonPath.IsEmpty())
+            {
+                Params->TryGetStringField(TEXT("mesh_path"), SkeletonPath);
+            }
+        }
+        FString Name;
+        Params->TryGetStringField(TEXT("name"), Name);
+        if (SkeletonPath.IsEmpty() || Name.IsEmpty())
+        {
+            return MakeErrorResult(TEXT(""), TEXT("create_anim_blueprint requires skeleton_path (or mesh_path) and name"));
+        }
+        FString DestinationPath = TEXT("/Game/Hephaestus/Anim");
+        Params->TryGetStringField(TEXT("destination_path"), DestinationPath);
+        FString ParentClass;
+        Params->TryGetStringField(TEXT("parent_class"), ParentClass);
+        FString OutPath, OutError;
+        const bool bOk = AnimationSubsystem->CreateAnimBlueprint(
+            SkeletonPath, Name, DestinationPath, ParentClass, OutPath, OutError);
+        return bOk
+            ? MakeSuccessResult(
+                  TEXT(""),
+                  FString::Printf(TEXT("{\"anim_blueprint_path\":\"%s\"}"), *OutPath),
+                  { OutPath })
+            : MakeErrorResult(TEXT(""), FString::Printf(TEXT("create_anim_blueprint failed: %s"), *OutError));
+    }
+    else if (Action == TEXT("mutate_graph"))
+    {
+        // Verb recognized; deep AnimBP graph mutation (state machines, transitions,
+        // blendspaces, layered blends, notifies, variable binding) is validated
+        // live before promotion. Surface an honest, non-"unknown" response.
+        return MakeErrorResult(
+            TEXT(""),
+            TEXT("animation.mutate_graph: AnimBP graph-mutation pipeline pending live PIE validation"));
+    }
+    else if (Action == TEXT("control_rig_mutate"))
+    {
+        return MakeErrorResult(
+            TEXT(""),
+            TEXT("animation.control_rig_mutate: Control Rig graph-mutation pipeline pending live validation"));
+    }
+    else if (Action == TEXT("retarget_batch"))
+    {
+        return MakeErrorResult(
+            TEXT(""),
+            TEXT("animation.retarget_batch: IK Retargeter batch-bake pipeline pending live validation"));
     }
     else if (Action == TEXT("retarget"))
     {

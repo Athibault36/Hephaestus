@@ -368,6 +368,238 @@ def build_import_fbx_command_v2(
     return command
 
 
+# --- Roadmap verbs: landscape / PCG / AnimBP / Control Rig / material / migrate
+
+def build_sequence_render_command(
+    sequence_path: str,
+    output_dir: str,
+    *,
+    preset_path: str = "",
+    config_path: str = "",
+    job_id: str = "",
+    resume_frame: int = 0,
+) -> dict[str, Any]:
+    """Submit a Level Sequence to the Movie Render Queue (MRQ)."""
+    params: dict[str, Any] = {
+        "sequence_path": sequence_path,
+        "output_dir": output_dir,
+    }
+    if preset_path:
+        params["preset_path"] = preset_path
+    if config_path:
+        params["config_path"] = config_path
+    if job_id:
+        params["job_id"] = job_id
+    if resume_frame:
+        params["resume_frame"] = int(resume_frame)
+    return {"command": "sequence.render", "params": params}
+
+
+def build_landscape_import_command(
+    heightmap_path: str,
+    *,
+    destination_path: str = "/Game/Hephaestus/Landscapes",
+    landscape_name: str = "",
+    section_size: int = 63,
+    sections_per_component: int = 1,
+    component_count_x: int = 8,
+    component_count_y: int = 8,
+    location: Vec3 = None,
+    scale: Vec3 = None,
+) -> dict[str, Any]:
+    """Apply a heightmap raster to a real UE Landscape (LandscapeEditor height)."""
+    params: dict[str, Any] = {
+        "heightmap_path": heightmap_path,
+        "destination_path": destination_path,
+        "section_size": int(section_size),
+        "sections_per_component": int(sections_per_component),
+        "component_count_x": int(component_count_x),
+        "component_count_y": int(component_count_y),
+    }
+    if landscape_name:
+        params["landscape_name"] = landscape_name
+    if location is not None:
+        params["location"] = _vec3(location, (0.0, 0.0, 0.0))
+    if scale is not None:
+        params["scale"] = _vec3(scale, (100.0, 100.0, 100.0))
+    return {"command": "landscape.import", "params": params}
+
+
+def build_landscape_import_weightmap_command(
+    landscape_path: str,
+    weightmap_path: str,
+    layer_name: str,
+    *,
+    create_layer: bool = True,
+) -> dict[str, Any]:
+    """Import a Gaea mask as a landscape paint (weight) layer."""
+    return {
+        "command": "landscape.import_weightmap",
+        "params": {
+            "landscape_path": landscape_path,
+            "weightmap_path": weightmap_path,
+            "layer_name": layer_name,
+            "create_layer": bool(create_layer),
+        },
+    }
+
+
+def build_pcg_create_graph_command(
+    name: str,
+    *,
+    destination_path: str = "/Game/Hephaestus/PCG",
+) -> dict[str, Any]:
+    return {
+        "command": "pcg.create_graph",
+        "params": {"name": name, "destination_path": destination_path},
+    }
+
+
+def build_pcg_bind_terrain_command(
+    graph_path: str,
+    landscape_path: str,
+) -> dict[str, Any]:
+    return {
+        "command": "pcg.bind_terrain",
+        "params": {"graph_path": graph_path, "landscape_path": landscape_path},
+    }
+
+
+def build_pcg_bind_vegetation_command(
+    graph_path: str,
+    meshes: Sequence[str],
+    *,
+    layer_name: str = "",
+    density: float = 100.0,
+) -> dict[str, Any]:
+    params: dict[str, Any] = {
+        "graph_path": graph_path,
+        "meshes": list(meshes),
+        "density": float(density),
+    }
+    if layer_name:
+        params["layer_name"] = layer_name
+    return {"command": "pcg.bind_vegetation", "params": params}
+
+
+def build_create_anim_blueprint_command(
+    skeleton_path: str,
+    name: str,
+    *,
+    destination_path: str = "/Game/Hephaestus/Anim",
+    parent_class: str = "",
+) -> dict[str, Any]:
+    params: dict[str, Any] = {
+        "skeleton_path": skeleton_path,
+        "name": name,
+        "destination_path": destination_path,
+    }
+    if parent_class:
+        params["parent_class"] = parent_class
+    return {"command": "animation.create_anim_blueprint", "params": params}
+
+
+def build_anim_mutate_graph_command(
+    anim_blueprint_path: str,
+    mutations: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "command": "animation.mutate_graph",
+        "params": {
+            "anim_blueprint_path": anim_blueprint_path,
+            "mutations": [dict(m) for m in mutations],
+        },
+    }
+
+
+def build_control_rig_mutate_command(
+    rig_path: str,
+    mutations: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "command": "animation.control_rig_mutate",
+        "params": {"rig_path": rig_path, "mutations": [dict(m) for m in mutations]},
+    }
+
+
+def build_retarget_batch_command(
+    retargeter_path: str,
+    anim_paths: Sequence[str],
+    *,
+    destination_path: str = "/Game/Hephaestus/Retargeted",
+) -> dict[str, Any]:
+    return {
+        "command": "animation.retarget_batch",
+        "params": {
+            "retargeter_path": retargeter_path,
+            "anim_paths": list(anim_paths),
+            "destination_path": destination_path,
+        },
+    }
+
+
+def build_material_add_expression_command(
+    material_path: str,
+    expression_class: str,
+    *,
+    parameters: Optional[Mapping[str, Any]] = None,
+    connect_to: str = "",
+) -> dict[str, Any]:
+    params: dict[str, Any] = {
+        "material_path": material_path,
+        "expression_class": expression_class,
+    }
+    if parameters:
+        params["parameters"] = dict(parameters)
+    if connect_to:
+        params["connect_to"] = connect_to
+    return {"command": "material.add_expression", "params": params}
+
+
+def build_material_create_parameter_collection_command(
+    name: str,
+    *,
+    destination_path: str = "/Game/Hephaestus/MPC",
+    scalars: Optional[Mapping[str, float]] = None,
+    vectors: Optional[Mapping[str, Any]] = None,
+) -> dict[str, Any]:
+    params: dict[str, Any] = {"name": name, "destination_path": destination_path}
+    if scalars:
+        params["scalars"] = {k: float(v) for k, v in scalars.items()}
+    if vectors:
+        params["vectors"] = dict(vectors)
+    return {"command": "material.create_parameter_collection", "params": params}
+
+
+def build_material_set_parameter_collection_command(
+    collection_path: str,
+    parameters: Mapping[str, Any],
+) -> dict[str, Any]:
+    return {
+        "command": "material.set_parameter_collection",
+        "params": {"collection_path": collection_path, "parameters": dict(parameters)},
+    }
+
+
+def build_asset_migrate_command(
+    source_paths: Sequence[str],
+    destination_path: str,
+    *,
+    execute: bool = False,
+    fixup_redirectors: bool = True,
+) -> dict[str, Any]:
+    """Plan (execute=False) or perform (execute=True) a bulk move with redirector fixup."""
+    return {
+        "command": "asset.migrate",
+        "params": {
+            "source_paths": list(source_paths),
+            "destination_path": destination_path,
+            "execute": bool(execute),
+            "fixup_redirectors": bool(fixup_redirectors),
+        },
+    }
+
+
 def spawn_actor_json(**kwargs: Any) -> str:
     """JSON string ready for ExecuteCommand."""
     return json.dumps(build_spawn_actor_command(**kwargs))

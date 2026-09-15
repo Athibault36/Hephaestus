@@ -17,6 +17,13 @@
 #include "Misc/Paths.h"
 #include "UObject/Package.h"
 
+#if WITH_EDITOR
+#include "Animation/AnimBlueprint.h"
+#include "Animation/Skeleton.h"
+#include "AnimBlueprintFactory.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#endif
+
 namespace
 {
 struct FHephaestusMoveJob
@@ -94,6 +101,75 @@ UObject* UHephaestusAnimationSubsystem::CreateControlRig(USkeletalMesh* Skeletal
 		UE_LOG(LogHephaestusBridge, Warning, TEXT("CreateControlRig: rig_path or mesh_path required"));
 	}
 	return nullptr;
+}
+
+bool UHephaestusAnimationSubsystem::CreateAnimBlueprint(
+	const FString& SkeletonOrMeshPath, const FString& Name,
+	const FString& DestinationPath, const FString& ParentClassPath, FString& OutPath, FString& OutError)
+{
+#if WITH_EDITOR
+	if (SkeletonOrMeshPath.IsEmpty() || Name.IsEmpty())
+	{
+		OutError = TEXT("skeleton_path/mesh_path and name required");
+		return false;
+	}
+
+	// Resolve a USkeleton directly, or via a skeletal mesh's skeleton.
+	USkeleton* Skeleton = LoadObject<USkeleton>(nullptr, *SkeletonOrMeshPath);
+	if (!Skeleton)
+	{
+		if (USkeletalMesh* Mesh = LoadObject<USkeletalMesh>(nullptr, *SkeletonOrMeshPath))
+		{
+			Skeleton = Mesh->GetSkeleton();
+		}
+	}
+	if (!Skeleton)
+	{
+		OutError = FString::Printf(TEXT("could not resolve skeleton from %s"), *SkeletonOrMeshPath);
+		return false;
+	}
+
+	const FString Dest = DestinationPath.IsEmpty() ? FString(TEXT("/Game/Hephaestus/Anim")) : DestinationPath;
+	const FString PackageName = FString::Printf(TEXT("%s/%s"), *Dest, *Name);
+	if (UAnimBlueprint* ExistingBP = LoadObject<UAnimBlueprint>(nullptr, *PackageName))
+	{
+		OutPath = ExistingBP->GetPathName();
+		return true;
+	}
+
+	UPackage* Package = CreatePackage(*PackageName);
+	if (!Package)
+	{
+		OutError = FString::Printf(TEXT("failed to create package %s"), *PackageName);
+		return false;
+	}
+
+	UAnimBlueprintFactory* Factory = NewObject<UAnimBlueprintFactory>();
+	Factory->TargetSkeleton = Skeleton;
+	if (!ParentClassPath.IsEmpty())
+	{
+		if (UClass* Parent = LoadClass<UAnimInstance>(nullptr, *ParentClassPath))
+		{
+			Factory->ParentClass = Parent;
+		}
+	}
+
+	UObject* Created = Factory->FactoryCreateNew(
+		UAnimBlueprint::StaticClass(), Package, FName(*Name), RF_Public | RF_Standalone, nullptr, GWarn);
+	UAnimBlueprint* AnimBP = Cast<UAnimBlueprint>(Created);
+	if (!AnimBP)
+	{
+		OutError = TEXT("AnimBlueprintFactory did not produce a UAnimBlueprint");
+		return false;
+	}
+	FAssetRegistryModule::AssetCreated(AnimBP);
+	AnimBP->MarkPackageDirty();
+	OutPath = AnimBP->GetPathName();
+	return true;
+#else
+	OutError = TEXT("create_anim_blueprint requires an editor build of HephaestusBridge");
+	return false;
+#endif
 }
 
 UAnimSequence* UHephaestusAnimationSubsystem::RetargetAnimation(UAnimSequence* Source, USkeletalMesh* Target, UObject* IKRig)
