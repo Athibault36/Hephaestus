@@ -359,6 +359,24 @@ def validate_pcg_set_metadata(command_obj: dict[str, Any]) -> list[str]:
     return errors
 
 
+# --- Movie Render Queue (MRQ) submit ------------------------------------------
+
+def validate_sequence_render(command_obj: dict[str, Any]) -> list[str]:
+    """sequence.render — submit a Level Sequence to the Movie Render Queue."""
+    errors: list[str] = []
+    if command_obj.get("command") != "sequence.render":
+        errors.append("command must be sequence.render")
+    params = resolve_params(command_obj)
+    if params is None:
+        errors.append("missing params/args object")
+        return errors
+    if not (params.get("sequence_path") or params.get("path")):
+        errors.append("missing sequence_path")
+    if not (params.get("output_dir") or params.get("output_directory") or params.get("output")):
+        errors.append("missing output_dir")
+    return errors
+
+
 # --- Landscape (Gaea → UE height apply / weightmap paint layers) --------------
 
 def validate_landscape_import(command_obj: dict[str, Any]) -> list[str]:

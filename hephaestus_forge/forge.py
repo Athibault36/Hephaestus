@@ -1215,6 +1215,13 @@ gaea_app = typer.Typer(
 )
 app.add_typer(gaea_app, name="gaea")
 
+mrq_app = typer.Typer(
+    name="mrq",
+    help="Movie Render Queue job DB — list / recover / resume power-off renders.",
+    no_args_is_help=True,
+)
+app.add_typer(mrq_app, name="mrq")
+
 dialog_app = typer.Typer(
     name="dialog",
     help="Control Windows / Unreal dialog boxes (list, click, auto-dismiss).",
@@ -1650,6 +1657,85 @@ def gaea_build_cmd(
         raise typer.Exit(0)
     console.print(f"[red]✗ gaea.build[/red]: {res.get('error')}")
     raise typer.Exit(1)
+
+
+def _open_mrq_db(project_path: Optional[Path]):
+    try:
+        from mrq_job_db import MrqJobDb, default_job_db_dir
+    except ImportError:
+        from hephaestus_forge.mrq_job_db import MrqJobDb, default_job_db_dir  # type: ignore
+    project_root = _resolve_active_project(project_path)
+    return MrqJobDb(default_job_db_dir(project_root))
+
+
+@mrq_app.command("list")
+def mrq_list_cmd(
+    project_path: Annotated[Optional[Path], typer.Option("--project", "-p")] = None,
+    status: Annotated[Optional[str], typer.Option("--status", help="Filter by status")] = None,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+):
+    """List Movie Render Queue jobs from the on-disk job DB."""
+    db = _open_mrq_db(project_path)
+    jobs = [j.to_dict() for j in db.list_jobs(status=status)]
+    if as_json:
+        import json as _json
+
+        typer.echo(_json.dumps(jobs, indent=2, ensure_ascii=True))
+        raise typer.Exit(0)
+    if not jobs:
+        console.print("[dim]No MRQ jobs recorded.[/dim]")
+        raise typer.Exit(0)
+    for j in jobs:
+        console.print(
+            f"[cyan]{j['job_id']}[/cyan] {j['status']:<11} "
+            f"{int(j['progress'] * 100):3d}% ({j['current_frame']}/{j['total_frames']}) "
+            f"{j['label']}"
+        )
+    raise typer.Exit(0)
+
+
+@mrq_app.command("recover")
+def mrq_recover_cmd(
+    project_path: Annotated[Optional[Path], typer.Option("--project", "-p")] = None,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+):
+    """Mark in-flight jobs INTERRUPTED after a crash/power-off (resume candidates)."""
+    db = _open_mrq_db(project_path)
+    interrupted = [j.to_dict() for j in db.recover()]
+    if as_json:
+        import json as _json
+
+        typer.echo(_json.dumps(interrupted, indent=2, ensure_ascii=True))
+        raise typer.Exit(0)
+    console.print(f"[green]Recovered {len(interrupted)} interrupted job(s)[/green]")
+    for j in interrupted:
+        console.print(f"[dim]{j['job_id']} resume from frame {j['current_frame']}[/dim]")
+    raise typer.Exit(0)
+
+
+@mrq_app.command("resume")
+def mrq_resume_cmd(
+    job_id: Annotated[str, typer.Argument(help="Job id to resume")],
+    project_path: Annotated[Optional[Path], typer.Option("--project", "-p")] = None,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+):
+    """Prepare an interrupted job for re-submission (SUBMITTED, keeps resume frame)."""
+    db = _open_mrq_db(project_path)
+    job = db.resume(job_id)
+    if job is None:
+        console.print(f"[red]No such job: {job_id}[/red]")
+        raise typer.Exit(1)
+    payload = job.to_dict()
+    if as_json:
+        import json as _json
+
+        typer.echo(_json.dumps(payload, indent=2, ensure_ascii=True))
+        raise typer.Exit(0)
+    console.print(
+        f"[green]Job {job_id} → {payload['status']}[/green] "
+        f"(resume #{payload['resume_count']} from frame {payload['current_frame']})"
+    )
+    raise typer.Exit(0)
 
 
 @cc5_app.command("install-plugin")

@@ -370,6 +370,31 @@ def build_import_fbx_command_v2(
 
 # --- Roadmap verbs: landscape / PCG / AnimBP / Control Rig / material / migrate
 
+def build_sequence_render_command(
+    sequence_path: str,
+    output_dir: str,
+    *,
+    preset_path: str = "",
+    config_path: str = "",
+    job_id: str = "",
+    resume_frame: int = 0,
+) -> dict[str, Any]:
+    """Submit a Level Sequence to the Movie Render Queue (MRQ)."""
+    params: dict[str, Any] = {
+        "sequence_path": sequence_path,
+        "output_dir": output_dir,
+    }
+    if preset_path:
+        params["preset_path"] = preset_path
+    if config_path:
+        params["config_path"] = config_path
+    if job_id:
+        params["job_id"] = job_id
+    if resume_frame:
+        params["resume_frame"] = int(resume_frame)
+    return {"command": "sequence.render", "params": params}
+
+
 def build_landscape_import_command(
     heightmap_path: str,
     *,
