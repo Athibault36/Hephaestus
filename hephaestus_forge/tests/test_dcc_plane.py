@@ -73,6 +73,57 @@ def test_route_blender_exec_missing_script():
     assert "script" in res["error"]
 
 
+def test_health_includes_gaea_status():
+    with patch("dcc_server.find_blender", return_value=(None, None)):
+        with patch("dcc_server._cc5_status", return_value={"available": False}):
+            with patch("dcc_server._gaea_status", return_value={"available": False, "path": None}):
+                h = health()
+    assert "gaea" in h
+    assert h["gaea"]["available"] is False
+
+
+def test_route_gaea_build_missing_terrain():
+    res = route_command("gaea.build", {})
+    assert res["success"] is False
+    assert "terrain" in res["error"].lower()
+
+
+def test_route_gaea_build_success(tmp_path: Path):
+    result = MagicMock()
+    result.success = True
+    result.heightmap = str(tmp_path / "Height.png")
+    result.masks = [str(tmp_path / "Slope.png")]
+    result.textures = [str(tmp_path / "Albedo.png")]
+    result.build_folder = str(tmp_path)
+    result.next_steps = ["landscape.import ..."]
+    result.outputs = [result.heightmap, result.masks[0], result.textures[0]]
+    result.to_dict.return_value = {
+        "success": True,
+        "heightmap": result.heightmap,
+        "masks": result.masks,
+        "textures": result.textures,
+        "build_folder": result.build_folder,
+        "next_steps": result.next_steps,
+    }
+    with patch("dcc_server._gaea_build_result", return_value=(result, None)):
+        res = route_command("gaea.build", {"terrain_file": str(tmp_path / "W.terrain")})
+    assert res["success"] is True
+    assert res["asset_paths"] == result.outputs
+    assert res["heightmap"] == result.heightmap
+
+
+def test_route_gaea_export_mask_requires_masks(tmp_path: Path):
+    result = MagicMock()
+    result.success = True
+    result.masks = []
+    result.error = None
+    result.to_dict.return_value = {"success": True, "masks": []}
+    with patch("dcc_server._gaea_build_result", return_value=(result, None)):
+        res = route_command("gaea.export_mask", {"terrain_file": str(tmp_path / "W.terrain")})
+    assert res["success"] is False
+    assert "mask" in res["error"].lower()
+
+
 def test_dcc_client_command_posts_params(monkeypatch):
     captured = {}
 

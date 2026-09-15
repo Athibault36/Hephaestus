@@ -83,11 +83,29 @@ def _cc5_status() -> dict[str, Any]:
     }
 
 
+def _gaea_status() -> dict[str, Any]:
+    try:
+        from gaea_bridge import find_gaea
+    except ImportError:
+        try:
+            from hephaestus_forge.gaea_bridge import find_gaea  # type: ignore
+        except ImportError:
+            return {"available": False, "path": None, "detail": "gaea_bridge not loaded"}
+    path, version = find_gaea()
+    return {
+        "available": bool(path),
+        "path": path,
+        "version": version,
+        "detail": "ready" if path else "Gaea Build Swarm not found (set GAEA_SWARM)",
+    }
+
+
 @app.get("/health")
 @app.get("/v1/health")
 def health() -> dict[str, Any]:
     blender = _blender_status()
     cc5 = _cc5_status()
+    gaea = _gaea_status()
     return {
         "ok": True,
         "service": "hephaestus-dcc",
@@ -95,6 +113,7 @@ def health() -> dict[str, Any]:
         "forge_version": FORGE_VERSION,
         "blender": blender,
         "cc5": cc5,
+        "gaea": gaea,
         # Honest: available only when Blender is actually found
         "ready": bool(blender.get("available")),
     }
@@ -299,6 +318,83 @@ def _handle_cc5_export(params: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _gaea_build_result(params: dict[str, Any]):
+    """Shared Gaea build invocation used by gaea.build / gaea.export_mask."""
+    try:
+        from gaea_bridge import build_terrain
+    except ImportError:
+        from hephaestus_forge.gaea_bridge import build_terrain  # type: ignore
+    terrain = params.get("terrain_file") or params.get("terrain") or params.get("file")
+    if not terrain:
+        return None, {
+            "success": False,
+            "error": "params.terrain_file required (.terrain or .tor)",
+            "result_json": "{}",
+        }
+    project_root = params.get("project_root") or params.get("project")
+    root = Path(project_root).resolve() if project_root else None
+    variables = params.get("variables") if isinstance(params.get("variables"), dict) else None
+    seed = params.get("seed")
+    result = build_terrain(
+        terrain,
+        project_root=root,
+        build_folder=params.get("build_folder"),
+        profile=params.get("profile"),
+        region=params.get("region"),
+        seed=int(seed) if seed is not None else None,
+        ignore_cache=bool(params.get("ignore_cache", False)),
+        verbose=bool(params.get("verbose", False)),
+        variables=variables,
+        vars_file=params.get("vars_file"),
+        gaea_executable=params.get("gaea_executable"),
+        destination_path=str(params.get("destination_path") or "/Game/Hephaestus/Landscapes"),
+        timeout_seconds=int(params.get("timeout") or 1800),
+    )
+    return result, None
+
+
+def _handle_gaea_build(params: dict[str, Any]) -> dict[str, Any]:
+    result, err = _gaea_build_result(params)
+    if err is not None:
+        return err
+    out = result.to_dict()
+    out["success"] = result.success
+    if result.success:
+        out["result_json"] = json.dumps(
+            {
+                "heightmap": result.heightmap,
+                "masks": result.masks,
+                "textures": result.textures,
+                "build_folder": result.build_folder,
+                "next_steps": result.next_steps,
+            }
+        )
+        out["asset_paths"] = result.outputs
+        out["next_steps"] = result.next_steps
+    else:
+        out["error"] = result.error or "gaea build failed"
+        out["result_json"] = "{}"
+    return out
+
+
+def _handle_gaea_export_mask(params: dict[str, Any]) -> dict[str, Any]:
+    """Build (if needed) and surface just the weightmap masks for UE paint layers."""
+    result, err = _gaea_build_result(params)
+    if err is not None:
+        return err
+    out = result.to_dict()
+    out["success"] = result.success and bool(result.masks)
+    if out["success"]:
+        out["result_json"] = json.dumps(
+            {"masks": result.masks, "build_folder": result.build_folder}
+        )
+        out["asset_paths"] = list(result.masks)
+    else:
+        out["error"] = result.error or "no weightmap masks exported by the Gaea graph"
+        out["result_json"] = "{}"
+    return out
+
+
 def route_command(command: str, params: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     params = params or {}
     cmd = (command or "").strip()
@@ -319,12 +415,16 @@ def route_command(command: str, params: Optional[dict[str, Any]] = None) -> dict
         return _handle_cc5_export(params)
     if cmd in ("meshy.generate", "meshy.text_to_3d", "meshy-generate"):
         return _handle_meshy_generate(params)
+    if cmd in ("gaea.build", "gaea.build_terrain", "gaea.import_landscape", "gaea-build"):
+        return _handle_gaea_build(params)
+    if cmd in ("gaea.export_mask", "gaea.export_masks", "gaea.masks"):
+        return _handle_gaea_export_mask(params)
     return {
         "success": False,
         "error": (
             f"Unknown DCC command '{cmd}' "
             "(use blender.export_fbx, blender.export_creature, blender.exec, "
-            "blender.scene_info, cc5.export, meshy.generate)"
+            "blender.scene_info, cc5.export, meshy.generate, gaea.build, gaea.export_mask)"
         ),
         "result_json": "{}",
     }
@@ -369,6 +469,12 @@ async def command(request: Request) -> JSONResponse:
         "next_steps",
         "object_count",
         "cc5_path",
+        "gaea_path",
+        "gaea_version",
+        "heightmap",
+        "masks",
+        "textures",
+        "build_folder",
     ):
         if key in result:
             envelope[key] = result[key]
