@@ -24,6 +24,9 @@ python -m pip install --upgrade pip
 pip install -r hephaestus_forge/requirements.txt
 # Developer tooling (pytest) — canonical test runner per AGENTS.md.
 pip install -r hephaestus_forge/requirements-dev.txt
+# Register the `forge` console script (README quick start) without re-resolving
+# the runtime deps already installed above.
+pip install -e . --no-deps
 
 # --- Frontend: Mission Control dashboard (React + Vite) ----------------------
 (
