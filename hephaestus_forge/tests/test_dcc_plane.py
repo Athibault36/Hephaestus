@@ -82,6 +82,26 @@ def test_health_includes_gaea_status():
     assert h["gaea"]["available"] is False
 
 
+def test_route_blender_run_jobs_requires_list():
+    res = route_command("blender.run_jobs", {})
+    assert res["success"] is False
+    assert "jobs" in res["error"]
+
+
+def test_route_blender_run_jobs_executes_graph():
+    jobs = [
+        {"id": "a", "kind": "primitive", "params": {"shape": "cube"}},
+        {"id": "b", "kind": "exec", "depends_on": ["a"], "params": {"script": "print(1)"}},
+    ]
+    with patch("blender_jobs.default_dcc_runner") as mk:
+        mk.return_value = lambda job: {"success": True}
+        res = route_command("blender.run_jobs", {"jobs": jobs})
+    assert res["success"] is True
+    payload = json.loads(res["result_json"])
+    assert payload["order"] == ["a", "b"]
+    assert payload["done"] == ["a", "b"]
+
+
 def test_route_gaea_build_missing_terrain():
     res = route_command("gaea.build", {})
     assert res["success"] is False

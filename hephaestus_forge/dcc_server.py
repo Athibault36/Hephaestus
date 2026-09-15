@@ -276,6 +276,43 @@ def _handle_blender_scene_info(params: dict[str, Any]) -> dict[str, Any]:
             pass
 
 
+def _handle_blender_run_jobs(params: dict[str, Any]) -> dict[str, Any]:
+    """Run a dependency-aware Blender job DAG through the DCC plane."""
+    try:
+        from blender_jobs import BlenderJob, run_job_graph
+    except ImportError:
+        from hephaestus_forge.blender_jobs import BlenderJob, run_job_graph  # type: ignore
+    raw_jobs = params.get("jobs")
+    if not isinstance(raw_jobs, list) or not raw_jobs:
+        return {"success": False, "error": "params.jobs (non-empty list) required", "result_json": "{}"}
+    jobs = []
+    for i, j in enumerate(raw_jobs):
+        if not isinstance(j, dict) or not j.get("id") or not j.get("kind"):
+            return {
+                "success": False,
+                "error": f"jobs[{i}] requires id and kind",
+                "result_json": "{}",
+            }
+        jobs.append(
+            BlenderJob(
+                id=str(j["id"]),
+                kind=str(j["kind"]),
+                params=j.get("params") or {},
+                depends_on=list(j.get("depends_on") or []),
+            )
+        )
+    project_root = params.get("project_root") or params.get("project")
+    try:
+        summary = run_job_graph(jobs, project_root=str(project_root) if project_root else None)
+    except Exception as exc:  # dependency errors, etc.
+        return {"success": False, "error": str(exc), "result_json": "{}"}
+    return {
+        "success": bool(summary.get("success")),
+        "error": "" if summary.get("success") else "one or more jobs failed or were skipped",
+        "result_json": json.dumps(summary),
+    }
+
+
 def _handle_meshy_generate(params: dict[str, Any]) -> dict[str, Any]:
     try:
         from meshy_bridge import generate_and_download, meshy_available
@@ -411,6 +448,8 @@ def route_command(command: str, params: Optional[dict[str, Any]] = None) -> dict
         return _handle_blender_exec(params)
     if cmd in ("blender.scene_info", "blender.scene"):
         return _handle_blender_scene_info(params)
+    if cmd in ("blender.run_jobs", "blender.jobs", "blender.job_graph"):
+        return _handle_blender_run_jobs(params)
     if cmd in ("cc5.export", "cc5.export_character", "cc5-export"):
         return _handle_cc5_export(params)
     if cmd in ("meshy.generate", "meshy.text_to_3d", "meshy-generate"):
